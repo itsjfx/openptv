@@ -1,0 +1,61 @@
+> Full architecture spec: docs/architecture.md
+
+# OpenPTV
+
+OpenPTV is an open-source Android client plus a Go backend proxy for the PTV (Public Transport Victoria) Timetable API v3. The mobile app aims to be a small, fast, ad-free, Material You alternative to the official PTV app. The Go proxy signs requests upstream so the mobile client never holds the PTV signing key; auth and rate-limiting are handled at the edge, not in the application.
+
+## Non-goals
+
+- iOS, web, desktop. Android only. The Hilt DI choice trades portability for ergonomics.
+- Trip planning (A to B). The PTV API does not expose one.
+- Real-time vehicle positions. Not in PTV API v3.
+- Hosted multi-tenant SaaS. Users run the proxy themselves or trust the OpenPTV-hosted instance.
+- Account systems, cross-device sync, social features.
+
+## Mobile architecture
+
+Standard three-layer Android architecture per the official guide.
+
+```
+UI Layer        :app, :feature:*       Compose screens, ViewModels;
+                                       StateFlow<UiState> mapped from Result<T>
+Domain Layer    :core:domain           Use cases (thin, optional)
+Data Layer      :core:data             Repository interfaces + impls (SSOT)
+                :core:database         DAOs
+                :core:datastore        Preferences (typed DSL)
+                :core:network          Retrofit + DTOs (internal)
+```
+
+- **UI Layer** (`:app`, `:feature:*`): Compose screens and ViewModels. ViewModels expose `StateFlow<UiState>` and accept events as method calls.
+- **Domain Layer** (`:core:domain`, thin and optional): use cases that orchestrate multiple repositories.
+- **Data Layer** (`:core:data`, `:core:database`, `:core:datastore`, `:core:network`): repository interfaces plus implementations; DAOs; preferences; Retrofit + DTOs (internal).
+
+### Key principles
+
+- **Unidirectional state flow.** UI is a function of state. ViewModels emit `UiState`; UI dispatches events back as method calls.
+- **Single source of truth** for each piece of data — usually the database for owned data, the network repository for ephemeral data such as departures.
+- **`Result<T>`** is a sealed type with `Success<T>`, `Error(Throwable)`, and `Loading`. It flows from repository to ViewModel; ViewModels map it into a screen-specific `UiState`. Same shape as NIA's `core/common/.../result/Result.kt`.
+- **Domain models live in `:core:model`** as pure data classes with no Android dependencies. Network DTOs stay internal to `:core:network` and never leak into domain or data interfaces.
+- **Navigation routes live in `:core:navigation`** so feature modules can navigate to each other's destinations without depending on each other.
+- Repository interface and implementation both live in `:core:data`. Use cases in `:core:domain` depend on the interface.
+
+## Testing
+
+- **Framework**: JUnit 4. Compose UI rules and `androidx.test.ext.junit` are JUnit-4-only.
+- **Assertions**: Truth. Example: `assertThat(result).isInstanceOf(Result.Success::class.java)`.
+- **Test doubles, in priority order**:
+  1. **Real objects** for pure types (formatters, mappers) — construct directly.
+  2. **Object Mothers** in `:core:testing` (e.g. `Stops.aStop()`, `Departures.aDeparture()`) with sensible defaults you can override.
+  3. **Hand-written fakes** in `:core:data-test`, bound app-wide via `@TestInstallIn` so feature tests inherit them.
+  4. **MockK**, last resort. Mocking a repository interface that already has a fake is a code smell.
+- **Flow**: Turbine.
+- **HTTP**: OkHttp `MockWebServer`. Never mock `OkHttpClient`.
+- **DB**: Room in-memory.
+- **Coroutines**: `kotlinx-coroutines-test` with `StandardTestDispatcher` for ViewModels (manual advance), `UnconfinedTestDispatcher` for repositories.
+- **Compose UI**: `createComposeRule` for module-local tests, `createAndroidComposeRule<HiltComponentActivity>()` for Hilt-injected screens.
+- **Screenshot**: Roborazzi on `:core:designsystem` and per-feature smoke screens.
+- **Coverage gates** (CI): line coverage at least 80% on `:core:*`; at least 85% on `:feature:*` ViewModels; UI tests cover the golden path per feature.
+
+## Theming
+
+Material 3 with dynamic colour on Android 12+. Below that, fall back to a hand-tuned palette borrowed from ReadYou (`MaterialYouStandard.kt` and palette extraction code, Apache 2.0 compatible) so non-dynamic-colour devices feel intentional. The theme is owned by `:core:designsystem` and exposed as `OpenPtvTheme { content() }`.
