@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenPTV</string>
+    <string name="home_title">OpenPTV</string>
+    <string name="home_subtitle">Public Transport Victoria, Material You.</string>
+    <string name="theme_mode_system">System</string>
+    <string name="theme_mode_light">Light</string>
+    <string name="theme_mode_dark">Dark</string>
+    <string name="theme_mode_label">Theme: %1$s</string>
+    <string name="theme_mode_action_cycle">Cycle theme</string>
+</resources>

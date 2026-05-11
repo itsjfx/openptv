@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Base launcher theme. The actual Material 3 styling is applied via the Compose
+        OpenPtvTheme; this XML theme exists purely so the system has a sensible
+        background and status bar treatment before Compose takes over.
+    -->
+    <style name="Theme.OpenPtv" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

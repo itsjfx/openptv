@@ -2,6 +2,13 @@
 
 Shared rules every mobile phase assumes. Read once; phase docs reference this rather than restating.
 
+## Platform targets
+
+- **The app MUST run with zero Google Play services.** No GMS, Firebase, FCM, Play Billing, Maps SDK, ML Kit, or anything else that links `com.google.android.gms.*` or requires the Play Store. Any dependency that hard-depends on GMS is disqualified — find an AOSP-friendly alternative or build it.
+- **Canonical deployment target: GrapheneOS.** Decisions that trade convenience for de-Googled compatibility default to the GrapheneOS-friendly option (e.g. push delivery via UnifiedPush rather than FCM; maps via MapLibre + OSM rather than Google Maps; location via `LocationManager` rather than Fused Location Provider).
+- **Local test target: AOSP system image** (`system-images;android-XX;default;x86_64`), not `google_apis*`. The AOSP image has no Play Services, so anything that silently relies on GMS will fail here exactly as it would on GrapheneOS. CI emulator jobs use the same `default` image variant.
+- **Network freedom**: nothing should require a Google account, push token, or attestation handshake to function.
+
 ## Project conventions
 
 - **Gradle**: Kotlin DSL, version catalog (`gradle/libs.versions.toml`), convention plugins under `build-logic/` (NIA-style). No `buildSrc`.
