@@ -1,0 +1,3 @@
+/openptvd
+*.test
+coverage.out
