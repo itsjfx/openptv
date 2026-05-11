@@ -23,6 +23,7 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import ac.jfx.openptv.R
+import ac.jfx.openptv.feature.search.SearchScreen
 import ac.jfx.openptv.ui.theme.LocalThemeMode
 import ac.jfx.openptv.ui.theme.OpenPtvTheme
 import ac.jfx.openptv.ui.theme.ThemeMode
@@ -30,16 +31,19 @@ import kotlinx.serialization.Serializable
 
 /**
  * Top-level navigation keys for the app. Each `data object` is a Navigation 3 destination key;
- * Phase 02 will move these into a dedicated `:core:navigation` module.
+ * a later phase will move these into a dedicated `:core:navigation` module.
  */
 sealed interface AppNavKey : NavKey {
     @Serializable
     data object Home : AppNavKey
+
+    @Serializable
+    data object Search : AppNavKey
 }
 
 /**
- * Root composable. Owns the theme-mode state (in-memory for the barebones cut; DataStore lands in Phase 4)
- * and the Navigation 3 back stack.
+ * Root composable. Owns the theme-mode state (in-memory for the barebones cut; DataStore lands
+ * in Phase 04) and the Navigation 3 back stack.
  */
 @Composable
 fun App() {
@@ -57,7 +61,11 @@ fun App() {
                         HomeScreen(
                             themeMode = themeMode,
                             onCycleTheme = { themeMode = themeMode.next() },
+                            onOpenSearch = { backStack.add(AppNavKey.Search) },
                         )
+                    }
+                    entry<AppNavKey.Search> {
+                        SearchScreen()
                     }
                 },
             )
@@ -66,13 +74,14 @@ fun App() {
 }
 
 /**
- * Placeholder Home destination. Renders a title, a one-line description, and a button that
- * cycles between System / Light / Dark theme modes to prove the theming wiring works end-to-end.
+ * Placeholder Home destination. Renders a title, a one-line description, a theme-cycle button,
+ * and a "Search stops" button to enter the Phase 02 search flow.
  */
 @Composable
 private fun HomeScreen(
     themeMode: ThemeMode,
     onCycleTheme: () -> Unit,
+    onOpenSearch: () -> Unit,
 ) {
     Scaffold { paddingValues ->
         Column(
@@ -92,7 +101,13 @@ private fun HomeScreen(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 8.dp, bottom = 24.dp),
             )
-            Button(onClick = onCycleTheme) {
+            Button(onClick = onOpenSearch) {
+                Text(text = stringResource(R.string.home_open_search))
+            }
+            Button(
+                onClick = onCycleTheme,
+                modifier = Modifier.padding(top = 16.dp),
+            ) {
                 Text(
                     text = stringResource(
                         R.string.theme_mode_label,
