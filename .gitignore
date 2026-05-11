@@ -1,0 +1,30 @@
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editors / IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Claude
+.claude/
+
+# Go
+/backend/openptvd
+/backend/*.test
+/backend/coverage.out
+
+# Android / Gradle
+.gradle/
+**/build/
+local.properties
+*.hprof
+captures/
+.cxx/
+*.apk
+*.aab
+*.keystore
+*.jks
