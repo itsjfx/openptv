@@ -19,7 +19,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
-import androidx.navigation3.runtime.entry
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
@@ -52,6 +51,7 @@ fun App() {
 
             NavDisplay(
                 backStack = backStack,
+                onBack = { backStack.removeLastOrNull() },
                 entryProvider = entryProvider {
                     entry<AppNavKey.Home> {
                         HomeScreen(
