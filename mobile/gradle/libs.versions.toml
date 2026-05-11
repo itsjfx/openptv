@@ -32,9 +32,14 @@ kotlinxDatetime = "0.6.2"
 # Coroutines
 kotlinxCoroutines = "1.10.2"
 
+# Networking
+okhttp = "5.3.2"
+retrofit = "3.0.0"
+
 # Testing
 junit = "4.13.2"
 truth = "1.4.4"
+turbine = "1.2.1"
 
 [libraries]
 # AndroidX core
@@ -69,10 +74,18 @@ kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.
 # Coroutines
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
 
+# Networking
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+okhttp-logging-interceptor = { module = "com.squareup.okhttp3:logging-interceptor", version.ref = "okhttp" }
+okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.ref = "okhttp" }
+retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit" }
+retrofit-kotlinx-serialization-converter = { module = "com.squareup.retrofit2:converter-kotlinx-serialization", version.ref = "retrofit" }
+
 # Testing
 junit = { module = "junit:junit", version.ref = "junit" }
 truth = { module = "com.google.truth:truth", version.ref = "truth" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
+turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

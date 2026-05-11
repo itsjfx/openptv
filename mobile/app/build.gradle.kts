@@ -26,6 +26,11 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            // Talk to the Go proxy running on the developer's host. `10.0.2.2` is the loopback
+            // alias the Android emulator exposes for the host; on a physical device this
+            // requires reverse-tethering (`adb reverse tcp:8080 tcp:8080`) or pointing at a
+            // LAN-reachable host.
+            buildConfigField("String", "BACKEND_BASE_URL", "\"http://10.0.2.2:8080/api/v3/\"")
         }
         release {
             isMinifyEnabled = true
@@ -34,6 +39,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Placeholder until the hosted backend is up. HTTPS only — release builds do
+            // not allow cleartext.
+            buildConfigField("String", "BACKEND_BASE_URL", "\"https://api.openptv.app/api/v3/\"")
         }
     }
 
@@ -44,7 +52,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = false
+        buildConfig = true
     }
 
     packaging {
@@ -88,6 +96,12 @@ dependencies {
     // Serialization
     implementation(libs.kotlinx.serialization.json)
 
+    // Networking
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging.interceptor)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.kotlinx.serialization.converter)
+
     // Coroutines / Time
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.datetime)
@@ -96,4 +110,6 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.turbine)
+    testImplementation(libs.okhttp.mockwebserver)
 }
