@@ -59,3 +59,37 @@ Data Layer      :core:data             Repository interfaces + impls (SSOT)
 ## Theming
 
 Material 3 with dynamic colour on Android 12+. Below that, fall back to a hand-tuned palette borrowed from ReadYou (`MaterialYouStandard.kt` and palette extraction code, Apache 2.0 compatible) so non-dynamic-colour devices feel intentional. The theme is owned by `:core:designsystem` and exposed as `OpenPtvTheme { content() }`.
+
+## GitHub SDLC
+
+GitHub repository: itsjfx/openptv
+
+GitHub is the tool for SDLC. You will be working on tasks based on a GitHub issue. If it's not clear, ask questions.
+
+Raise PRs, link back to the GitHub issue.
+
+## Issue Template
+
+When creating issues use the following template: What, Why, How, Acceptance Criteria, Out of Scope, Definition of Done
+
+## Commits
+
+All commits must include a Co-Authored-By trailer for the AI contributor:
+
+Co-Authored-By: ai-tiro <ai-tiro@jfx.ac>
+
+Make regular, small commits when accomplishing a small milestone within a ticket.
+
+Push to a branch and make a draft PR as soon as possible. When complete, mark the PR as ready to review.
+
+Put in the PR description: what you did, what you discovered, anything you tried that didn't work, and justify why you did what you did. Note any one-way door changes, or testing concerns.
+
+If you're stuck, tag @itsjfx on the PR with your query before marking as ready.
+
+When done, assign the PR to @itsjfx for review.
+
+## No Nos
+
+Rewriting history on other branches (other than working branch)
+
+Avoid rewriting history altogether, even on current branch, unless absolutely necessary (accidentally committed large files, etc)
