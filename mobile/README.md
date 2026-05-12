@@ -29,3 +29,22 @@ plugins, so individual modules don't need to opt in.
 `spotlessApply` should be a no-op on a clean tree. CI runs `spotlessCheck`. The header lives in
 `mobile/spotless/license-header.kt`. A pre-commit hook recommendation is documented in
 [`../docs/mobile/00-conventions.md`](../docs/mobile/00-conventions.md#pre-commit).
+
+## Static analysis
+
+Detekt is wired into every Kotlin module the same way Spotless is — via the `openptv.detekt`
+convention plugin applied transitively through the android / jvm convention plugins. The shared
+config is `mobile/detekt.yml`; feature modules don't override it (it's the SSOT).
+
+```bash
+./gradlew detekt          # aggregated CI gate
+./gradlew :feature/search:detekt   # one module
+```
+
+Spotless owns formatting (ktlint), detekt owns structure (complexity, naming, magic numbers,
+potential bugs). The `formatting` ruleset is deliberately disabled to avoid two tools fighting
+over the same edits.
+
+Project-specific rules live in `:lint:detekt` and plug in through detekt's `RuleSetProvider` SPI.
+The current rule, `ForbidAndroidLog`, fails the build on any `import android.util.Log` outside
+`:core:common.AndroidLogger` — every other caller MUST inject `core.common.Logger`.
