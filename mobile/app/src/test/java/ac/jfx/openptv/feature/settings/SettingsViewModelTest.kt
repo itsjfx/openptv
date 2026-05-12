@@ -1,3 +1,12 @@
+/*
+ * Copyright 2026 OpenPTV contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
 package ac.jfx.openptv.feature.settings
 
 import ac.jfx.openptv.core.data.test.FakeSettingsRepository
@@ -16,13 +25,13 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
-
-    private val settings = FakeSettingsRepository(
-        AppSettings(
-            backendBaseUrl = "http://saved.local/api/v3/",
-            setupCompleted = true,
-        ),
-    )
+    private val settings =
+        FakeSettingsRepository(
+            AppSettings(
+                backendBaseUrl = "http://saved.local/api/v3/",
+                setupCompleted = true,
+            ),
+        )
 
     @Before
     fun setUp() {

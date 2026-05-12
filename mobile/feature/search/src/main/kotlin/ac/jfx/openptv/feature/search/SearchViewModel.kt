@@ -1,3 +1,12 @@
+/*
+ * Copyright 2026 OpenPTV contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
 package ac.jfx.openptv.feature.search
 
 import ac.jfx.openptv.core.common.Result
@@ -72,16 +81,15 @@ class SearchViewModel @Inject constructor(
         _query.value = newQuery
     }
 
-    private fun toUiState(result: Result<List<ac.jfx.openptv.core.model.Stop>>): SearchUiState =
-        when (result) {
-            is Result.Loading -> SearchUiState.Loading
-            is Result.Success -> if (result.data.isEmpty()) {
-                SearchUiState.Empty
-            } else {
-                SearchUiState.Results(result.data)
-            }
-            is Result.Error -> SearchUiState.Error(result.throwable.toUserFacingReason())
+    private fun toUiState(result: Result<List<ac.jfx.openptv.core.model.Stop>>): SearchUiState = when (result) {
+        is Result.Loading -> SearchUiState.Loading
+        is Result.Success -> if (result.data.isEmpty()) {
+            SearchUiState.Empty
+        } else {
+            SearchUiState.Results(result.data)
         }
+        is Result.Error -> SearchUiState.Error(result.throwable.toUserFacingReason())
+    }
 
     private fun Throwable.toUserFacingReason(): String = when (this) {
         is HttpException -> when (code()) {

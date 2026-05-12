@@ -1,3 +1,12 @@
+/*
+ * Copyright 2026 OpenPTV contributors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
 package ac.jfx.openptv.core.common
 
 /**
@@ -17,9 +26,33 @@ package ac.jfx.openptv.core.common
  * this project and one dep removed is one dep less to keep on a release-mode allowlist.
  */
 interface Logger {
-    fun v(tag: String, message: String, throwable: Throwable? = null)
-    fun d(tag: String, message: String, throwable: Throwable? = null)
-    fun i(tag: String, message: String, throwable: Throwable? = null)
-    fun w(tag: String, message: String, throwable: Throwable? = null)
-    fun e(tag: String, message: String, throwable: Throwable? = null)
+    fun v(
+        tag: String,
+        message: String,
+        throwable: Throwable? = null,
+    )
+
+    fun d(
+        tag: String,
+        message: String,
+        throwable: Throwable? = null,
+    )
+
+    fun i(
+        tag: String,
+        message: String,
+        throwable: Throwable? = null,
+    )
+
+    fun w(
+        tag: String,
+        message: String,
+        throwable: Throwable? = null,
+    )
+
+    fun e(
+        tag: String,
+        message: String,
+        throwable: Throwable? = null,
+    )
 }
