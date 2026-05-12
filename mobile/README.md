@@ -48,3 +48,28 @@ over the same edits.
 Project-specific rules live in `:lint:detekt` and plug in through detekt's `RuleSetProvider` SPI.
 The current rule, `ForbidAndroidLog`, fails the build on any `import android.util.Log` outside
 `:core:common.AndroidLogger` — every other caller MUST inject `core.common.Logger`.
+
+## Dependency Guard
+
+Dropbox's [Dependency Guard](https://github.com/dropbox/dependency-guard) locks the transitive
+dependency set on `:app`'s `releaseRuntimeClasspath` (i.e. exactly what ends up in the production
+APK) against a checked-in baseline at `app/dependencies/releaseRuntimeClasspath.txt`. Compose-BOM
+bumps, Retrofit minors, etc. otherwise pull in dozens of artifacts invisibly — particularly
+problematic here because the app targets GrapheneOS, so anything transitively dragging in
+`com.google.android.gms` / Firebase / Play services must be caught at PR review, not at runtime
+on a user's device.
+
+```bash
+./gradlew :app:dependencyGuard           # CI gate — verifies against the baseline
+./gradlew :app:dependencyGuardBaseline   # rebaseline after intentional dep changes
+```
+
+When you rebaseline, call it out explicitly in the PR description — the whole point is that the
+new set of artifacts gets a human review, not just a green build.
+
+Deliberately scoped to `releaseRuntimeClasspath` only. Debug / test configurations pull in
+MockWebServer, Hilt test infra, Compose tooling etc. and would add noisy baseline churn for no
+real shipping-code value. The plugin is applied directly in `:app/build.gradle.kts` (not via a
+convention plugin) because `:app` is the rollup that determines the APK — tracking each
+`:core:*` / `:feature:*` independently would multiply baseline files without catching anything
+the `:app` baseline doesn't already lock down.
