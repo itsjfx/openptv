@@ -1,20 +1,20 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
+// `:app` — the only application module. Everything not specific to this module
+// (compileSdk/minSdk, JVM target, Compose BOM, Hilt + KSP) is in
+// `build-logic/convention/`. What stays here is genuinely app-specific:
+// applicationId, version, build types, and the dependency surface the entry
+// point needs.
 plugins {
-    alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.compose)
+    id("openptv.android.application")
+    id("openptv.android.application.compose")
+    id("openptv.android.hilt")
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.ksp)
-    alias(libs.plugins.hilt)
 }
 
 android {
     namespace = "ac.jfx.openptv"
-    compileSdk = 36
 
     defaultConfig {
         applicationId = "ac.jfx.openptv"
-        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
@@ -45,27 +45,8 @@ android {
         }
     }
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-
     buildFeatures {
-        compose = true
         buildConfig = true
-    }
-
-    packaging {
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-    }
-}
-
-kotlin {
-    jvmToolchain(21)
-    compilerOptions {
-        jvmTarget = JvmTarget.JVM_11
     }
 }
 
@@ -76,21 +57,13 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.activity.compose)
 
-    // Compose (BOM-managed)
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.compose.material3)
-    debugImplementation(libs.androidx.compose.ui.tooling)
-
     // Navigation 3
     implementation(libs.androidx.navigation3.runtime)
     implementation(libs.androidx.navigation3.ui)
 
-    // Hilt
-    implementation(libs.hilt.android)
-    ksp(libs.hilt.compiler)
+    // Hilt navigation-compose isn't part of `openptv.android.hilt` (it's a
+    // Compose-only concern, not core Hilt) so feature modules pick it up via
+    // `openptv.android.feature` and the app picks it up here.
     implementation(libs.androidx.hilt.navigation.compose)
 
     // Serialization
