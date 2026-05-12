@@ -17,6 +17,11 @@ android {
 dependencies {
     api(project(":core:model"))
 
+    // `MainDispatcherRule` exposes `TestDispatcher` in its constructor, so the coroutines-test
+    // surface is part of this module's public API — `api` rather than `implementation` so
+    // consumers can construct the rule without re-declaring the dependency.
+    api(libs.kotlinx.coroutines.test)
+
     // `OpenPtvTestRunner` lives in `src/main/` because the `:app` module's
     // `testInstrumentationRunner` setting resolves it on the main classpath,
     // not the test classpath — same shape as NIA's `NiaTestRunner`.
