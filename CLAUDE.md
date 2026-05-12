@@ -42,9 +42,12 @@ Data Layer      :core:data             Repository interfaces + impls (SSOT)
 - **Assertions**: Truth. Example: `assertThat(result).isInstanceOf(Result.Success::class.java)`.
 - **Test doubles, in priority order**:
   1. **Real objects** for pure types (formatters, mappers) — construct directly.
-  2. **Object Mothers** in `:core:testing` (e.g. `Stops.aStop()`, `Departures.aDeparture()`) with sensible defaults you can override.
+  2. **Object Mothers** in `:core:testing` (e.g. `StopMother.aStop()`, `DepartureMother.aDeparture()`) with sensible defaults you can override.
   3. **Hand-written fakes** in `:core:data-test`, bound app-wide via `@TestInstallIn` so feature tests inherit them.
   4. **MockK**, last resort. Mocking a repository interface that already has a fake is a code smell.
+- **Object Mother pattern is mandatory** for constructing domain objects in tests. Do not write inline `aStop()` helpers or pass long constructor argument lists. Every domain type used by more than one test gets a `<Type>Mother` class with a `private constructor()`, a companion `aThing()`/`anInvalidThing()`/etc. factory that returns a builder, a `with*` method per field, and a `build()`. See `~/.claude/skills/object-mother/skill.md` for the full spec.
+  - **Where Mothers live**: same Gradle module as the type they build. In the barebones single-module cut: `app/src/test/.../core/testing/`. Promoted to `:core:testing` (Kotlin source set shared with all `:core:*` and `:feature:*` tests) alongside the multi-module split.
+  - **Same applies to internal DTOs and ViewModel inputs**: prefer `StopDtoMother.aStopDto()` over inline `StopDto(...)` so tests stay readable when the wire format gains fields.
 - **Flow**: Turbine.
 - **HTTP**: OkHttp `MockWebServer`. Never mock `OkHttpClient`.
 - **DB**: Room in-memory.

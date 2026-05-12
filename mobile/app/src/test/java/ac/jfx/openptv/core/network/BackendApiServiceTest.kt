@@ -18,18 +18,23 @@ import kotlinx.serialization.SerializationException
  * Exercises the Retrofit-bound [BackendApiService] against [MockWebServer]. No MockK: the goal is
  * to assert the real wire contract — JSON shape, HTTP status mapping, request path — not to mock
  * a fake collaborator.
+ *
+ * The service now takes a full URL via `@Url` so the test composes one against the mock server,
+ * mirroring how `StopSearchRepositoryImpl` does it in production.
  */
 class BackendApiServiceTest {
 
     private lateinit var server: MockWebServer
     private lateinit var service: BackendApiService
+    private lateinit var baseUrl: String
 
     @Before
     fun setUp() {
         server = MockWebServer()
         server.start()
+        baseUrl = server.url("/api/v3/").toString()
         val retrofit = Retrofit.Builder()
-            .baseUrl(server.url("/api/v3/"))
+            .baseUrl(server.url("/sentinel/"))
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
         service = retrofit.create(BackendApiService::class.java)
@@ -56,7 +61,7 @@ class BackendApiServiceTest {
                 ),
         )
 
-        val response = service.searchStops("flinders")
+        val response = service.searchStops("${baseUrl}search/flinders")
 
         assertThat(response.stops).hasSize(1)
         val request = server.takeRequest()
@@ -66,18 +71,18 @@ class BackendApiServiceTest {
     @Test(expected = HttpException::class)
     fun `4xx surfaces as HttpException`() = runTest {
         server.enqueue(MockResponse().setResponseCode(404).setBody("not found"))
-        service.searchStops("does-not-exist")
+        service.searchStops("${baseUrl}search/does-not-exist")
     }
 
     @Test(expected = HttpException::class)
     fun `5xx surfaces as HttpException`() = runTest {
         server.enqueue(MockResponse().setResponseCode(503).setBody("upstream down"))
-        service.searchStops("anything")
+        service.searchStops("${baseUrl}search/anything")
     }
 
     @Test(expected = SerializationException::class)
     fun `malformed JSON surfaces as SerializationException`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("{not json"))
-        service.searchStops("anything")
+        service.searchStops("${baseUrl}search/anything")
     }
 }

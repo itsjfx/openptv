@@ -1,7 +1,9 @@
 package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.model.AppSettings
 import ac.jfx.openptv.core.network.BackendApiService
+import ac.jfx.openptv.core.testing.FakeSettingsRepository
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -31,11 +33,19 @@ class StopSearchRepositoryImplTest {
         server = MockWebServer()
         server.start()
         val service = Retrofit.Builder()
-            .baseUrl(server.url("/api/v3/"))
+            // Retrofit still requires a baseUrl even when every endpoint uses @Url; the value
+            // is a sentinel.
+            .baseUrl(server.url("/sentinel/"))
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(BackendApiService::class.java)
-        repository = StopSearchRepositoryImpl(service)
+        val settings = FakeSettingsRepository(
+            AppSettings(
+                backendBaseUrl = server.url("/api/v3/").toString(),
+                setupCompleted = true,
+            ),
+        )
+        repository = StopSearchRepositoryImpl(service, settings)
     }
 
     private companion object {
@@ -104,5 +114,15 @@ class StopSearchRepositoryImplTest {
         assertThat(result).isInstanceOf(Result.Error::class.java)
         assertThat((result as Result.Error).throwable)
             .isInstanceOf(SerializationException::class.java)
+    }
+
+    @Test
+    fun `request URL is composed from current settings backendBaseUrl`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
+
+        repository.searchStops("flinders")
+
+        val recorded = server.takeRequest()
+        assertThat(recorded.path).isEqualTo("/api/v3/search/flinders")
     }
 }

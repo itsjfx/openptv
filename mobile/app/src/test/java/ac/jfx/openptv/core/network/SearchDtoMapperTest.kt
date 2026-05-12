@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.network
 
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.testing.StopDtoMother
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
@@ -32,15 +33,13 @@ class SearchDtoMapperTest {
 
     @Test
     fun `StopDto trims trailing whitespace on name and suburb`() {
-        val dto = StopDto(
-            stopId = 1071,
-            stopName = "Flinders Street Railway Station ",
-            stopSuburb = "Melbourne City  ",
-            routeType = 0,
-            stopLatitude = -37.8183,
-            stopLongitude = 144.9671,
-        )
+        val dto = StopDtoMother.aStopDto()
+            .withStopName("Flinders Street Railway Station ")
+            .withStopSuburb("Melbourne City  ")
+            .build()
+
         val stop = dto.toDomain()
+
         assertThat(stop.name).isEqualTo("Flinders Street Railway Station")
         assertThat(stop.suburb).isEqualTo("Melbourne City")
         assertThat(stop.routeType).isEqualTo(RouteType.Train)

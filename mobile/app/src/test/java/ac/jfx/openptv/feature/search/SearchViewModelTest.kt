@@ -1,10 +1,8 @@
 package ac.jfx.openptv.feature.search
 
 import ac.jfx.openptv.core.common.Result
-import ac.jfx.openptv.core.data.StopSearchRepository
-import ac.jfx.openptv.core.model.RouteType
-import ac.jfx.openptv.core.model.Stop
-import ac.jfx.openptv.core.model.StopId
+import ac.jfx.openptv.core.testing.FakeStopSearchRepository
+import ac.jfx.openptv.core.testing.StopMother
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
@@ -19,30 +17,6 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
-
-/**
- * Hand-written fake. Lives in the test source set for the barebones cut; promoted to
- * `:core:data-test` (with `@TestInstallIn`) alongside the multi-module split.
- */
-private class FakeStopSearchRepository : StopSearchRepository {
-    var queue: ArrayDeque<Result<List<Stop>>> = ArrayDeque()
-    val requestedTerms: MutableList<String> = mutableListOf()
-
-    override suspend fun searchStops(term: String): Result<List<Stop>> {
-        requestedTerms += term
-        return queue.removeFirstOrNull() ?: Result.Success(emptyList())
-    }
-}
-
-private fun aStop(id: Int = 1071, name: String = "Flinders Street Railway Station"): Stop =
-    Stop(
-        id = StopId(id),
-        name = name,
-        suburb = "Melbourne City",
-        routeType = RouteType.Train,
-        latitude = -37.8183,
-        longitude = 144.9671,
-    )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SearchViewModelTest {
@@ -85,7 +59,7 @@ class SearchViewModelTest {
 
     @Test
     fun `valid query transitions Loading then Results`() = runTest(dispatcher) {
-        repository.queue.addLast(Result.Success(listOf(aStop())))
+        repository.enqueueSuccess(listOf(StopMother.aStop().build()))
         viewModel.uiState.test {
             assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
             viewModel.onQueryChanged("flinders")
@@ -102,7 +76,7 @@ class SearchViewModelTest {
 
     @Test
     fun `valid query that returns empty list becomes Empty`() = runTest(dispatcher) {
-        repository.queue.addLast(Result.Success(emptyList()))
+        repository.enqueueSuccess(emptyList())
         viewModel.uiState.test {
             assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
             viewModel.onQueryChanged("zzz")
@@ -116,7 +90,7 @@ class SearchViewModelTest {
 
     @Test
     fun `IOException becomes user-facing Error state`() = runTest(dispatcher) {
-        repository.queue.addLast(Result.Error(IOException("boom")))
+        repository.enqueueError(IOException("boom"))
         viewModel.uiState.test {
             assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
             viewModel.onQueryChanged("flinders")
@@ -132,7 +106,7 @@ class SearchViewModelTest {
 
     @Test
     fun `fast keystrokes coalesce into one upstream call`() = runTest(dispatcher) {
-        repository.queue.addLast(Result.Success(listOf(aStop())))
+        repository.enqueueSuccess(listOf(StopMother.aStop().build()))
         viewModel.uiState.test {
             assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
             // Three rapid keystrokes within the debounce window.
