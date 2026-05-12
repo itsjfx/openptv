@@ -14,9 +14,3 @@ plugins {
 android {
     namespace = "ac.jfx.openptv.core.common"
 }
-
-dependencies {
-    // `javax.inject.Inject` / `Singleton`. Hilt brings these transitively via
-    // `hilt-android`, but pinning the explicit dep keeps the API surface
-    // visible.
-}
