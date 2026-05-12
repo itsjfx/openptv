@@ -21,4 +21,4 @@ sealed interface SearchUiState {
 }
 
 /** Below this character count the screen sits in [SearchUiState.Idle] and never hits the network. */
-const val MIN_QUERY_LENGTH: Int = 3
+const val MIN_QUERY_LENGTH: Int = 1

@@ -14,7 +14,7 @@
     <!-- Stop search screen -->
     <string name="search_title">Search stops</string>
     <string name="search_field_label">Stop name or suburb</string>
-    <string name="search_idle_hint">Type at least 3 characters to search.</string>
+    <string name="search_idle_hint">Start typing to search.</string>
     <string name="search_empty">No stops match that search.</string>
     <string name="search_row_open">Open</string>
     <string name="search_row_content_description">%1$s, %2$s, %3$s stop</string>

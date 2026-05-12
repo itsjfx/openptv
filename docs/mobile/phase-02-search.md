@@ -52,7 +52,7 @@ Wire up the network stack, add the first feature module (`:feature:search`), and
 
 ## Acceptance criteria
 
-- Typing a query for ≥3 characters triggers a search after debounce; backspacing cancels the in-flight call.
+- Typing any non-empty query triggers a search after debounce; backspacing cancels the in-flight call.
 - Results render with stop name, suburb, and a small transport-mode icon.
 - 4xx / 5xx / network failure / decoding error each produce a distinct visible message; the screen recovers when the user retries.
 - A successful search of "flinders" returns Flinders Street and reasonable variants on a real device against the staging proxy.

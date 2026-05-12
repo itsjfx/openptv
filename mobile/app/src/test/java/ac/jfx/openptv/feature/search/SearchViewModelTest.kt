@@ -45,16 +45,18 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun `query shorter than minimum stays Idle`() = runTest(dispatcher) {
+    fun `single-character query triggers a search`() = runTest(dispatcher) {
+        repository.enqueueSuccess(listOf(StopMother.aStop().build()))
         viewModel.uiState.test {
             assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
-            viewModel.onQueryChanged("fl")
-            advanceTimeBy(500)
-            // No additional emission — short query is filtered before debounce hits the network.
-            expectNoEvents()
+            viewModel.onQueryChanged("f")
+            advanceTimeBy(350)
+            assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
+            advanceUntilIdle()
+            assertThat(awaitItem()).isInstanceOf(SearchUiState.Results::class.java)
             cancelAndIgnoreRemainingEvents()
         }
-        assertThat(repository.requestedTerms).isEmpty()
+        assertThat(repository.requestedTerms).containsExactly("f")
     }
 
     @Test
