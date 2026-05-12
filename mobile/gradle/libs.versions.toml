@@ -51,6 +51,10 @@ turbine = "1.2.1"
 # uses ktlint internally, so the surface configured under `openptv.spotless`
 # stays identical.
 spotless = "7.0.4"
+# detekt 1.23.x is the current stable line. 2.0 is still alpha. The plugin
+# (`openptv.detekt`) wires it onto every Kotlin module and the custom rules
+# in `:lint:detekt` plug into the same `RuleSetProvider` SPI.
+detekt = "1.23.8"
 
 [libraries]
 # AndroidX core
@@ -111,6 +115,12 @@ kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", v
 ksp-gradle-plugin = { module = "com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin", version.ref = "ksp" }
 compose-gradle-plugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
 spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
+# detekt — Gradle plugin (applied by `openptv.detekt`) plus the `detekt-api`
+# surface the custom rules in `:lint:detekt` compile against. `detekt-test`
+# is the JUnit harness used by the custom-rule tests.
+detekt-gradle-plugin = { module = "io.gitlab.arturbosch.detekt:detekt-gradle-plugin", version.ref = "detekt" }
+detekt-api = { module = "io.gitlab.arturbosch.detekt:detekt-api", version.ref = "detekt" }
+detekt-test = { module = "io.gitlab.arturbosch.detekt:detekt-test", version.ref = "detekt" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -126,3 +136,7 @@ hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 # `pluginManager.apply("com.diffplug.spotless")` from the convention plugin
 # can resolve the extension classes at runtime.
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+# detekt is applied indirectly through the `openptv.detekt` convention plugin.
+# Same `apply false` pattern as spotless — pulls the plugin jar onto the
+# build-script classpath so the convention plugin can reference its DSL.
+detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
