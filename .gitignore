@@ -9,8 +9,9 @@
 *.iml
 .DS_Store
 
-# Claude
-.claude/
+# Claude — track shared skills, ignore user-local settings + worktrees
+.claude/*
+!.claude/skills/
 
 # Go
 /backend/openptvd
