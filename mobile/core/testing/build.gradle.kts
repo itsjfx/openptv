@@ -16,4 +16,10 @@ android {
 
 dependencies {
     api(project(":core:model"))
+
+    // `OpenPtvTestRunner` lives in `src/main/` because the `:app` module's
+    // `testInstrumentationRunner` setting resolves it on the main classpath,
+    // not the test classpath — same shape as NIA's `NiaTestRunner`.
+    implementation(libs.androidx.test.runner)
+    implementation(libs.hilt.android.testing)
 }
