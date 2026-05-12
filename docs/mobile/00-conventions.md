@@ -17,10 +17,30 @@ Shared rules every mobile phase assumes. Read once; phase docs reference this ra
 - **KSP** for all annotation processing (Hilt, Room, kotlinx.serialization). No KAPT.
 - **R8**: full mode in release builds.
 - **Lint / format**:
-  - **Spotless** (ktlint formatter) wired into every module via `openptv.spotless`.
+  - **Spotless** (ktlint formatter) wired into every module via `openptv.spotless`. Apache-2.0
+    license header on every `.kt` source; `.gradle.kts` build scripts get ktlint-only so their
+    top-of-file explainer comments stay visible. Two ktlint rules are disabled in
+    `SpotlessConventionPlugin` (`standard:function-naming` so PascalCase composables are accepted,
+    `standard:property-naming` so `internal const val TestTagFoo` constants used by Compose UI
+    tests pass). Run `./gradlew spotlessApply` to fix, `./gradlew spotlessCheck` to verify.
   - **detekt** for static analysis (complexity, magic numbers, naming).
   - **Dependency Guard** baselines transitive deps for `:app` (catches accidental dep churn).
-  - Pre-commit hook recommended: `./gradlew spotlessApply detekt`.
+
+<a id="pre-commit"></a>
+
+### Pre-commit hook (recommended)
+
+Drop the following into `.git/hooks/pre-commit` and `chmod +x` it. The hook runs the formatter
+against the staged tree before each commit so style drift never makes it onto a branch. It is a
+**recommendation, not enforcement** — the canonical gate is `spotlessCheck` in CI.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)/mobile"
+./gradlew --quiet spotlessApply
+git add -u
+```
 - **Logging**: project-internal `Logger` interface in `:core:common`; `Log.d` / `println` outside `:core:common` is a detekt failure.
 - **Strings**: `:core:designsystem` owns shared strings; feature strings in feature modules.
 - **Resources**: every module has a unique resource prefix (`feature_search_*`, `core_designsystem_*`) — enforced by `android.resourcePrefix` set in the convention plugin from the module path.

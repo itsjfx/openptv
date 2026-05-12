@@ -14,3 +14,18 @@ in a follow-up issue.
 
 Requires the Android SDK installed locally with `ANDROID_HOME` (or `sdk.dir` in `local.properties`)
 pointing at it. JDK 21 toolchain; the Gradle wrapper is committed.
+
+## Formatting
+
+Spotless (ktlint + a short Apache-2.0 license header) is wired into every Kotlin module via the
+`openptv.spotless` convention plugin — applied transitively through the android / jvm convention
+plugins, so individual modules don't need to opt in.
+
+```bash
+./gradlew spotlessApply   # rewrite anything off-style in place
+./gradlew spotlessCheck   # CI gate; fails on any drift
+```
+
+`spotlessApply` should be a no-op on a clean tree. CI runs `spotlessCheck`. The header lives in
+`mobile/spotless/license-header.kt`. A pre-commit hook recommendation is documented in
+[`../docs/mobile/00-conventions.md`](../docs/mobile/00-conventions.md#pre-commit).
