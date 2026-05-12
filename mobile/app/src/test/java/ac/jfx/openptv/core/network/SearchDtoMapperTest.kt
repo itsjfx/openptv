@@ -51,4 +51,21 @@ class SearchDtoMapperTest {
         val empty = SearchResponseDto(stops = emptyList())
         assertThat(empty.toDomain()).isEmpty()
     }
+
+    @Test
+    fun `mapper preserves entries that share a stop_id but differ in route_type`() {
+        val response = SearchResponseDto(
+            stops = listOf(
+                StopDtoMother.aStopDto().withRouteType(0).build(),
+                StopDtoMother.aStopDto().withRouteType(1).build(),
+            ),
+        )
+
+        val stops = response.toDomain()
+
+        assertThat(stops).hasSize(2)
+        assertThat(stops.map { it.id.value }).containsExactly(1071, 1071).inOrder()
+        assertThat(stops.map { it.routeType })
+            .containsExactly(RouteType.Train, RouteType.Tram).inOrder()
+    }
 }

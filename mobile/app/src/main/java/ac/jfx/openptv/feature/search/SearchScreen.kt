@@ -128,7 +128,7 @@ private fun StopList(
     onStopSelected: (Stop) -> Unit,
 ) {
     LazyColumn(modifier = Modifier.fillMaxSize().testTag(TestTagResults)) {
-        items(stops, key = { it.id.value }) { stop ->
+        items(stops, key = { it.id.value to it.routeType }) { stop ->
             StopRow(stop = stop, onClick = { onStopSelected(stop) })
             HorizontalDivider()
         }
