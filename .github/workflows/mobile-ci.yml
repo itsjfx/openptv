@@ -62,10 +62,20 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v4
-      # Roborazzi lands in #16. Until it ships, the gate is intentionally a no-op
-      # stub — `--dry-run` so the job pattern is real (cache warm, JDK ready) but
-      # nothing actually runs. #16 flips this to `verifyRoborazziDebug`.
-      - run: ./gradlew --dry-run verifyRoborazziDebug || true
+      # Roborazzi screenshot gate (issue #16). `:core:designsystem` owns the
+      # baseline today; per-feature smoke suites add themselves to the verify
+      # task as they land. Run with --rerun-tasks so Gradle's incremental
+      # cache doesn't mask a baseline drift the first time CI sees it.
+      - run: ./gradlew :core:designsystem:verifyRoborazziDebug
+      # On failure, upload the diff outputs so reviewers can see what changed
+      # without re-running the build locally. Roborazzi writes `*_compare.png`
+      # (side-by-side expected | actual | diff) and `*_actual.png` to the
+      # module's `build/outputs/roborazzi/` directory.
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: roborazzi-diff
+          path: mobile/core/designsystem/build/outputs/roborazzi/
 
   dependency-guard:
     runs-on: ubuntu-latest
