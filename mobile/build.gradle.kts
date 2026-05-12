@@ -24,5 +24,11 @@ plugins {
     // apply detekt at the root project level because there's no Kotlin source
     // here for it to analyse — only build scripts, which detekt doesn't lint.
     alias(libs.plugins.detekt) apply false
+    // Same `apply false` pattern for Roborazzi: pulls the plugin jar onto every
+    // subproject's classpath so the `openptv.android.library.roborazzi`
+    // convention plugin can apply it by id. The convention plugin is opt-in
+    // (not transitively applied by `openptv.android.library.compose`) so only
+    // modules with screenshot tests pay the Robolectric cost.
+    alias(libs.plugins.roborazzi) apply false
     id("openptv.spotless")
 }

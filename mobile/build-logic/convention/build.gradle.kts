@@ -85,5 +85,9 @@ gradlePlugin {
             id = "openptv.detekt"
             implementationClass = "ac.jfx.openptv.buildlogic.DetektConventionPlugin"
         }
+        register("androidLibraryRoborazzi") {
+            id = "openptv.android.library.roborazzi"
+            implementationClass = "ac.jfx.openptv.buildlogic.AndroidRoborazziConventionPlugin"
+        }
     }
 }

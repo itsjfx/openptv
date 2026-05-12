@@ -61,6 +61,19 @@ detekt = "1.23.8"
 # in the APK); debug-only / test configurations are deliberately out of scope.
 dependencyGuard = "0.5.0"
 
+# Roborazzi — Compose screenshot tests on the JVM via Robolectric. 1.60.0 is
+# the latest stable. Earlier 1.4x lines target AGP 8 and break against AGP 9's
+# DSL surface (`TestedExtension` removed); 1.56.0+ migrated to AGP 9 APIs.
+# Wired by `openptv.android.library.roborazzi`; opt-in per module so we don't
+# drag Robolectric onto every Compose lib by default.
+roborazzi = "1.60.0"
+# Robolectric powers Roborazzi's JVM harness. 4.15.1 is the current stable
+# and supports SDK 33/34, which is what the screenshot tests target.
+robolectric = "4.15.1"
+# AndroidX Compose test artifacts (`ui-test-junit4`, `ui-test-manifest`) are
+# Compose-BOM-managed, so no version pin needed here — the `composeBom`
+# alignment owns them.
+
 [libraries]
 # AndroidX core
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCoreKtx" }
@@ -111,6 +124,18 @@ truth = { module = "com.google.truth:truth", version.ref = "truth" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 
+# Roborazzi — screenshot capture + JUnit rule. `roborazzi` is the core
+# capture API, `roborazzi-compose` adds Compose-specific helpers,
+# `roborazzi-junit-rule` integrates with the standard JUnit 4 rule chain.
+roborazzi = { module = "io.github.takahirom.roborazzi:roborazzi", version.ref = "roborazzi" }
+roborazzi-compose = { module = "io.github.takahirom.roborazzi:roborazzi-compose", version.ref = "roborazzi" }
+roborazzi-junit-rule = { module = "io.github.takahirom.roborazzi:roborazzi-junit-rule", version.ref = "roborazzi" }
+# Robolectric — Android-on-JVM harness Roborazzi piggybacks on.
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+# Compose UI test harness — BOM-managed (no version.ref).
+androidx-compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
+androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
+
 # Gradle plugins as artifacts — consumed only by the `build-logic` composite
 # build so its convention plugins can call into AGP / Kotlin / KSP / Compose /
 # Spotless plugin APIs directly. Don't apply these in any module's `plugins {}`
@@ -149,3 +174,8 @@ detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 # convention plugin (see `app/build.gradle.kts` rationale): only `:app` rolls
 # up the production APK classpath, so this is intentionally one-module-only.
 dependency-guard = { id = "com.dropbox.dependency-guard", version.ref = "dependencyGuard" }
+# Roborazzi — applied indirectly through the `openptv.android.library.roborazzi`
+# convention plugin. Same `apply false` pattern as Spotless / detekt: pulls the
+# plugin jar onto the build-script classpath so the convention plugin can apply
+# it by id and reference its DSL classes at runtime.
+roborazzi = { id = "io.github.takahirom.roborazzi", version.ref = "roborazzi" }
