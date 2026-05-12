@@ -76,7 +76,7 @@ class OpenPtvThemeScreenshotTest(
 
         composeRule.onRoot().captureRoboImage(
             filePath = "src/test/snapshots/theme_${theme.slug}_${device.slug}.png",
-            roborazziOptions = SCREENSHOT_OPTIONS,
+            roborazziOptions = screenshotOptions,
         )
     }
 
@@ -104,7 +104,7 @@ private const val SCREENSHOT_SDK = 33
  * by even one hue step) blows well past it — verified manually via the
  * fail-on-change demo in the PR description.
  */
-private val SCREENSHOT_OPTIONS = RoborazziOptions(
+private val screenshotOptions = RoborazziOptions(
     compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0.01f),
 )
 
