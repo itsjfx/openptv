@@ -13,6 +13,15 @@ plugins {
     id("openptv.android.application.compose")
     id("openptv.android.hilt")
     alias(libs.plugins.kotlin.serialization)
+    // Dropbox Dependency Guard — locks `releaseRuntimeClasspath` (the set of
+    // artifacts that ends up in the production APK) against a checked-in
+    // baseline at `app/dependencies/releaseRuntimeClasspath.txt`. Run
+    // `:app:dependencyGuard` to verify (CI gate) and
+    // `:app:dependencyGuardBaseline` to rebaseline after intentional changes.
+    // Deliberately applied only in `:app`, not via a convention plugin:
+    // `:app` is the rollup that determines what actually ships, and
+    // tracking each `:core:*` / `:feature:*` separately would just add churn.
+    alias(libs.plugins.dependency.guard)
 }
 
 android {
@@ -53,6 +62,15 @@ android {
     buildFeatures {
         buildConfig = true
     }
+}
+
+// Scoped to `releaseRuntimeClasspath` only — that's the set of artifacts that
+// ends up in the production APK and the one we actually need to lock down for
+// the GrapheneOS / "no GMS sneaks in" guarantee. Debug / test configurations
+// pull in MockWebServer, Hilt test infra, Compose tooling etc. and would add
+// noisy baseline churn for no real shipping-code value.
+dependencyGuard {
+    configuration("releaseRuntimeClasspath")
 }
 
 dependencies {

@@ -55,6 +55,11 @@ spotless = "7.0.4"
 # (`openptv.detekt`) wires it onto every Kotlin module and the custom rules
 # in `:lint:detekt` plug into the same `RuleSetProvider` SPI.
 detekt = "1.23.8"
+# Dropbox Dependency Guard — locks the transitive dep set on `:app`'s
+# `releaseRuntimeClasspath` so accidental Compose-BOM / Retrofit / etc.
+# transitive churn fails CI. Only applied on `:app` (the rollup that ends up
+# in the APK); debug-only / test configurations are deliberately out of scope.
+dependencyGuard = "0.5.0"
 
 [libraries]
 # AndroidX core
@@ -140,3 +145,7 @@ spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 # Same `apply false` pattern as spotless — pulls the plugin jar onto the
 # build-script classpath so the convention plugin can reference its DSL.
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+# Dropbox Dependency Guard — applied directly in `:app/build.gradle.kts`. No
+# convention plugin (see `app/build.gradle.kts` rationale): only `:app` rolls
+# up the production APK classpath, so this is intentionally one-module-only.
+dependency-guard = { id = "com.dropbox.dependency-guard", version.ref = "dependencyGuard" }
