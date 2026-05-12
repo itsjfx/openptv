@@ -1,14 +1,12 @@
 package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.data.test.FakeSettingsRepository
 import ac.jfx.openptv.core.model.AppSettings
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.network.StopSearchDataSource
 import ac.jfx.openptv.core.testing.StopMother
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import java.io.IOException
@@ -20,9 +18,11 @@ import java.util.concurrent.CancellationException
  * `RetrofitStopSearchDataSourceTest`; here we fake the data source so the tests focus on the
  * repository's contract.
  *
- * `FakeSettingsRepository` is duplicated inline rather than imported from `:core:data-test`
- * because the test fake there is bound through Hilt's `@TestInstallIn` — a heavyweight
- * mechanism intended for instrumented tests, not module-local unit tests.
+ * `FakeSettingsRepository` comes from `:core:data-test`. NIA's `:core:data` does the same —
+ * `testImplementation(projects.core.datastoreTest)` plus `testImplementation(projects.core.testing)`
+ * in its `core/data/build.gradle.kts` — so unit tests reuse the same fakes that instrumented
+ * tests would. The local `FakeDataSource` stays inline because it's a one-off
+ * `StopSearchDataSource` test double with no reuse value.
  */
 class StopSearchRepositoryImplTest {
 
@@ -67,9 +67,9 @@ class StopSearchRepositoryImplTest {
     @Test
     fun `repository reads baseUrl from settings on every call`() = runTest {
         val ds = FakeDataSource(returning = emptyList())
-        val settings = FakeSettingsRepository(
-            AppSettings(backendBaseUrl = "http://first.local/api/v3/", setupCompleted = true),
-        )
+        val settings = FakeSettingsRepository().apply {
+            seed(AppSettings(backendBaseUrl = "http://first.local/api/v3/", setupCompleted = true))
+        }
         val repo = StopSearchRepositoryImpl(ds, settings)
 
         repo.searchStops("a")
@@ -93,22 +93,6 @@ class StopSearchRepositoryImplTest {
             calls += baseUrl to term
             throwing?.let { throw it }
             return returning
-        }
-    }
-
-    private class FakeSettingsRepository(
-        initial: AppSettings = AppSettings(
-            backendBaseUrl = "http://test.local/api/v3/",
-            setupCompleted = true,
-        ),
-    ) : SettingsRepository {
-        private val state = MutableStateFlow(initial)
-        override val settings: Flow<AppSettings> = state.asStateFlow()
-        override suspend fun setBackendBaseUrl(url: String) {
-            state.value = state.value.copy(backendBaseUrl = url)
-        }
-        override suspend fun completeSetup(url: String) {
-            state.value = state.value.copy(backendBaseUrl = url, setupCompleted = true)
         }
     }
 }
