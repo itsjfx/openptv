@@ -7,9 +7,6 @@ OpenPTV is an open-source Android client plus a Go backend proxy for the PTV (Pu
 ## Non-goals
 
 - iOS, web, desktop. Android only. The Hilt DI choice trades portability for ergonomics.
-- Trip planning (A to B). The PTV API does not expose one.
-- Real-time vehicle positions. Not in PTV API v3.
-- Hosted multi-tenant SaaS. Users run the proxy themselves or trust the OpenPTV-hosted instance.
 - Account systems, cross-device sync, social features.
 
 ## Mobile architecture
@@ -62,9 +59,11 @@ Material 3 with dynamic colour on Android 12+. Below that, fall back to a hand-t
 
 ## GitHub SDLC
 
-GitHub repository: `itsjfx/openptv`
+GitHub repository: itsjfx/openptv
 
-Raise PRs.
+GitHub is the tool for SDLC. You will be working on tasks based on a GitHub issue. If it's not clear, ask questions.
+
+Raise PRs, link back to the GitHub issue.
 
 ## Issue Template
 
@@ -72,10 +71,9 @@ When creating issues use the following template: What, Why, How, Acceptance Crit
 
 ## Commits
 
-All commits must include a `Co-Authored-By` trailer for the AI contributor:
-```
+All commits must include a Co-Authored-By trailer for the AI contributor:
+
 Co-Authored-By: ai-tiro <ai-tiro@jfx.ac>
-```
 
 Make regular, small commits when accomplishing a small milestone within a ticket.
 
