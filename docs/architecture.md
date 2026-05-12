@@ -5,7 +5,7 @@
 
 ## Vision
 
-Provide a small, fast, ad-free, Material You alternative to the official PTV app. The mobile client never sees the PTV signing key; a Go proxy signs requests upstream. Auth and rate-limiting are handled at the edge (Cloudflare or nginx), not by the application — the proxy stays "dumb" and stateless.
+Provide a small, fast, ad-free, Material You alternative to the official PTV app. It must work without Google Services. The mobile client never sees the PTV signing key; a Go proxy signs requests upstream. Auth and rate-limiting are handled at the edge (Cloudflare or nginx), not by the application — the proxy stays "dumb" and stateless.
 
 ## Non-goals
 
