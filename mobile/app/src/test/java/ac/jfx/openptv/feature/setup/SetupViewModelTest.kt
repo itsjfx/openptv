@@ -18,12 +18,14 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class SetupViewModelTest {
 
-    private val settings = FakeSettingsRepository(
-        AppSettings(
-            backendBaseUrl = "http://default.local/api/v3/",
-            setupCompleted = false,
-        ),
-    )
+    private val settings = FakeSettingsRepository().apply {
+        seed(
+            AppSettings(
+                backendBaseUrl = "http://default.local/api/v3/",
+                setupCompleted = false,
+            ),
+        )
+    }
 
     @Before
     fun setUp() {
