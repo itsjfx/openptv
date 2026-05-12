@@ -1,5 +1,6 @@
 package ac.jfx.openptv.core.network
 
+import ac.jfx.openptv.core.network.model.SearchResponseDto
 import retrofit2.http.GET
 import retrofit2.http.Url
 

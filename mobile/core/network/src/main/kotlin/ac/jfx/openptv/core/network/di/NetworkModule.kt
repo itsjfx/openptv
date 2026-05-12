@@ -1,5 +1,9 @@
-package ac.jfx.openptv.core.network
+package ac.jfx.openptv.core.network.di
 
+import ac.jfx.openptv.core.network.BackendApiService
+import ac.jfx.openptv.core.network.BuildConfig
+import ac.jfx.openptv.core.network.RetrofitStopSearchDataSource
+import ac.jfx.openptv.core.network.StopSearchDataSource
 import dagger.Binds
 import dagger.Module
 import dagger.Provides

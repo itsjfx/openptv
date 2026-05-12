@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.network
 
 import ac.jfx.openptv.core.model.Stop
+import ac.jfx.openptv.core.network.model.toDomain
 import java.net.URLEncoder
 import javax.inject.Inject
 
