@@ -1,5 +1,6 @@
 package ac.jfx.openptv.core.data
 
+import ac.jfx.openptv.core.datastore.SettingsRepositoryImpl
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -18,4 +19,10 @@ internal abstract class RepositoryModule {
     internal abstract fun bindStopSearchRepository(
         impl: StopSearchRepositoryImpl,
     ): StopSearchRepository
+
+    @Binds
+    @Singleton
+    internal abstract fun bindSettingsRepository(
+        impl: SettingsRepositoryImpl,
+    ): SettingsRepository
 }

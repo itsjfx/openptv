@@ -106,6 +106,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.datetime)
 
+    // Persistence
+    implementation(libs.androidx.datastore.preferences)
+
     // Test
     testImplementation(libs.junit)
     testImplementation(libs.truth)
