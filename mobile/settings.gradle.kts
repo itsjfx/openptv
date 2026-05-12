@@ -1,4 +1,9 @@
 pluginManagement {
+    // The composite build under `build-logic/` publishes `openptv.*` plugins.
+    // It has to be included before `repositories { ... }` for Gradle to resolve
+    // their ids from `plugins { id("openptv.android.library") }` blocks.
+    includeBuild("build-logic")
+
     repositories {
         google {
             content {

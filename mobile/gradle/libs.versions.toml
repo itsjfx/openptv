@@ -44,6 +44,9 @@ junit = "4.13.2"
 truth = "1.4.4"
 turbine = "1.2.1"
 
+# Code quality
+spotless = "8.0.0"
+
 [libraries]
 # AndroidX core
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidxCoreKtx" }
@@ -92,6 +95,16 @@ junit = { module = "junit:junit", version.ref = "junit" }
 truth = { module = "com.google.truth:truth", version.ref = "truth" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
+
+# Gradle plugins as artifacts — consumed only by the `build-logic` composite
+# build so its convention plugins can call into AGP / Kotlin / KSP / Compose /
+# Spotless plugin APIs directly. Don't apply these in any module's `plugins {}`
+# block — that's what the `openptv.*` convention plugins are for.
+android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+ksp-gradle-plugin = { module = "com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin", version.ref = "ksp" }
+compose-gradle-plugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
+spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
