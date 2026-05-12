@@ -11,6 +11,7 @@ package ac.jfx.openptv.core.designsystem
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
+import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -75,6 +76,7 @@ class OpenPtvThemeScreenshotTest(
 
         composeRule.onRoot().captureRoboImage(
             filePath = "src/test/snapshots/theme_${theme.slug}_${device.slug}.png",
+            roborazziOptions = SCREENSHOT_OPTIONS,
         )
     }
 
@@ -89,6 +91,22 @@ class OpenPtvThemeScreenshotTest(
 
 /** Class-level `@Config(sdk = [...])` only accepts `IntArray`-compatible literals. */
 private const val SCREENSHOT_SDK = 33
+
+/**
+ * Comparison tolerance for the screenshot suite.
+ *
+ * Font anti-aliasing and Skia hinting differ subtly between developer
+ * machines and the GitHub Actions Linux runner (the latter has a different
+ * Fontconfig setup; `Fontconfig error: Cannot load default config file` is
+ * routine on both, but the fallback fonts diverge). A `changeThreshold` of
+ * 1 % is large enough to absorb that noise across every cell we have, and
+ * still small enough that a real palette change (e.g. swapping the primary
+ * by even one hue step) blows well past it — verified manually via the
+ * fail-on-change demo in the PR description.
+ */
+private val SCREENSHOT_OPTIONS = RoborazziOptions(
+    compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0.01f),
+)
 
 /** Theme cases exercised by the screenshot suite. See class KDoc for why dynamic is skipped. */
 enum class ThemeCase(val mode: ThemeMode, val slug: String) {
