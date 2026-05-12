@@ -18,19 +18,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.platform.LocalContext
-
-/**
- * Three-way theme mode. Persisted via DataStore in Phase 4; in-memory only for the barebones skeleton.
- */
-enum class ThemeMode { System, Light, Dark }
-
-/**
- * Composition local for the active theme mode. Screens read this to render a toggle UI.
- * The actual mutable state lives in the `App` composable for the barebones cut.
- */
-val LocalThemeMode = compositionLocalOf { ThemeMode.System }
 
 /**
  * Material 3 colour scheme entry point.

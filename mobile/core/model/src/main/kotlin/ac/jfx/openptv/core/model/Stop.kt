@@ -35,6 +35,9 @@ enum class RouteType {
     ;
 
     companion object {
+        // Wire codes are defined by the PTV Timetable API contract; mapping them in-place reads
+        // more naturally than a parallel constants table.
+        @Suppress("MagicNumber")
         fun fromCode(code: Int): RouteType = when (code) {
             0 -> Train
             1 -> Tram

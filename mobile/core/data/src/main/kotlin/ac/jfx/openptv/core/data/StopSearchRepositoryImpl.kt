@@ -31,6 +31,10 @@ internal class StopSearchRepositoryImpl @Inject constructor(
     private val dataSource: StopSearchDataSource,
     private val settings: SettingsRepository,
 ) : StopSearchRepository {
+    // Repository boundary: any non-cancellation failure (IO, parse, JSON, ...) becomes
+    // `Result.Error` so callers don't have to know the underlying type lattice. Catching
+    // `Throwable` is the conventional shape; see KDoc above for the cancellation contract.
+    @Suppress("TooGenericExceptionCaught")
     override suspend fun searchStops(term: String): Result<List<Stop>> = try {
         val baseUrl = settings.settings.first().backendBaseUrl
         Result.Success(dataSource.searchStops(baseUrl, term))
