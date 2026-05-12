@@ -1,7 +1,7 @@
 package ac.jfx.openptv.feature.settings
 
+import ac.jfx.openptv.core.data.test.FakeSettingsRepository
 import ac.jfx.openptv.core.model.AppSettings
-import ac.jfx.openptv.core.testing.FakeSettingsRepository
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi

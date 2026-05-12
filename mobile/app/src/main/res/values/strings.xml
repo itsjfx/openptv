@@ -11,22 +11,7 @@
     <string name="theme_mode_label">Theme: %1$s</string>
     <string name="theme_mode_action_cycle">Cycle theme</string>
 
-    <!-- Stop search screen -->
-    <string name="search_title">Search stops</string>
-    <string name="search_field_label">Stop name or suburb</string>
-    <string name="search_idle_hint">Start typing to search.</string>
-    <string name="search_empty">No stops match that search.</string>
-    <string name="search_row_open">Open</string>
-    <string name="search_row_content_description">%1$s, %2$s, %3$s stop</string>
-    <string name="search_unknown_suburb">unknown suburb</string>
-
-    <!-- Transport modes -->
-    <string name="route_type_train">Train</string>
-    <string name="route_type_tram">Tram</string>
-    <string name="route_type_bus">Bus</string>
-    <string name="route_type_vline">V/Line</string>
-    <string name="route_type_night_bus">Night Bus</string>
-    <string name="route_type_unknown">Stop</string>
+    <!-- Stop search strings live in :feature:search/.../strings.xml. -->
 
     <!-- First-run setup -->
     <string name="setup_title">Choose your server</string>

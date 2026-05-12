@@ -1,8 +1,13 @@
-// `:app` — the only application module. Everything not specific to this module
-// (compileSdk/minSdk, JVM target, Compose BOM, Hilt + KSP) is in
-// `build-logic/convention/`. What stays here is genuinely app-specific:
-// applicationId, version, build types, and the dependency surface the entry
-// point needs.
+// `:app` — composition root. Owns `OpenPtvApplication` (`@HiltAndroidApp`),
+// `MainActivity`, the top-level navigation graph, plus the bits not yet
+// promoted out: `SettingsRepositoryImpl` (DataStore-backed) and the
+// Setup / Settings screens. Those move to `:core:datastore` and
+// `:feature:setup` / `:feature:settings` in the phases that introduce those
+// modules.
+//
+// What lives here: `applicationId`, `versionCode`, `versionName`, build types
+// (with `BACKEND_BASE_URL`). Everything else (compileSdk/minSdk, JVM target,
+// Compose BOM, Hilt + KSP) comes from the convention plugins.
 plugins {
     id("openptv.android.application")
     id("openptv.android.application.compose")
@@ -51,6 +56,17 @@ android {
 }
 
 dependencies {
+    // Core libs — :app is a consumer of every core module it composes.
+    implementation(project(":core:common"))
+    implementation(project(":core:data"))
+    implementation(project(":core:designsystem"))
+    implementation(project(":core:model"))
+    implementation(project(":core:navigation"))
+    implementation(project(":core:network"))
+
+    // Features composed by the root nav graph.
+    implementation(project(":feature:search"))
+
     // AndroidX core
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -66,23 +82,20 @@ dependencies {
     // `openptv.android.feature` and the app picks it up here.
     implementation(libs.androidx.hilt.navigation.compose)
 
-    // Serialization
+    // Serialization (root nav key)
     implementation(libs.kotlinx.serialization.json)
-
-    // Networking
-    implementation(libs.okhttp)
-    implementation(libs.okhttp.logging.interceptor)
-    implementation(libs.retrofit)
-    implementation(libs.retrofit.kotlinx.serialization.converter)
 
     // Coroutines / Time
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.datetime)
 
-    // Persistence
+    // Persistence — `SettingsRepositoryImpl` is DataStore-backed and lives here
+    // until `:core:datastore` lands in a later phase.
     implementation(libs.androidx.datastore.preferences)
 
     // Test
+    testImplementation(project(":core:data-test"))
+    testImplementation(project(":core:testing"))
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
