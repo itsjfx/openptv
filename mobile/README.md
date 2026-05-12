@@ -1,10 +1,8 @@
 # OpenPTV — mobile
 
-Android client for the OpenPTV project (see `../docs/architecture.md`). This is the **barebones**
-Phase 01 skeleton: a single-module Compose app with a Material You theme and one Home placeholder.
-The multi-module split, convention plugins under `build-logic/`, detekt / Spotless / Dependency
-Guard, and the GitHub Actions CI workflow described in `../docs/mobile/phase-01-skeleton.md` land
-in a follow-up issue.
+Android client for the OpenPTV project (see `../docs/architecture.md`). The multi-module split,
+convention plugins under `build-logic/`, detekt / Spotless / Dependency Guard, and the GitHub
+Actions CI workflow are all wired up — see `../docs/mobile/phase-01-skeleton.md` for the design.
 
 ## Build
 
