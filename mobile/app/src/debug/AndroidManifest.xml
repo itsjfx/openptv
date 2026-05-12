@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only manifest overlay. Permits cleartext traffic so the app can reach the local
+  Go proxy on `http://10.0.2.2:8080` while developing. Release builds inherit the main
+  manifest, which leaves `usesCleartextTraffic` at its platform default (false on API 28+).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:usesCleartextTraffic="true"
+        tools:targetApi="m" />
+
+</manifest>

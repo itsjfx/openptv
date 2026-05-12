@@ -30,27 +30,57 @@ and links to the APK download.
 `attach.sh` lives in this skill directory.
 
 ```
-attach.sh <pr-number> [--apk <path>] [--screenshot <path>]... [--caption <text>]... [--repo <owner/repo>]
+attach.sh <pr-number> [--apk <path>] [--screenshot <path>]... [--caption <text>]... [--repo <owner/repo>] [--new]
 ```
 
 - `<pr-number>` is required.
 - `--screenshot` and `--caption` are repeatable; captions match screenshots
-  positionally. If a caption is omitted for a screenshot, it is derived from
-  the filename (basename without extension).
+  positionally. If a caption is omitted, it is derived from the filename
+  (basename without extension). Captions are **not persisted** across
+  updates — re-running drops them back to filename stems.
 - `--apk` is optional. When provided the comment includes a download link and
   the file size.
 - `--repo` defaults to the current repo (`gh repo view --json nameWithOwner`).
+- `--new` forces a fresh gist + new comment even if a previous pr-attach gist
+  already exists for this PR.
 
 The gist is created as **secret** and is named `<repo>#<pr-number>` (e.g.
-`itsjfx/openptv#8`) so it is easy to find later.
+`itsjfx/openptv#8`) so the script can find it again on subsequent runs.
 
 ## Behaviour summary
 
-1. Create a placeholder gist (secret by default — `gh gist create` is secret
-   unless `--public` is passed).
-2. Clone the gist repo into a temp dir authenticated with `gh auth token`.
-3. Copy the screenshots and/or APK in, commit, and push.
-4. Build raw URLs (`https://gist.githubusercontent.com/<owner>/<id>/raw/<file>`)
-   and verify each returns HTTP 200 before posting.
-5. Post one PR comment combining the screenshot grid (if any) and the APK
-   download line (if any). Print the gist URL and PR comment URL on success.
+The script is **idempotent per PR by default**: rerunning on the same PR
+reuses the existing gist and edits the existing comment in place rather than
+spawning a new one each time. Use `--new` only when you actually want a
+separate attachment thread (rare).
+
+### First run (no existing gist)
+
+1. Create a placeholder secret gist named `<repo>#<pr>`.
+2. Clone the gist repo (authenticated with `gh auth token`).
+3. Copy the passed screenshots and/or APK in. Same-basename collisions in a
+   single run get suffixed `-1`, `-2`, ...
+4. Commit (as `ai-tiro`) and push to whatever branch the gist's HEAD is on
+   (`main` on new gists, `master` on older).
+5. Build raw URLs pinned to the commit SHA (`.../raw/<sha>/<file>`) — the
+   unversioned shortcut 404s for files gist considers "large" (~10 MB+,
+   e.g. typical debug APKs). Verify each returns HTTP 200, retrying for a
+   few seconds since raw URLs can lag a push.
+6. Post one PR comment with a hidden `<!-- pr-attach:<repo>#<pr> -->` marker
+   at the top, the embedded screenshots, the APK download line, and a
+   footer crediting this skill. Print the gist URL + comment URL.
+
+### Subsequent runs (gist already exists for this PR)
+
+1. Find the gist by description (`<repo>#<pr>`) via `gh api gists --paginate`.
+2. Clone it, **overwrite** passed files in place by exact basename, commit
+   only if there's an actual diff, push.
+3. Regenerate the comment body from the *current* contents of the gist —
+   every image embedded, every APK linked, every other file linked.
+   Files already in the gist that weren't passed this run stay in the
+   comment.
+4. Find the existing comment via the hidden marker and PATCH its body in
+   place (`gh api -X PATCH repos/.../issues/comments/<id>` — `gh` CLI has no
+   direct subcommand for editing issue comments).
+5. If no comment with the marker exists (e.g. legacy comment), fall back to
+   posting a new one.
