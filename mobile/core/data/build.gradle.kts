@@ -24,6 +24,11 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(project(":core:testing"))
+    // Reuses `FakeSettingsRepository` from `:core:data-test`. Pulling
+    // `:core:data-test` into a unit-test classpath of the same module it provides fakes for
+    // is the same shape as NIA's `core/data` unit tests, which `testImplementation` the
+    // `:core:data-test` module they emit.
+    testImplementation(project(":core:data-test"))
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
