@@ -32,10 +32,10 @@ dependencies {
     compileOnly(libs.kotlin.gradle.plugin)
     compileOnly(libs.ksp.gradle.plugin)
     compileOnly(libs.compose.gradle.plugin)
-    // Spotless is intentionally NOT on the convention classpath in this PR.
-    // The `SpotlessConventionPlugin` is a stub that doesn't apply the spotless
-    // plugin yet (#12 wires it). When that lands it will add Spotless via
-    // `pluginManager.apply` and bring this dep along with it.
+    // Spotless's Gradle plugin powers `openptv.spotless`. Pinned to 7.x in the
+    // catalog so the convention plugin classpath (JVM 11) doesn't trip over
+    // Spotless 8's JDK 17 bytecode requirement.
+    compileOnly(libs.spotless.gradle.plugin)
 }
 
 gradlePlugin {

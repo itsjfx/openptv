@@ -45,7 +45,12 @@ truth = "1.4.4"
 turbine = "1.2.1"
 
 # Code quality
-spotless = "8.0.0"
+# Pinned to the latest 7.x line. Spotless 8.0.0 ships JDK 17 bytecode, which
+# breaks the convention plugin compile classpath (`build-logic` targets JVM
+# 11 to match the consumed modules). 7.0.4 is still actively maintained and
+# uses ktlint internally, so the surface configured under `openptv.spotless`
+# stays identical.
+spotless = "7.0.4"
 
 [libraries]
 # AndroidX core
@@ -115,3 +120,9 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+# Spotless is applied indirectly through the `openptv.spotless` convention
+# plugin. The alias here is so the root build can declare `apply false`,
+# which pulls the plugin jar onto the build-script classpath so
+# `pluginManager.apply("com.diffplug.spotless")` from the convention plugin
+# can resolve the extension classes at runtime.
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
