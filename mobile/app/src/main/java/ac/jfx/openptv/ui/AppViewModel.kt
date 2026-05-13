@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.ui
 
 import ac.jfx.openptv.core.data.SettingsRepository
@@ -29,19 +20,19 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class AppViewModel
-@Inject
-constructor(
-    settings: SettingsRepository,
-) : ViewModel() {
-    val gate: StateFlow<GateState> =
-        settings.settings
-            .map { if (it.setupCompleted) GateState.Ready else GateState.NeedsSetup }
-            .stateIn(
-                scope = viewModelScope,
-                started = SharingStarted.Eagerly,
-                initialValue = GateState.Loading,
-            )
-}
+    @Inject
+    constructor(
+        settings: SettingsRepository,
+    ) : ViewModel() {
+        val gate: StateFlow<GateState> =
+            settings.settings
+                .map { if (it.setupCompleted) GateState.Ready else GateState.NeedsSetup }
+                .stateIn(
+                    scope = viewModelScope,
+                    started = SharingStarted.Eagerly,
+                    initialValue = GateState.Loading,
+                )
+    }
 
 sealed interface GateState {
     data object Loading : GateState

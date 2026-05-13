@@ -1,84 +1,68 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.feature.settings
 
 import ac.jfx.openptv.core.data.test.FakeSettingsRepository
 import ac.jfx.openptv.core.model.AppSettings
+import ac.jfx.openptv.core.testing.util.MainDispatcherRule
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
-import org.junit.After
-import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
+    @get:Rule
+    val mainDispatcherRule = MainDispatcherRule()
+
     private val settings =
-        FakeSettingsRepository(
-            AppSettings(
-                backendBaseUrl = "http://saved.local/api/v3/",
-                setupCompleted = true,
-            ),
-        )
-
-    @Before
-    fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-    }
-
-    @After
-    fun tearDown() {
-        Dispatchers.resetMain()
-    }
+        FakeSettingsRepository().apply {
+            seed(
+                AppSettings(
+                    backendBaseUrl = "http://saved.local/api/v3/",
+                    setupCompleted = true,
+                ),
+            )
+        }
 
     @Test
-    fun `loads saved URL into draft`() = runTest {
-        val viewModel = SettingsViewModel(settings)
-        val state = viewModel.uiState.value
-        assertThat(state.savedUrl).isEqualTo("http://saved.local/api/v3/")
-        assertThat(state.draftUrl).isEqualTo("http://saved.local/api/v3/")
-        assertThat(state.dirty).isFalse()
-        assertThat(state.loaded).isTrue()
-    }
+    fun `loads saved URL into draft`() =
+        runTest {
+            val viewModel = SettingsViewModel(settings)
+            val state = viewModel.uiState.value
+            assertThat(state.savedUrl).isEqualTo("http://saved.local/api/v3/")
+            assertThat(state.draftUrl).isEqualTo("http://saved.local/api/v3/")
+            assertThat(state.dirty).isFalse()
+            assertThat(state.loaded).isTrue()
+        }
 
     @Test
-    fun `editing draft marks state dirty`() = runTest {
-        val viewModel = SettingsViewModel(settings)
-        viewModel.onDraftUrlChanged("http://new.local/api/v3/")
-        assertThat(viewModel.uiState.value.dirty).isTrue()
-    }
+    fun `editing draft marks state dirty`() =
+        runTest {
+            val viewModel = SettingsViewModel(settings)
+            viewModel.onDraftUrlChanged("http://new.local/api/v3/")
+            assertThat(viewModel.uiState.value.dirty).isTrue()
+        }
 
     @Test
-    fun `save persists draft and clears dirty`() = runTest {
-        val viewModel = SettingsViewModel(settings)
-        viewModel.onDraftUrlChanged("http://new.local/api/v3/")
-        viewModel.onSave()
+    fun `save persists draft and clears dirty`() =
+        runTest {
+            val viewModel = SettingsViewModel(settings)
+            viewModel.onDraftUrlChanged("http://new.local/api/v3/")
+            viewModel.onSave()
 
-        // The normalisation in the repository keeps the trailing slash.
-        assertThat(settings.settings.first().backendBaseUrl)
-            .isEqualTo("http://new.local/api/v3/")
-        assertThat(viewModel.uiState.value.dirty).isFalse()
-    }
+            // The normalisation in the repository keeps the trailing slash.
+            assertThat(settings.settings.first().backendBaseUrl)
+                .isEqualTo("http://new.local/api/v3/")
+            assertThat(viewModel.uiState.value.dirty).isFalse()
+        }
 
     @Test
-    fun `save is a no-op when draft is blank`() = runTest {
-        val viewModel = SettingsViewModel(settings)
-        viewModel.onDraftUrlChanged("")
-        viewModel.onSave()
-        // The original value remains; the empty draft isn't pushed.
-        assertThat(settings.settings.first().backendBaseUrl)
-            .isEqualTo("http://saved.local/api/v3/")
-    }
+    fun `save is a no-op when draft is blank`() =
+        runTest {
+            val viewModel = SettingsViewModel(settings)
+            viewModel.onDraftUrlChanged("")
+            viewModel.onSave()
+            // The original value remains; the empty draft isn't pushed.
+            assertThat(settings.settings.first().backendBaseUrl)
+                .isEqualTo("http://saved.local/api/v3/")
+        }
 }

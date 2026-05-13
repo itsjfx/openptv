@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.core.testing
 
 import ac.jfx.openptv.core.model.RouteType
@@ -22,7 +13,6 @@ import ac.jfx.openptv.core.model.StopId
  * visually consistent. See `~/.claude/skills/object-mother/skill.md` for the pattern spec.
  */
 class StopMother private constructor() {
-
     companion object {
         private const val DEFAULT_ID = 1071
         private const val DEFAULT_NAME = "Flinders Street Railway Station"
@@ -31,7 +21,9 @@ class StopMother private constructor() {
         private const val DEFAULT_LONGITUDE = 144.9671
 
         fun aStop(): StopBuilder = StopBuilder()
+
         fun aTramStop(): StopBuilder = StopBuilder().withRouteType(RouteType.Tram)
+
         fun aBusStop(): StopBuilder = StopBuilder().withRouteType(RouteType.Bus)
     }
 
@@ -44,19 +36,25 @@ class StopMother private constructor() {
         private var longitude: Double = DEFAULT_LONGITUDE
 
         fun withId(id: Int) = apply { this.id = id }
+
         fun withName(name: String) = apply { this.name = name }
+
         fun withSuburb(suburb: String) = apply { this.suburb = suburb }
+
         fun withRouteType(routeType: RouteType) = apply { this.routeType = routeType }
+
         fun withLatitude(latitude: Double) = apply { this.latitude = latitude }
+
         fun withLongitude(longitude: Double) = apply { this.longitude = longitude }
 
-        fun build(): Stop = Stop(
-            id = StopId(id),
-            name = name,
-            suburb = suburb,
-            routeType = routeType,
-            latitude = latitude,
-            longitude = longitude,
-        )
+        fun build(): Stop =
+            Stop(
+                id = StopId(id),
+                name = name,
+                suburb = suburb,
+                routeType = routeType,
+                latitude = latitude,
+                longitude = longitude,
+            )
     }
 }

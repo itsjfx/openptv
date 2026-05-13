@@ -20,9 +20,10 @@ dependencies {
     api(project(":core:model"))
     api(project(":core:common"))
 
-    // `@TestInstallIn` lives in `hilt-android-testing`, but consumers of this
-    // module's fakes (instrumented + Robolectric tests in `:feature:*`) are
-    // already pulling `hilt-android-testing` into their test classpath, so it
-    // goes here as `api` rather than `implementation`.
-    api(libs.hilt.android.testing)
+    // `@TestInstallIn` annotations on `FakeDataModule` need `hilt-android-testing`
+    // at compile time, but the annotations are an internal implementation detail
+    // of this module — consumers in `:feature:*` androidTests bring their own
+    // `hilt-android-testing` dependency (it's pulled in by `dagger.hilt.android.testing.HiltAndroidRule`).
+    // NIA scopes the same dependency as `implementation` on its `:core:data-test`.
+    implementation(libs.hilt.android.testing)
 }

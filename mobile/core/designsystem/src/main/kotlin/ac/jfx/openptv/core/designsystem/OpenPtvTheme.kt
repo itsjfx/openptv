@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.core.designsystem
 
 import android.os.Build
@@ -34,18 +25,20 @@ fun OpenPtvTheme(
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
-    val useDark = when (themeMode) {
-        ThemeMode.System -> systemDark
-        ThemeMode.Light -> false
-        ThemeMode.Dark -> true
-    }
+    val useDark =
+        when (themeMode) {
+            ThemeMode.System -> systemDark
+            ThemeMode.Light -> false
+            ThemeMode.Dark -> true
+        }
 
-    val colorScheme: ColorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        val ctx = LocalContext.current
-        if (useDark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-    } else {
-        if (useDark) darkColorScheme() else lightColorScheme()
-    }
+    val colorScheme: ColorScheme =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val ctx = LocalContext.current
+            if (useDark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+        } else {
+            if (useDark) darkColorScheme() else lightColorScheme()
+        }
 
     MaterialTheme(
         colorScheme = colorScheme,

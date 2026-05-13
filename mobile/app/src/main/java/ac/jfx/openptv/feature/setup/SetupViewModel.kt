@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.feature.setup
 
 import ac.jfx.openptv.core.data.SettingsRepository
@@ -32,38 +23,38 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class SetupViewModel
-@Inject
-constructor(
-    private val settings: SettingsRepository,
-) : ViewModel() {
-    private val _uiState = MutableStateFlow(SetupUiState(defaultUrl = ""))
-    val uiState: StateFlow<SetupUiState> = _uiState.asStateFlow()
+    @Inject
+    constructor(
+        private val settings: SettingsRepository,
+    ) : ViewModel() {
+        private val _uiState = MutableStateFlow(SetupUiState(defaultUrl = ""))
+        val uiState: StateFlow<SetupUiState> = _uiState.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            val current = settings.settings.first()
-            _uiState.update { it.copy(defaultUrl = current.backendBaseUrl) }
+        init {
+            viewModelScope.launch {
+                val current = settings.settings.first()
+                _uiState.update { it.copy(defaultUrl = current.backendBaseUrl) }
+            }
+        }
+
+        fun onServerChoiceChanged(choice: ServerChoice) {
+            _uiState.update { it.copy(serverChoice = choice) }
+        }
+
+        fun onCustomUrlChanged(url: String) {
+            _uiState.update { it.copy(customUrl = url) }
+        }
+
+        fun onConsentToggled(accepted: Boolean) {
+            _uiState.update { it.copy(consentAccepted = accepted) }
+        }
+
+        fun completeSetup(onDone: () -> Unit) {
+            val state = _uiState.value
+            if (!state.canContinue) return
+            viewModelScope.launch {
+                settings.completeSetup(state.effectiveUrl)
+                onDone()
+            }
         }
     }
-
-    fun onServerChoiceChanged(choice: ServerChoice) {
-        _uiState.update { it.copy(serverChoice = choice) }
-    }
-
-    fun onCustomUrlChanged(url: String) {
-        _uiState.update { it.copy(customUrl = url) }
-    }
-
-    fun onConsentToggled(accepted: Boolean) {
-        _uiState.update { it.copy(consentAccepted = accepted) }
-    }
-
-    fun completeSetup(onDone: () -> Unit) {
-        val state = _uiState.value
-        if (!state.canContinue) return
-        viewModelScope.launch {
-            settings.completeSetup(state.effectiveUrl)
-            onDone()
-        }
-    }
-}
