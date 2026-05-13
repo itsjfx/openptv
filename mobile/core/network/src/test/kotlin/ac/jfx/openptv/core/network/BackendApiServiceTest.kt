@@ -89,4 +89,84 @@ class BackendApiServiceTest {
             server.enqueue(MockResponse().setResponseCode(200).setBody("{not json"))
             service.searchStops("${baseUrl}search/anything")
         }
+
+    // -------- getStop --------
+
+    @Test
+    fun `getStop success parses StopResponseDto`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """
+                    {"stop":{"stop_id":1071,"stop_name":"Flinders Street","stop_suburb":"Melbourne City","route_type":0,"stop_latitude":-37.8,"stop_longitude":144.96},"routes":[{"route_id":19,"route_name":"Mernda","route_number":"","route_type":0}]}
+                    """.trimIndent(),
+                ),
+            )
+
+            val response = service.getStop("${baseUrl}stops/1071/route_type/0")
+
+            assertThat(response.stop?.stopName).isEqualTo("Flinders Street")
+            assertThat(response.routes).hasSize(1)
+        }
+
+    @Test(expected = HttpException::class)
+    fun `getStop 4xx surfaces as HttpException`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(404))
+            service.getStop("${baseUrl}stops/99999/route_type/0")
+        }
+
+    @Test(expected = HttpException::class)
+    fun `getStop 5xx surfaces as HttpException`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(500))
+            service.getStop("${baseUrl}stops/1071/route_type/0")
+        }
+
+    @Test(expected = SerializationException::class)
+    fun `getStop malformed JSON surfaces as SerializationException`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("garbage"))
+            service.getStop("${baseUrl}stops/1071/route_type/0")
+        }
+
+    // -------- getDepartures --------
+
+    @Test
+    fun `getDepartures success parses DeparturesResponseDto`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """
+                    {"departures":[{"route_id":1,"run_ref":"OPS-1","direction_id":1,"scheduled_departure_utc":"2026-05-14T09:00:00Z","estimated_departure_utc":"2026-05-14T09:01:00Z","platform_number":"2","disruption_ids":[]}],"directions":{"1":{"direction_id":1,"direction_name":"City"}}}
+                    """.trimIndent(),
+                ),
+            )
+
+            val response = service.getDepartures("${baseUrl}departures/route_type/0/stop/1071")
+
+            assertThat(response.departures).hasSize(1)
+            assertThat(response.directions).hasSize(1)
+        }
+
+    @Test(expected = HttpException::class)
+    fun `getDepartures 4xx surfaces as HttpException`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(400))
+            service.getDepartures("${baseUrl}departures/route_type/0/stop/1071")
+        }
+
+    @Test(expected = HttpException::class)
+    fun `getDepartures 5xx surfaces as HttpException`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(503))
+            service.getDepartures("${baseUrl}departures/route_type/0/stop/1071")
+        }
+
+    @Test(expected = SerializationException::class)
+    fun `getDepartures malformed JSON surfaces as SerializationException`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("{not"))
+            service.getDepartures("${baseUrl}departures/route_type/0/stop/1071")
+        }
 }
