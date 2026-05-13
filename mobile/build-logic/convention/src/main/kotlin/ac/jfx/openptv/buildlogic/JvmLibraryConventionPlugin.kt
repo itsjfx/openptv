@@ -12,6 +12,7 @@ class JvmLibraryConventionPlugin : Plugin<Project> {
         with(target) {
             pluginManager.apply("org.jetbrains.kotlin.jvm")
             pluginManager.apply("openptv.spotless")
+            pluginManager.apply("openptv.detekt")
             configureJvm()
         }
     }

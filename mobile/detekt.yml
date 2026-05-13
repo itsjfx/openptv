@@ -1,0 +1,123 @@
+# detekt configuration for OpenPTV mobile.
+#
+# Layered on top of the bundled defaults (`buildUponDefaultConfig = true` in
+# `DetektConventionPlugin`), so this file only needs to record deltas:
+#   - tuning that's Compose-friendly (LongParameterList, FunctionNaming, etc.),
+#   - rulesets disabled because another tool already owns them (Spotless owns
+#     `formatting`),
+#   - the project-specific `openptv` ruleset shipped by `:lint:detekt`.
+#
+# If you're adding a new override, prefer disabling individual rules over whole
+# rulesets; that keeps the surface narrow and obvious.
+
+config:
+  validation: true
+  warningsAsErrors: false
+  # `formatting` and `openptv` are conditionally on detekt's classpath:
+  # `formatting` we deliberately don't depend on (Spotless owns formatting),
+  # and `openptv` is the project-specific ruleset shipped by `:lint:detekt`
+  # which itself is excluded from `detektPlugins(project(":lint:detekt"))`
+  # to avoid the self-reference cycle. Listing both here keeps validation
+  # strict elsewhere while letting those modules' detekt task accept the
+  # YAML stanzas without exploding on "property is misspelled".
+  excludes: 'formatting,openptv'
+
+# Spotless (ktlint) handles every formatting concern: indentation, blank
+# lines, import order, trailing commas, etc. Detekt's `formatting` ruleset is
+# also ktlint-backed — running both would mean two tools fighting over the
+# same edits. The Gradle plugin doesn't even pull `detekt-formatting` onto the
+# classpath unless we ask for it; this stanza is here so the intent is loud.
+formatting:
+  active: false
+
+# Compose composables are PascalCase by convention, and feature ViewModels
+# routinely accept 6-7 collaborators via constructor injection. Tune the two
+# rules that bite the hardest before they generate noise that drowns out real
+# findings.
+naming:
+  FunctionNaming:
+    active: true
+    # Allow PascalCase for `@Composable` (Composables are documented as
+    # PascalCase per Compose API guidelines).
+    ignoreAnnotated: ['Composable']
+  TopLevelPropertyNaming:
+    active: true
+    # Loosen the constant pattern (default `[A-Z][_A-Z0-9]*` is SCREAMING_SNAKE_CASE
+    # only) so Compose-flavoured `TestTagFoo` semantic-marker constants pass alongside
+    # ordinary `MIN_QUERY_LENGTH`. This matches the Spotless exemption from #12,
+    # which disables ktlint's `standard:property-naming` for the same reason.
+    constantPattern: '[A-Z][_A-Za-z0-9]*'
+    privatePropertyPattern: '_?[A-Za-z][A-Za-z0-9]*'
+
+complexity:
+  LongParameterList:
+    active: true
+    # Default is 6 (functions) / 5 (constructors). Compose `@Composable fun`
+    # signatures commonly need 7-8 params (state, callbacks, modifier...);
+    # bump both to 8 to match real-world function shapes.
+    functionThreshold: 8
+    constructorThreshold: 8
+    ignoreDefaultParameters: true
+    ignoreDataClasses: true
+    ignoreAnnotated: ['Composable']
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 15
+    thresholdInClasses: 15
+    thresholdInInterfaces: 15
+    thresholdInObjects: 15
+    thresholdInEnums: 15
+    ignoreDeprecated: true
+    ignorePrivate: true
+    ignoreOverridden: true
+    ignoreAnnotatedFunctions: ['Composable']
+  LongMethod:
+    active: true
+    threshold: 80
+    ignoreAnnotated: ['Composable']
+
+style:
+  MagicNumber:
+    active: true
+    # Compose code is full of `dp`/`sp` literals for spacing and elevation,
+    # and tests use literal expected values. The defaults flag all of those.
+    # We allow named constants, companion-object consts, properties, enum
+    # entries, and ranges — that covers ~all the false positives without
+    # silencing genuine "what does 86400 mean here" cases.
+    ignorePropertyDeclaration: true
+    ignoreLocalVariableDeclaration: true
+    ignoreConstantDeclaration: true
+    ignoreCompanionObjectPropertyDeclaration: true
+    ignoreAnnotation: true
+    ignoreNamedArgument: true
+    ignoreEnums: true
+    ignoreRanges: true
+    ignoreExtensionFunctions: true
+  MaxLineLength:
+    active: true
+    # Spotless / ktlint enforces 100 by default but allows long URLs in
+    # comments; matching that here keeps the two tools aligned.
+    maxLineLength: 140
+    excludeCommentStatements: true
+  ReturnCount:
+    active: true
+    max: 4
+  UnusedPrivateMember:
+    active: true
+    # `@Preview fun ScreenPreview()` etc. read as unused from detekt's POV.
+    ignoreAnnotated: ['Preview', 'Composable']
+  WildcardImport:
+    active: true
+    excludeImports:
+      - 'java.util.*'
+
+# OpenPTV-specific rules shipped by `:lint:detekt`. `ForbidAndroidLog` is the
+# hard guard from #13 — direct `android.util.Log` usage must route through
+# `:core:common.Logger`. `:core:common.AndroidLogger` is the one sanctioned
+# exception, scoped here so a misplaced grep doesn't accidentally include it.
+openptv:
+  active: true
+  ForbidAndroidLog:
+    active: true
+    excludes:
+      - '**/core/common/AndroidLogger.kt'

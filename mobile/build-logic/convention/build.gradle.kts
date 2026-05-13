@@ -36,6 +36,11 @@ dependencies {
     // catalog so the convention plugin classpath (JVM 11) doesn't trip over
     // Spotless 8's JDK 17 bytecode requirement.
     compileOnly(libs.spotless.gradle.plugin)
+    // detekt's Gradle plugin powers `openptv.detekt`. Same `compileOnly`
+    // pattern as the other tooling plugins above — the consumer build picks
+    // it up via the corresponding `apply false` declaration in the root
+    // `mobile/build.gradle.kts`.
+    compileOnly(libs.detekt.gradle.plugin)
 }
 
 gradlePlugin {
@@ -75,6 +80,10 @@ gradlePlugin {
         register("spotless") {
             id = "openptv.spotless"
             implementationClass = "ac.jfx.openptv.buildlogic.SpotlessConventionPlugin"
+        }
+        register("detekt") {
+            id = "openptv.detekt"
+            implementationClass = "ac.jfx.openptv.buildlogic.DetektConventionPlugin"
         }
     }
 }

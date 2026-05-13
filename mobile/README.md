@@ -31,6 +31,25 @@ need to opt in.
 recommendation is documented in
 [`../docs/mobile/00-conventions.md`](../docs/mobile/00-conventions.md#pre-commit).
 
+## Static analysis
+
+Detekt is wired into every Kotlin module the same way Spotless is — via the `openptv.detekt`
+convention plugin applied transitively through the android / jvm convention plugins. The shared
+config is `mobile/detekt.yml`; feature modules don't override it (it's the SSOT).
+
+```bash
+./gradlew detekt          # aggregated CI gate
+./gradlew :feature/search:detekt   # one module
+```
+
+Spotless owns formatting (ktlint), detekt owns structure (complexity, naming, magic numbers,
+potential bugs). The `formatting` ruleset is deliberately disabled to avoid two tools fighting
+over the same edits.
+
+Project-specific rules live in `:lint:detekt` and plug in through detekt's `RuleSetProvider` SPI.
+The current rule, `ForbidAndroidLog`, fails the build on any `import android.util.Log` outside
+`:core:common.AndroidLogger` — every other caller MUST inject `core.common.Logger`.
+
 ## Modules
 
 The project is a multi-module Gradle build following Android's three-layer architecture.
@@ -38,6 +57,7 @@ The project is a multi-module Gradle build following Android's three-layer archi
 - **`:app`** — application module. Composition root; hosts the entry-point Activity and the top-level navigation graph.
 - **`:feature:*`** — user-facing screens. One module per feature; each owns its own ViewModel, UI, and feature-local resources.
 - **`:core:*`** — shared libraries used by `:app` and `:feature:*`. Split by concern: data layer (repository contracts and implementations), design system, domain models, navigation, network, and shared test infrastructure.
+- **`:lint:detekt`** — project-specific detekt rules. Plugs into detekt's `RuleSetProvider` SPI.
 - **`:ui-test-hilt-manifest`** — minimal Hilt-aware Activity that Compose UI tests host themselves in.
 
 Dependency direction is strictly top-down: `:app` → `:feature:*` → `:core:*`. Feature modules don't depend on each other; cross-feature navigation goes through a shared `:core` module.

@@ -19,5 +19,10 @@ plugins {
     // `SpotlessExtension` at runtime. The root project still applies the
     // convention plugin below, which is what actually configures the formats.
     alias(libs.plugins.spotless) apply false
+    // Same `apply false` pattern for detekt: pulls the plugin jar onto every
+    // subproject's classpath so `openptv.detekt` can apply it by id. We don't
+    // apply detekt at the root project level because there's no Kotlin source
+    // here for it to analyse — only build scripts, which detekt doesn't lint.
+    alias(libs.plugins.detekt) apply false
     id("openptv.spotless")
 }
