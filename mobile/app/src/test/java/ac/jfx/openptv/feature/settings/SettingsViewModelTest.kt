@@ -1,46 +1,26 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.feature.settings
 
 import ac.jfx.openptv.core.data.test.FakeSettingsRepository
 import ac.jfx.openptv.core.model.AppSettings
+import ac.jfx.openptv.core.testing.util.MainDispatcherRule
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
-import org.junit.After
-import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
-@OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
-    private val settings =
-        FakeSettingsRepository(
+
+    @get:Rule
+    val mainDispatcherRule = MainDispatcherRule()
+
+    private val settings = FakeSettingsRepository().apply {
+        seed(
             AppSettings(
                 backendBaseUrl = "http://saved.local/api/v3/",
                 setupCompleted = true,
             ),
         )
-
-    @Before
-    fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
-    }
-
-    @After
-    fun tearDown() {
-        Dispatchers.resetMain()
     }
 
     @Test

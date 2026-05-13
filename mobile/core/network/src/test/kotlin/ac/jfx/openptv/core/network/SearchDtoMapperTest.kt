@@ -10,6 +10,9 @@
 package ac.jfx.openptv.core.network
 
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.network.model.SearchResponseDto
+import ac.jfx.openptv.core.network.model.StopDtoMother
+import ac.jfx.openptv.core.network.model.toDomain
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 

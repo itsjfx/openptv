@@ -1,13 +1,4 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
-package ac.jfx.openptv.core.network
+package ac.jfx.openptv.core.network.model
 
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
@@ -16,18 +7,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Wire types for `GET /api/v3/search/{term}`. Marked `internal` so DTOs never leak past the
- * network boundary; the rest of the app sees domain models from `core.model`.
- *
- * The PTV search response also carries `routes`, `outlets`, and a `status` block — Phase 02
- * only renders stops, so those fields are ignored. `Json { ignoreUnknownKeys = true }` in the
- * Hilt module means we don't have to mirror them here.
+ * Wire shape for an entry in `SearchResponseDto.stops`. Marked `internal` so DTOs never leak
+ * past the network boundary; the rest of the app sees `Stop` from `core.model`.
  */
-@Serializable
-internal data class SearchResponseDto(
-    val stops: List<StopDto> = emptyList(),
-)
-
 @Serializable
 internal data class StopDto(
     @SerialName("stop_id") val stopId: Int,
@@ -53,5 +35,3 @@ internal fun StopDto.toDomain(): Stop = Stop(
     latitude = stopLatitude,
     longitude = stopLongitude,
 )
-
-internal fun SearchResponseDto.toDomain(): List<Stop> = stops.map { it.toDomain() }

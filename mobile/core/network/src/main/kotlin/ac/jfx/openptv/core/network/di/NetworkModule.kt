@@ -1,14 +1,9 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
-package ac.jfx.openptv.core.network
+package ac.jfx.openptv.core.network.di
 
+import ac.jfx.openptv.core.network.BackendApiService
+import ac.jfx.openptv.core.network.BuildConfig
+import ac.jfx.openptv.core.network.RetrofitStopSearchDataSource
+import ac.jfx.openptv.core.network.StopSearchDataSource
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -79,7 +74,8 @@ internal object NetworkModule {
 
     @Provides
     @Singleton
-    internal fun provideBackendApiService(retrofit: Retrofit): BackendApiService = retrofit.create(BackendApiService::class.java)
+    internal fun provideBackendApiService(retrofit: Retrofit): BackendApiService =
+        retrofit.create(BackendApiService::class.java)
 
     // Retrofit demands a non-empty `baseUrl` at build time even if every endpoint uses
     // absolute `@Url` strings. The host is intentionally unreachable so a forgotten `@Url`

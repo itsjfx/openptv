@@ -21,17 +21,22 @@ import javax.inject.Singleton
 /**
  * Hand-written fake for [SettingsRepository]. In-memory backing — no DataStore, no IO.
  *
- * Two construction paths so this works inside the Hilt test graph AND inside plain JUnit
- * unit tests that need to seed initial state:
+ * One construction path: the parameterless `@Inject` primary, which Hilt uses inside the test
+ * graph and which plain JUnit tests can call directly (`FakeSettingsRepository()`). Tests that
+ * need a non-default starting state call [seed] right after construction:
  *
- * - **Hilt graph** uses the parameterless `@Inject` primary; the seed is the platform default.
- *   Tests inside `@HiltAndroidTest` flows obtain the single `@Singleton` instance via
- *   `@Inject lateinit var` and call [seed] to set the initial state per test.
- * - **Plain unit tests** call the secondary `constructor(initial:)` to get a fresh instance
- *   pre-seeded — the typical shape of ViewModel tests in `:feature:*`.
+ * ```
+ * val settings = FakeSettingsRepository().apply {
+ *     seed(AppSettings(backendBaseUrl = "...", setupCompleted = true))
+ * }
+ * ```
+ *
+ * NIA follows the same one-constructor-plus-`setX`/`seedX` shape on its fakes (e.g.
+ * `TestUserDataRepository` in `core/data-test`) — secondary constructors that just delegate to
+ * `setX(state)` are a code smell because the seam to mutate state already exists.
  */
 @Singleton
-class FakeSettingsRepository : SettingsRepository {
+class FakeSettingsRepository @Inject constructor() : SettingsRepository {
 
     private val state = MutableStateFlow(
         AppSettings(
@@ -40,13 +45,6 @@ class FakeSettingsRepository : SettingsRepository {
         ),
     )
     override val settings: Flow<AppSettings> = state.asStateFlow()
-
-    @Inject
-    constructor()
-
-    constructor(initial: AppSettings) : this() {
-        state.value = initial
-    }
 
     override suspend fun setBackendBaseUrl(url: String) {
         state.update { it.copy(backendBaseUrl = url) }

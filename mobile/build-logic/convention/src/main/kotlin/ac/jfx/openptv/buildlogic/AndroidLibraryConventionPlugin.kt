@@ -13,6 +13,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         with(target) {
             pluginManager.apply("com.android.library")
+            pluginManager.apply("openptv.android.lint")
             pluginManager.apply("openptv.spotless")
 
             extensions.configure<LibraryExtension> {

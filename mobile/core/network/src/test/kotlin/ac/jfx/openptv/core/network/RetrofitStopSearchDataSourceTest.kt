@@ -27,7 +27,11 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
  * Network-end of the stop-search path: real Retrofit, real OkHttp, [MockWebServer] for the wire.
  * Lives in `:core:network` because it tests the Retrofit-backed [StopSearchDataSource] which can
  * only be constructed within this module (`BackendApiService` is `internal`). The repository-end
- * coverage (Result error wrapping, settings lookup) lives in `:core:data`.
+ * coverage (Result error wrapping) lives in `:core:data`.
+ *
+ * `BackendUrlProvider` is injected as a `fun interface` lambda that returns the [MockWebServer]
+ * URL — exactly the seam the production graph uses, just sourced from a test fixture instead of
+ * `SettingsRepository`.
  */
 class RetrofitStopSearchDataSourceTest {
 
@@ -45,7 +49,10 @@ class RetrofitStopSearchDataSourceTest {
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(BackendApiService::class.java)
-        dataSource = RetrofitStopSearchDataSource(service)
+        dataSource = RetrofitStopSearchDataSource(
+            api = service,
+            backendUrl = BackendUrlProvider { baseUrl },
+        )
     }
 
     private companion object {
@@ -67,7 +74,7 @@ class RetrofitStopSearchDataSourceTest {
             ),
         )
 
-        val stops = dataSource.searchStops(baseUrl, "flinders")
+        val stops = dataSource.searchStops("flinders")
 
         assertThat(stops).hasSize(1)
         // Trim happens at the DTO -> domain boundary in `:core:network`, not in `:core:data`.
@@ -78,7 +85,7 @@ class RetrofitStopSearchDataSourceTest {
     fun `200 with empty list returns empty list`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
 
-        val stops = dataSource.searchStops(baseUrl, "zzz")
+        val stops = dataSource.searchStops("zzz")
 
         assertThat(stops).isEmpty()
     }
@@ -86,26 +93,26 @@ class RetrofitStopSearchDataSourceTest {
     @Test(expected = HttpException::class)
     fun `4xx propagates as HttpException`() = runTest {
         server.enqueue(MockResponse().setResponseCode(400))
-        dataSource.searchStops(baseUrl, "bad")
+        dataSource.searchStops("bad")
     }
 
     @Test(expected = HttpException::class)
     fun `5xx propagates as HttpException`() = runTest {
         server.enqueue(MockResponse().setResponseCode(502))
-        dataSource.searchStops(baseUrl, "oops")
+        dataSource.searchStops("oops")
     }
 
     @Test(expected = SerializationException::class)
     fun `malformed JSON propagates as SerializationException`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("not json"))
-        dataSource.searchStops(baseUrl, "anything")
+        dataSource.searchStops("anything")
     }
 
     @Test
     fun `request URL is composed from baseUrl plus encoded term`() = runTest {
         server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
 
-        dataSource.searchStops(baseUrl, "flinders")
+        dataSource.searchStops("flinders")
 
         val recorded = server.takeRequest()
         assertThat(recorded.path).isEqualTo("/api/v3/search/flinders")
