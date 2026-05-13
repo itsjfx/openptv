@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Stop-detail screen. Resource prefix matches the AGP `resourcePrefix` set by the
+         `openptv.android.library` convention plugin: every string in :feature:stop-detail
+         starts with `feature_stop_detail_`. -->
+    <string name="feature_stop_detail_title">Stop detail</string>
+    <string name="feature_stop_detail_back">Back</string>
+    <string name="feature_stop_detail_refresh">Refresh</string>
+    <string name="feature_stop_detail_loading">Loading departures…</string>
+    <string name="feature_stop_detail_empty">No upcoming departures.</string>
+    <string name="feature_stop_detail_empty_subtitle">Could be the last service of the day, or services are paused.</string>
+    <string name="feature_stop_detail_error">Couldn\'t load departures.</string>
+    <string name="feature_stop_detail_retry">Retry</string>
+    <string name="feature_stop_detail_as_of">As of %1$s</string>
+    <string name="feature_stop_detail_scheduled">scheduled %1$s</string>
+    <string name="feature_stop_detail_platform">platform %1$s</string>
+    <string name="feature_stop_detail_no_platform">no platform info</string>
+    <string name="feature_stop_detail_delay_indicator">+%1$d min</string>
+    <string name="feature_stop_detail_disruption">Disruption affects this route</string>
+    <string name="feature_stop_detail_disruption_snackbar">Disruption details land in Phase 10.</string>
+    <string name="feature_stop_detail_star_disabled">Favourite (coming in Phase 4)</string>
+    <string name="feature_stop_detail_serving_routes">Routes serving this stop</string>
+
+    <!-- Departure row content description. Slots: route number/name, direction destination,
+         relative time phrase ("in 3 minutes"), platform clause ("from platform 2" or empty). -->
+    <string name="feature_stop_detail_row_content_description">Route %1$s to %2$s, departing %3$s%4$s</string>
+    <string name="feature_stop_detail_row_platform_clause"> from platform %1$s</string>
+
+    <!-- Group header: route badge + direction destination. -->
+    <string name="feature_stop_detail_group_header">Route %1$s · %2$s</string>
+
+    <!-- Transport modes — duplicated from :feature:search rather than promoted to
+         :core:designsystem so the prefix invariant holds. Tiny string surface; the multi-feature
+         consolidation happens alongside the i18n pass. -->
+    <string name="feature_stop_detail_route_type_train">Train</string>
+    <string name="feature_stop_detail_route_type_tram">Tram</string>
+    <string name="feature_stop_detail_route_type_bus">Bus</string>
+    <string name="feature_stop_detail_route_type_vline">V/Line</string>
+    <string name="feature_stop_detail_route_type_night_bus">Night Bus</string>
+    <string name="feature_stop_detail_route_type_unknown">Stop</string>
+</resources>

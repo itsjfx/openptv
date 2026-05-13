@@ -4,10 +4,13 @@ import ac.jfx.openptv.R
 import ac.jfx.openptv.core.designsystem.LocalThemeMode
 import ac.jfx.openptv.core.designsystem.OpenPtvTheme
 import ac.jfx.openptv.core.designsystem.ThemeMode
+import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.navigation.AppNavKey
 import ac.jfx.openptv.feature.search.SearchScreen
 import ac.jfx.openptv.feature.settings.SettingsScreen
 import ac.jfx.openptv.feature.setup.SetupScreen
+import ac.jfx.openptv.feature.stopdetail.StopDetailRoute
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -81,7 +84,26 @@ private fun MainNav(
                     )
                 }
                 entry<AppNavKey.Search> {
-                    SearchScreen()
+                    SearchScreen(
+                        onStopSelected = { stop ->
+                            // Phase 03: replace the search-screen snackbar with real navigation
+                            // into stop detail. The screen now snackbar's on its own only as a
+                            // visual confirmation; the real action is the back-stack push.
+                            backStack.add(
+                                AppNavKey.StopDetail(
+                                    stopId = stop.id.value,
+                                    routeTypeCode = stop.routeType.toCode(),
+                                ),
+                            )
+                        },
+                    )
+                }
+                entry<AppNavKey.StopDetail> { key ->
+                    StopDetailRoute(
+                        stopId = StopId(key.stopId),
+                        routeType = RouteType.fromCode(key.routeTypeCode),
+                        onBack = { backStack.removeLastOrNull() },
+                    )
                 }
                 entry<AppNavKey.Settings> {
                     SettingsScreen(onBack = { backStack.removeLastOrNull() })
