@@ -1,6 +1,6 @@
-// `:core:common` — cross-cutting types (`Result`, `Logger`). Needs an Android
-// dep because `AndroidLogger` calls `android.util.Log` directly — and per
-// docs/mobile/00-conventions.md this is the ONLY module allowed to do that.
+// `:core:common` — cross-cutting types (`Result`, `Logger`, `RelativeTimeFormatter`).
+// Needs an Android dep because `AndroidLogger` calls `android.util.Log` directly —
+// and per docs/mobile/00-conventions.md this is the ONLY module allowed to do that.
 // The detekt rule that enforces it lands in #13.
 //
 // Hilt is applied so the `LoggerModule` `@Provides` here is reachable from
@@ -13,4 +13,13 @@ plugins {
 
 android {
     namespace = "ac.jfx.openptv.core.common"
+}
+
+dependencies {
+    // `RelativeTimeFormatter` exposes `kotlinx.datetime.Instant` / `Clock` in its public API,
+    // so the dep is `api` not `implementation`.
+    api(libs.kotlinx.datetime)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
 }
