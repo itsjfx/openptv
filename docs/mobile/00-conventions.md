@@ -103,7 +103,6 @@ A feature module:
 - **HTTP**: OkHttp `MockWebServer`. Never mock `OkHttpClient`.
 - **DB**: Room in-memory (`Room.inMemoryDatabaseBuilder`).
 - **Compose UI**: `createComposeRule` for module-local screens; `createAndroidComposeRule<HiltComponentActivity>()` (from `:ui-test-hilt-manifest`) for Hilt-injected screens.
-- **Screenshot**: Roborazzi on the JVM. Locked devices: `phone`, `phone_landscape`, `tablet`. Run on `:core:designsystem` + per-feature smoke screen.
 - **Hilt tests**: `@HiltAndroidTest`, `HiltAndroidRule`. Production fakes from `:core:data-test`; one-off test bindings via `@TestInstallIn` in the test source set.
 - **Object Mother template**:
   ```kotlin
@@ -120,11 +119,15 @@ A feature module:
 
 ## CI
 
-- GitHub Actions workflow `mobile-ci.yml`, triggered on PRs touching `mobile/**` or `gradle/**`.
-- Steps: `./gradlew :app:lintDebug spotlessCheck detekt test verifyRoborazziDebug dependencyGuard assembleDebug`.
-- Parallelism: separate jobs for `lint+spotless+detekt`, `unitTest`, `screenshotTest`, `dependencyGuard`.
-- Cache: Gradle build cache via `actions/setup-java` cache + `gradle/actions/setup-gradle`.
-- Release builds (tag-triggered) sign with a key from GitHub Actions secrets (`KEYSTORE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`), upload APK to GitHub Releases.
+- GitHub Actions workflow `.github/workflows/mobile-ci.yml`, triggered on PRs / `master` pushes
+  touching `mobile/**` or the workflow file itself.
+- Parallel jobs: `lint-spotless-detekt` (`:app:lintDebug spotlessCheck detekt`), `unit-test`
+  (`test`, uploads `mobile/**/build/reports/tests/` on failure), `dependency-guard`
+  (`:app:dependencyGuard`), and `assemble-debug` (`:app:assembleDebug`, uploads the debug
+  APK as artifact `app-debug-<sha>` for 14 days).
+- JDK 21 (`temurin`) via `actions/setup-java`; Gradle caching via `gradle/actions/setup-gradle@v4`
+  (defaults). `concurrency: cancel-in-progress` so superseded runs on the same PR get cancelled.
+- Release builds (tag-triggered) sign with a key from GitHub Actions secrets (`KEYSTORE`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`), upload APK to GitHub Releases — Phase 11.
 
 ## Style
 
