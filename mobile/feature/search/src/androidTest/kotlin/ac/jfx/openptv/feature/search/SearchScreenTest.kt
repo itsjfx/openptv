@@ -12,7 +12,6 @@ package ac.jfx.openptv.feature.search
 import ac.jfx.openptv.core.data.test.FakeStopSearchRepository
 import ac.jfx.openptv.core.testing.StopMother
 import ac.jfx.openptv.uitesthiltmanifest.HiltComponentActivity
-import androidx.activity.compose.setContent
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -34,7 +33,9 @@ import javax.inject.Inject
  * fake repository is the entire test seam.
  *
  * The Hilt rule has to run before the Compose rule (`order = 0`) so the graph is built by the
- * time `composeTestRule.activity.setContent { ... }` requests dependencies.
+ * time `composeTestRule.setContent { ... }` requests dependencies. We use the rule's
+ * `setContent` (not `activity.setContent`) because it dispatches onto the UI thread for us — the
+ * activity-level overload runs from the JUnit thread and trips `CalledFromWrongThreadException`.
  *
  * Sets the per-feature template every later feature copies. Same shape as NIA's
  * `feature/topic/.../TopicScreenTest.kt`.
@@ -72,7 +73,7 @@ class SearchScreenTest {
             ),
         )
 
-        composeTestRule.activity.setContent { SearchScreen() }
+        composeTestRule.setContent { SearchScreen() }
 
         composeTestRule
             .onNodeWithTag(TestTagQueryField)
@@ -104,7 +105,7 @@ class SearchScreenTest {
     fun emptyState_rendersEmptyMessage() {
         repository.enqueueSuccess(emptyList())
 
-        composeTestRule.activity.setContent { SearchScreen() }
+        composeTestRule.setContent { SearchScreen() }
 
         composeTestRule
             .onNodeWithTag(TestTagQueryField)
@@ -131,7 +132,7 @@ class SearchScreenTest {
     fun errorState_rendersNetworkErrorMessage() {
         repository.enqueueError(IOException("boom"))
 
-        composeTestRule.activity.setContent { SearchScreen() }
+        composeTestRule.setContent { SearchScreen() }
 
         composeTestRule
             .onNodeWithTag(TestTagQueryField)
