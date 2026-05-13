@@ -2,14 +2,13 @@ package ac.jfx.openptv.feature.stopdetail
 
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.model.Departure
-import ac.jfx.openptv.core.model.PlatformNumber
 import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.feature.stopdetail.R
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -27,7 +26,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -45,7 +43,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -151,10 +148,11 @@ internal fun StopDetailScreenContent(
                     IconButton(
                         onClick = { /* disabled */ },
                         enabled = false,
-                        modifier = Modifier.semantics {
-                            contentDescription =
-                                "Favourite (coming in Phase 4)"
-                        },
+                        modifier =
+                            Modifier.semantics {
+                                contentDescription =
+                                    "Favourite (coming in Phase 4)"
+                            },
                     ) {
                         Text(text = "☆", style = MaterialTheme.typography.titleLarge)
                     }
@@ -350,10 +348,11 @@ private fun DepartureRow(
     onDisruptionClicked: () -> Unit,
     onClicked: () -> Unit,
 ) {
-    val relative = timeFormatter.format(
-        scheduled = departure.scheduledDepartureUtc,
-        estimated = departure.estimatedDepartureUtc,
-    )
+    val relative =
+        timeFormatter.format(
+            scheduled = departure.scheduledDepartureUtc,
+            estimated = departure.estimatedDepartureUtc,
+        )
     val scheduled = departure.scheduledDepartureUtc.formatTimeOfDay()
     val platformClause =
         departure.platform?.let { platform ->
@@ -374,6 +373,11 @@ private fun DepartureRow(
         modifier =
             Modifier
                 .fillMaxWidth()
+                // Tap surfaces the run-detail destination in Phase 09; today the lambda is a
+                // pass-through so the row's clickable affordance is wired even though the
+                // Phase 9 destination doesn't exist yet. `clickable` keeps the row touchable
+                // in TalkBack as a single semantic element.
+                .clickable(onClick = onClicked)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .semantics { contentDescription = talkback }
                 .testTag(TestTagDepartureRow),
@@ -575,7 +579,3 @@ internal const val TestTagEmpty: String = "stop-detail-empty"
 internal const val TestTagError: String = "stop-detail-error"
 internal const val TestTagHeaderRetry: String = "stop-detail-header-retry"
 internal const val TestTagDeparturesRetry: String = "stop-detail-departures-retry"
-
-// Visible only to silence Detekt's unused-private rule on the colour helper below.
-@Suppress("unused")
-private val touchpoint: Color = Color.Transparent
