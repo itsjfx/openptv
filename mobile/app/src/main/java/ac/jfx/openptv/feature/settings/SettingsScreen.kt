@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.feature.settings
 
 import ac.jfx.openptv.R
@@ -71,10 +62,11 @@ internal fun SettingsScreenContent(
         },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 24.dp),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
@@ -85,9 +77,10 @@ internal fun SettingsScreenContent(
             OutlinedTextField(
                 value = state.draftUrl,
                 onValueChange = onDraftUrlChanged,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(TestTagBackendUrlField),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTagBackendUrlField),
                 label = { Text(stringResource(R.string.settings_backend_label)) },
                 supportingText = { Text(stringResource(R.string.settings_backend_helper)) },
                 singleLine = true,
@@ -96,9 +89,10 @@ internal fun SettingsScreenContent(
             Button(
                 onClick = onSave,
                 enabled = state.dirty && state.draftUrl.isNotBlank(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(TestTagSaveButton),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTagSaveButton),
             ) {
                 Text(stringResource(R.string.settings_save))
             }

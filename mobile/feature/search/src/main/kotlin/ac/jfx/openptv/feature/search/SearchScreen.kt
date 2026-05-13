@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.feature.search
 
 import ac.jfx.openptv.core.model.RouteType
@@ -84,43 +75,49 @@ internal fun SearchScreenContent(
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             OutlinedTextField(
                 value = query,
                 onValueChange = onQueryChanged,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 16.dp)
-                    .testTag(TestTagQueryField),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp)
+                        .testTag(TestTagQueryField),
                 label = { Text(stringResource(R.string.feature_search_field_label)) },
                 singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    imeAction = ImeAction.Search,
-                ),
+                keyboardOptions =
+                    androidx.compose.foundation.text.KeyboardOptions(
+                        imeAction = ImeAction.Search,
+                    ),
             )
 
             when (val state = uiState) {
-                SearchUiState.Idle -> CenteredMessage(
-                    text = stringResource(R.string.feature_search_idle_hint),
-                )
+                SearchUiState.Idle ->
+                    CenteredMessage(
+                        text = stringResource(R.string.feature_search_idle_hint),
+                    )
                 SearchUiState.Loading -> CenteredLoader()
-                SearchUiState.Empty -> CenteredMessage(
-                    text = stringResource(R.string.feature_search_empty),
-                )
-                is SearchUiState.Results -> StopList(
-                    stops = state.stops,
-                    onStopSelected = { stop ->
-                        onStopSelected(stop)
-                        scope.launch {
-                            snackbarHostState.showSnackbar(stop.name)
-                        }
-                    },
-                )
+                SearchUiState.Empty ->
+                    CenteredMessage(
+                        text = stringResource(R.string.feature_search_empty),
+                    )
+                is SearchUiState.Results ->
+                    StopList(
+                        stops = state.stops,
+                        onStopSelected = { stop ->
+                            onStopSelected(stop)
+                            scope.launch {
+                                snackbarHostState.showSnackbar(stop.name)
+                            }
+                        },
+                    )
                 is SearchUiState.Error -> CenteredMessage(text = state.reason)
             }
         }
@@ -150,17 +147,19 @@ private fun StopRow(
     onClick: () -> Unit,
 ) {
     val mode = stop.routeType.label()
-    val talkback = stringResource(
-        R.string.feature_search_row_content_description,
-        stop.name,
-        stop.suburb.ifBlank { stringResource(R.string.feature_search_unknown_suburb) },
-        mode,
-    )
+    val talkback =
+        stringResource(
+            R.string.feature_search_row_content_description,
+            stop.name,
+            stop.suburb.ifBlank { stringResource(R.string.feature_search_unknown_suburb) },
+            mode,
+        )
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 12.dp)
-            .semantics { contentDescription = talkback },
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp)
+                .semantics { contentDescription = talkback },
     ) {
         androidx.compose.foundation.layout.Row(
             modifier = Modifier.fillMaxWidth(),
@@ -169,8 +168,9 @@ private fun StopRow(
             Text(
                 text = mode,
                 style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier
-                    .padding(end = 12.dp),
+                modifier =
+                    Modifier
+                        .padding(end = 12.dp),
             )
             Column {
                 Text(stop.name, style = MaterialTheme.typography.bodyLarge)
@@ -201,14 +201,15 @@ private fun CenteredMessage(text: String) {
 }
 
 @Composable
-private fun RouteType.label(): String = when (this) {
-    RouteType.Train -> stringResource(R.string.feature_search_route_type_train)
-    RouteType.Tram -> stringResource(R.string.feature_search_route_type_tram)
-    RouteType.Bus -> stringResource(R.string.feature_search_route_type_bus)
-    RouteType.VLine -> stringResource(R.string.feature_search_route_type_vline)
-    RouteType.NightBus -> stringResource(R.string.feature_search_route_type_night_bus)
-    RouteType.Unknown -> stringResource(R.string.feature_search_route_type_unknown)
-}
+private fun RouteType.label(): String =
+    when (this) {
+        RouteType.Train -> stringResource(R.string.feature_search_route_type_train)
+        RouteType.Tram -> stringResource(R.string.feature_search_route_type_tram)
+        RouteType.Bus -> stringResource(R.string.feature_search_route_type_bus)
+        RouteType.VLine -> stringResource(R.string.feature_search_route_type_vline)
+        RouteType.NightBus -> stringResource(R.string.feature_search_route_type_night_bus)
+        RouteType.Unknown -> stringResource(R.string.feature_search_route_type_unknown)
+    }
 
 internal const val TestTagQueryField: String = "search-query-field"
 internal const val TestTagResults: String = "search-results-list"

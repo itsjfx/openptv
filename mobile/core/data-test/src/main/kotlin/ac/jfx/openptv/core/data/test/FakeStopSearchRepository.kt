@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.core.data.test
 
 import ac.jfx.openptv.core.common.Result
@@ -25,24 +16,26 @@ import javax.inject.Singleton
  * setUp() method would land on a different instance than the ViewModel ends up using.
  */
 @Singleton
-class FakeStopSearchRepository @Inject constructor() : StopSearchRepository {
-    private val queue: ArrayDeque<Result<List<Stop>>> = ArrayDeque()
-    val requestedTerms: MutableList<String> = mutableListOf()
+class FakeStopSearchRepository
+    @Inject
+    constructor() : StopSearchRepository {
+        private val queue: ArrayDeque<Result<List<Stop>>> = ArrayDeque()
+        val requestedTerms: MutableList<String> = mutableListOf()
 
-    fun enqueueResult(result: Result<List<Stop>>) {
-        queue.addLast(result)
-    }
+        fun enqueueResult(result: Result<List<Stop>>) {
+            queue.addLast(result)
+        }
 
-    fun enqueueSuccess(stops: List<Stop>) {
-        queue.addLast(Result.Success(stops))
-    }
+        fun enqueueSuccess(stops: List<Stop>) {
+            queue.addLast(Result.Success(stops))
+        }
 
-    fun enqueueError(throwable: Throwable) {
-        queue.addLast(Result.Error(throwable))
-    }
+        fun enqueueError(throwable: Throwable) {
+            queue.addLast(Result.Error(throwable))
+        }
 
-    override suspend fun searchStops(term: String): Result<List<Stop>> {
-        requestedTerms += term
-        return queue.removeFirstOrNull() ?: Result.Success(emptyList())
+        override suspend fun searchStops(term: String): Result<List<Stop>> {
+            requestedTerms += term
+            return queue.removeFirstOrNull() ?: Result.Success(emptyList())
+        }
     }
-}

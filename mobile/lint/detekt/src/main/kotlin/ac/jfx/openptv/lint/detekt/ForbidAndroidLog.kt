@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.lint.detekt
 
 import io.gitlab.arturbosch.detekt.api.CodeSmell
@@ -37,9 +28,9 @@ class ForbidAndroidLog(config: Config) : Rule(config) {
             id = ID,
             severity = Severity.Defect,
             description =
-            "Direct android.util.Log usage is forbidden. " +
-                "Inject ac.jfx.openptv.core.common.Logger instead. The only sanctioned " +
-                "Android Log call site is :core:common.AndroidLogger.",
+                "Direct android.util.Log usage is forbidden. " +
+                    "Inject ac.jfx.openptv.core.common.Logger instead. The only sanctioned " +
+                    "Android Log call site is :core:common.AndroidLogger.",
             debt = Debt.FIVE_MINS,
         )
 
