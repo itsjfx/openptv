@@ -13,6 +13,15 @@ plugins {
 
 android {
     namespace = "ac.jfx.openptv.feature.search"
+
+    defaultConfig {
+        // Library modules don't inherit `:app`'s instrumentation runner — AGP
+        // wires `testInstrumentationRunner` per-module from each library's own
+        // `defaultConfig`. Point it at `OpenPtvTestRunner` (in `:core:testing`)
+        // so `@HiltAndroidTest` swaps in `HiltTestApplication` for these
+        // androidTests. Mirrors NIA's per-feature wiring.
+        testInstrumentationRunner = "ac.jfx.openptv.core.testing.OpenPtvTestRunner"
+    }
 }
 
 dependencies {
@@ -38,4 +47,29 @@ dependencies {
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+
+    // Hilt-instrumented Compose UI tests. `:ui-test-hilt-manifest` exports the
+    // `HiltComponentActivity` host that `createAndroidComposeRule` launches;
+    // `:core:data-test` brings `FakeStopSearchRepository` + the `@TestInstallIn`
+    // module that swaps it in for the production binding; `:core:testing`
+    // brings the `StopMother` fixtures. `debugImplementation` for the host
+    // because AGP only merges debug manifests into androidTest APKs.
+    debugImplementation(project(":ui-test-hilt-manifest"))
+    androidTestImplementation(project(":core:testing"))
+    androidTestImplementation(project(":core:data-test"))
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.truth)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    // `ui-test-manifest` is the empty-manifest helper Compose needs at runtime
+    // for `ComponentActivity`-hosted UI tests. Has to be on `debugImplementation`
+    // so its manifest is merged into the test APK; placing it on
+    // `androidTestImplementation` doesn't merge the manifest.
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
+    androidTestImplementation(libs.hilt.android.testing)
+    kspAndroidTest(libs.hilt.compiler)
 }
