@@ -1,5 +1,13 @@
 package ac.jfx.openptv.ui
 
+import ac.jfx.openptv.R
+import ac.jfx.openptv.core.designsystem.LocalThemeMode
+import ac.jfx.openptv.core.designsystem.OpenPtvTheme
+import ac.jfx.openptv.core.designsystem.ThemeMode
+import ac.jfx.openptv.core.navigation.AppNavKey
+import ac.jfx.openptv.feature.search.SearchScreen
+import ac.jfx.openptv.feature.settings.SettingsScreen
+import ac.jfx.openptv.feature.setup.SetupScreen
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,37 +30,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
-import ac.jfx.openptv.R
-import ac.jfx.openptv.feature.search.SearchScreen
-import ac.jfx.openptv.feature.settings.SettingsScreen
-import ac.jfx.openptv.feature.setup.SetupScreen
-import ac.jfx.openptv.ui.theme.LocalThemeMode
-import ac.jfx.openptv.ui.theme.OpenPtvTheme
-import ac.jfx.openptv.ui.theme.ThemeMode
-import kotlinx.serialization.Serializable
-
-/**
- * Top-level navigation keys for the app. Each `data object` is a Navigation 3 destination key;
- * a later phase will move these into a dedicated `:core:navigation` module.
- */
-sealed interface AppNavKey : NavKey {
-    @Serializable
-    data object Home : AppNavKey
-
-    @Serializable
-    data object Search : AppNavKey
-
-    @Serializable
-    data object Settings : AppNavKey
-}
 
 /**
  * Root composable. Owns the theme-mode state (in-memory for the barebones cut; DataStore lands
- * in Phase 04) and gates the main navigation behind the first-run setup flow.
+ * in Phase 04) and gates the main navigation behind the first-run setup flow. Nav keys come from
+ * `:core:navigation` so feature modules can navigate to each other without depending on each
+ * other.
  */
 @Composable
 fun App(appViewModel: AppViewModel = hiltViewModel()) {

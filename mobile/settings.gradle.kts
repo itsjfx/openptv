@@ -28,3 +28,28 @@ dependencyResolutionManagement {
 rootProject.name = "openptv"
 
 include(":app")
+
+// `:core:*` — shared libraries. Each one has a single responsibility per
+// docs/mobile/00-conventions.md. `:core:domain` and `:core:ui` are intentionally
+// absent from this list: per the issue, modules with no code to host don't get
+// invented. They'll be added in the phase that introduces use cases / shared
+// Compose primitives.
+include(":core:common")
+include(":core:data")
+include(":core:data-test")
+include(":core:designsystem")
+include(":core:model")
+include(":core:navigation")
+include(":core:network")
+include(":core:testing")
+
+// `:feature:*` — single-screen features. Each one depends on `:core:domain`,
+// `:core:designsystem`, `:core:ui`, `:core:common`, `:core:navigation` (the
+// feature convention plugin guards those with `findProject` so missing ones are
+// a no-op, not a build break).
+include(":feature:search")
+
+// `:ui-test-hilt-manifest` — minimal Hilt-aware Activity that feature
+// androidTests host themselves in for Compose UI tests. Borrowed verbatim from
+// NIA.
+include(":ui-test-hilt-manifest")

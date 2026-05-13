@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Stop search screen. Resource prefix matches the AGP `resourcePrefix` set by the
+         `openptv.android.library` convention plugin: every string in :feature:search starts with
+         `feature_search_`. -->
+    <string name="feature_search_title">Search stops</string>
+    <string name="feature_search_field_label">Stop name or suburb</string>
+    <string name="feature_search_idle_hint">Start typing to search.</string>
+    <string name="feature_search_empty">No stops match that search.</string>
+    <string name="feature_search_row_open">Open</string>
+    <string name="feature_search_row_content_description">%1$s, %2$s, %3$s stop</string>
+    <string name="feature_search_unknown_suburb">unknown suburb</string>
+
+    <!-- Transport modes -->
+    <string name="feature_search_route_type_train">Train</string>
+    <string name="feature_search_route_type_tram">Tram</string>
+    <string name="feature_search_route_type_bus">Bus</string>
+    <string name="feature_search_route_type_vline">V/Line</string>
+    <string name="feature_search_route_type_night_bus">Night Bus</string>
+    <string name="feature_search_route_type_unknown">Stop</string>
+</resources>

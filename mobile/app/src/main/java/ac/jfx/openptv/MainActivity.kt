@@ -1,11 +1,11 @@
 package ac.jfx.openptv
 
+import ac.jfx.openptv.core.designsystem.OpenPtvTheme
+import ac.jfx.openptv.ui.App
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import ac.jfx.openptv.ui.App
-import ac.jfx.openptv.ui.theme.OpenPtvTheme
 import dagger.hilt.android.AndroidEntryPoint
 
 /**
