@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.feature.settings
 
 import ac.jfx.openptv.core.data.SettingsRepository
@@ -30,35 +21,35 @@ import javax.inject.Inject
  */
 @HiltViewModel
 class SettingsViewModel
-@Inject
-constructor(
-    private val settings: SettingsRepository,
-) : ViewModel() {
-    private val _uiState = MutableStateFlow(SettingsUiState())
-    val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+    @Inject
+    constructor(
+        private val settings: SettingsRepository,
+    ) : ViewModel() {
+        private val _uiState = MutableStateFlow(SettingsUiState())
+        val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            val current = settings.settings.first().backendBaseUrl
-            _uiState.update {
-                it.copy(savedUrl = current, draftUrl = current, loaded = true)
+        init {
+            viewModelScope.launch {
+                val current = settings.settings.first().backendBaseUrl
+                _uiState.update {
+                    it.copy(savedUrl = current, draftUrl = current, loaded = true)
+                }
+            }
+        }
+
+        fun onDraftUrlChanged(url: String) {
+            _uiState.update { it.copy(draftUrl = url) }
+        }
+
+        fun onSave() {
+            val state = _uiState.value
+            if (!state.dirty || state.draftUrl.isBlank()) return
+            viewModelScope.launch {
+                settings.setBackendBaseUrl(state.draftUrl)
+                _uiState.update { it.copy(savedUrl = it.draftUrl) }
             }
         }
     }
-
-    fun onDraftUrlChanged(url: String) {
-        _uiState.update { it.copy(draftUrl = url) }
-    }
-
-    fun onSave() {
-        val state = _uiState.value
-        if (!state.dirty || state.draftUrl.isBlank()) return
-        viewModelScope.launch {
-            settings.setBackendBaseUrl(state.draftUrl)
-            _uiState.update { it.copy(savedUrl = it.draftUrl) }
-        }
-    }
-}
 
 data class SettingsUiState(
     val savedUrl: String = "",

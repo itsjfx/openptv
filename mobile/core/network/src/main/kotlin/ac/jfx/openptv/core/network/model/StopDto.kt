@@ -27,11 +27,12 @@ internal data class StopDto(
  * `internal` plus the `:core:data` consumer call site means this is a friend-of-the-module API,
  * not a public API. Consumers in other modules go through the repository, not the mapper.
  */
-internal fun StopDto.toDomain(): Stop = Stop(
-    id = StopId(stopId),
-    name = stopName.trim(),
-    suburb = stopSuburb.trim(),
-    routeType = RouteType.fromCode(routeType),
-    latitude = stopLatitude,
-    longitude = stopLongitude,
-)
+internal fun StopDto.toDomain(): Stop =
+    Stop(
+        id = StopId(stopId),
+        name = stopName.trim(),
+        suburb = stopSuburb.trim(),
+        routeType = RouteType.fromCode(routeType),
+        latitude = stopLatitude,
+        longitude = stopLongitude,
+    )

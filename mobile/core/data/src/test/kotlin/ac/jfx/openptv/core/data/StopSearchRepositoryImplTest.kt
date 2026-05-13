@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
@@ -33,51 +24,57 @@ import java.util.concurrent.CancellationException
  * recorder is specific to this test class. Promoting it to `:core:data-test` would be premature.
  */
 class StopSearchRepositoryImplTest {
+    @Test
+    fun `success wraps mapped stops in Result Success`() =
+        runTest {
+            val expectedStops = listOf(StopMother.aStop().build())
+            val repo =
+                StopSearchRepositoryImpl(
+                    dataSource = FakeDataSource(returning = expectedStops),
+                )
+
+            val result = repo.searchStops("flinders")
+
+            assertThat(result).isInstanceOf(Result.Success::class.java)
+            assertThat((result as Result.Success).data).isEqualTo(expectedStops)
+        }
 
     @Test
-    fun `success wraps mapped stops in Result Success`() = runTest {
-        val expectedStops = listOf(StopMother.aStop().build())
-        val repo = StopSearchRepositoryImpl(
-            dataSource = FakeDataSource(returning = expectedStops),
-        )
+    fun `non-cancellation throwables become Result Error`() =
+        runTest {
+            val boom = IOException("network down")
+            val repo =
+                StopSearchRepositoryImpl(
+                    dataSource = FakeDataSource(throwing = boom),
+                )
 
-        val result = repo.searchStops("flinders")
+            val result = repo.searchStops("anything")
 
-        assertThat(result).isInstanceOf(Result.Success::class.java)
-        assertThat((result as Result.Success).data).isEqualTo(expectedStops)
-    }
-
-    @Test
-    fun `non-cancellation throwables become Result Error`() = runTest {
-        val boom = IOException("network down")
-        val repo = StopSearchRepositoryImpl(
-            dataSource = FakeDataSource(throwing = boom),
-        )
-
-        val result = repo.searchStops("anything")
-
-        assertThat(result).isInstanceOf(Result.Error::class.java)
-        assertThat((result as Result.Error).throwable).isSameInstanceAs(boom)
-    }
+            assertThat(result).isInstanceOf(Result.Error::class.java)
+            assertThat((result as Result.Error).throwable).isSameInstanceAs(boom)
+        }
 
     @Test(expected = CancellationException::class)
-    fun `cancellation propagates rather than being swallowed`() = runTest {
-        val repo = StopSearchRepositoryImpl(
-            dataSource = FakeDataSource(throwing = CancellationException("scope died")),
-        )
+    fun `cancellation propagates rather than being swallowed`() =
+        runTest {
+            val repo =
+                StopSearchRepositoryImpl(
+                    dataSource = FakeDataSource(throwing = CancellationException("scope died")),
+                )
 
-        repo.searchStops("flinders")
-    }
+            repo.searchStops("flinders")
+        }
 
     @Test
-    fun `term is passed through to the data source untouched`() = runTest {
-        val ds = FakeDataSource(returning = emptyList())
-        val repo = StopSearchRepositoryImpl(ds)
+    fun `term is passed through to the data source untouched`() =
+        runTest {
+            val ds = FakeDataSource(returning = emptyList())
+            val repo = StopSearchRepositoryImpl(ds)
 
-        repo.searchStops("flinders street")
+            repo.searchStops("flinders street")
 
-        assertThat(ds.calls).containsExactly("flinders street")
-    }
+            assertThat(ds.calls).containsExactly("flinders street")
+        }
 
     private class FakeDataSource(
         private val returning: List<Stop> = emptyList(),

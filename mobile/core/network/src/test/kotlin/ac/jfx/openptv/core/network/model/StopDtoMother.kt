@@ -9,7 +9,6 @@ package ac.jfx.openptv.core.network.model
  * See `~/.claude/skills/object-mother/skill.md` for the pattern spec.
  */
 internal class StopDtoMother private constructor() {
-
     companion object {
         private const val DEFAULT_ID = 1071
         private const val DEFAULT_NAME = "Flinders Street Railway Station"
@@ -30,19 +29,25 @@ internal class StopDtoMother private constructor() {
         private var stopLongitude: Double = DEFAULT_LONGITUDE
 
         fun withStopId(id: Int) = apply { this.stopId = id }
+
         fun withStopName(name: String) = apply { this.stopName = name }
+
         fun withStopSuburb(suburb: String) = apply { this.stopSuburb = suburb }
+
         fun withRouteType(code: Int) = apply { this.routeType = code }
+
         fun withStopLatitude(latitude: Double) = apply { this.stopLatitude = latitude }
+
         fun withStopLongitude(longitude: Double) = apply { this.stopLongitude = longitude }
 
-        fun build(): StopDto = StopDto(
-            stopId = stopId,
-            stopName = stopName,
-            stopSuburb = stopSuburb,
-            routeType = routeType,
-            stopLatitude = stopLatitude,
-            stopLongitude = stopLongitude,
-        )
+        fun build(): StopDto =
+            StopDto(
+                stopId = stopId,
+                stopName = stopName,
+                stopSuburb = stopSuburb,
+                routeType = routeType,
+                stopLatitude = stopLatitude,
+                stopLongitude = stopLongitude,
+            )
     }
 }

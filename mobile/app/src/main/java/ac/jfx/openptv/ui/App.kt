@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.ui
 
 import ac.jfx.openptv.R
@@ -59,10 +50,11 @@ fun App(appViewModel: AppViewModel = hiltViewModel()) {
             when (gate) {
                 GateState.Loading -> SplashLoader()
                 GateState.NeedsSetup -> SetupScreen(onSetupComplete = { /* gate flow flips */ })
-                GateState.Ready -> MainNav(
-                    themeMode = themeMode,
-                    onCycleTheme = { themeMode = themeMode.next() },
-                )
+                GateState.Ready ->
+                    MainNav(
+                        themeMode = themeMode,
+                        onCycleTheme = { themeMode = themeMode.next() },
+                    )
             }
         }
     }
@@ -78,22 +70,23 @@ private fun MainNav(
     NavDisplay(
         backStack = backStack,
         onBack = { backStack.removeLastOrNull() },
-        entryProvider = entryProvider {
-            entry<AppNavKey.Home> {
-                HomeScreen(
-                    themeMode = themeMode,
-                    onCycleTheme = onCycleTheme,
-                    onOpenSearch = { backStack.add(AppNavKey.Search) },
-                    onOpenSettings = { backStack.add(AppNavKey.Settings) },
-                )
-            }
-            entry<AppNavKey.Search> {
-                SearchScreen()
-            }
-            entry<AppNavKey.Settings> {
-                SettingsScreen(onBack = { backStack.removeLastOrNull() })
-            }
-        },
+        entryProvider =
+            entryProvider {
+                entry<AppNavKey.Home> {
+                    HomeScreen(
+                        themeMode = themeMode,
+                        onCycleTheme = onCycleTheme,
+                        onOpenSearch = { backStack.add(AppNavKey.Search) },
+                        onOpenSettings = { backStack.add(AppNavKey.Settings) },
+                    )
+                }
+                entry<AppNavKey.Search> {
+                    SearchScreen()
+                }
+                entry<AppNavKey.Settings> {
+                    SettingsScreen(onBack = { backStack.removeLastOrNull() })
+                }
+            },
     )
 }
 
@@ -101,9 +94,10 @@ private fun MainNav(
 private fun SplashLoader() {
     Scaffold { padding ->
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding),
             contentAlignment = Alignment.Center,
         ) {
             CircularProgressIndicator()
@@ -124,10 +118,11 @@ private fun HomeScreen(
 ) {
     Scaffold { paddingValues ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .padding(24.dp),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(24.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -154,24 +149,27 @@ private fun HomeScreen(
                 modifier = Modifier.padding(top = 16.dp),
             ) {
                 Text(
-                    text = stringResource(
-                        R.string.theme_mode_label,
-                        stringResource(themeMode.labelRes()),
-                    ),
+                    text =
+                        stringResource(
+                            R.string.theme_mode_label,
+                            stringResource(themeMode.labelRes()),
+                        ),
                 )
             }
         }
     }
 }
 
-private fun ThemeMode.next(): ThemeMode = when (this) {
-    ThemeMode.System -> ThemeMode.Light
-    ThemeMode.Light -> ThemeMode.Dark
-    ThemeMode.Dark -> ThemeMode.System
-}
+private fun ThemeMode.next(): ThemeMode =
+    when (this) {
+        ThemeMode.System -> ThemeMode.Light
+        ThemeMode.Light -> ThemeMode.Dark
+        ThemeMode.Dark -> ThemeMode.System
+    }
 
-private fun ThemeMode.labelRes(): Int = when (this) {
-    ThemeMode.System -> R.string.theme_mode_system
-    ThemeMode.Light -> R.string.theme_mode_light
-    ThemeMode.Dark -> R.string.theme_mode_dark
-}
+private fun ThemeMode.labelRes(): Int =
+    when (this) {
+        ThemeMode.System -> R.string.theme_mode_system
+        ThemeMode.Light -> R.string.theme_mode_light
+        ThemeMode.Dark -> R.string.theme_mode_dark
+    }
