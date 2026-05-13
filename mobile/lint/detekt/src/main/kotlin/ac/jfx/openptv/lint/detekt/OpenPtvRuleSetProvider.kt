@@ -12,12 +12,13 @@ import io.gitlab.arturbosch.detekt.api.RuleSetProvider
 class OpenPtvRuleSetProvider : RuleSetProvider {
     override val ruleSetId: String = RULE_SET_ID
 
-    override fun instance(config: Config): RuleSet = RuleSet(
-        ruleSetId,
-        listOf(
-            ForbidAndroidLog(config),
-        ),
-    )
+    override fun instance(config: Config): RuleSet =
+        RuleSet(
+            ruleSetId,
+            listOf(
+                ForbidAndroidLog(config),
+            ),
+        )
 
     companion object {
         const val RULE_SET_ID: String = "openptv"

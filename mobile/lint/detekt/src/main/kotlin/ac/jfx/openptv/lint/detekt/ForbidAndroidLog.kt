@@ -28,9 +28,9 @@ class ForbidAndroidLog(config: Config) : Rule(config) {
             id = ID,
             severity = Severity.Defect,
             description =
-            "Direct android.util.Log usage is forbidden. " +
-                "Inject ac.jfx.openptv.core.common.Logger instead. The only sanctioned " +
-                "Android Log call site is :core:common.AndroidLogger.",
+                "Direct android.util.Log usage is forbidden. " +
+                    "Inject ac.jfx.openptv.core.common.Logger instead. The only sanctioned " +
+                    "Android Log call site is :core:common.AndroidLogger.",
             debt = Debt.FIVE_MINS,
         )
 
