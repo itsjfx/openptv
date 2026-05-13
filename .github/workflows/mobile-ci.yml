@@ -50,23 +50,6 @@ jobs:
           name: test-reports
           path: mobile/**/build/reports/tests/
 
-  screenshot:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mobile
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: gradle/actions/setup-gradle@v6
-      # Roborazzi lands in #16. Until it ships, the gate is intentionally a no-op
-      # stub — `--dry-run` so the job pattern is real (cache warm, JDK ready) but
-      # nothing actually runs. #16 flips this to `verifyRoborazziDebug`.
-      - run: ./gradlew --dry-run verifyRoborazziDebug || true
-
   dependency-guard:
     runs-on: ubuntu-latest
     defaults:

@@ -9,9 +9,8 @@ package ac.jfx.openptv.core.common
  *
  * - **Testability.** Hilt swaps in a no-op or capturing fake for unit tests; static `Log.*` calls
  *   would have to be silenced via Robolectric or Powermock.
- * - **Future targets.** A Roborazzi / JVM unit-test variant of the app needs something that
- *   doesn't crash without an Android runtime; an interface lets each variant bind whatever it
- *   wants.
+ * - **Future targets.** A JVM unit-test variant of the app needs something that doesn't crash
+ *   without an Android runtime; an interface lets each variant bind whatever it wants.
  *
  * No Timber, deliberately — NIA also avoids Timber. The standard `Log` mapping is enough for
  * this project and one dep removed is one dep less to keep on a release-mode allowlist.
