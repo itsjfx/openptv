@@ -53,3 +53,9 @@ include(":feature:search")
 // androidTests host themselves in for Compose UI tests. Borrowed verbatim from
 // NIA.
 include(":ui-test-hilt-manifest")
+
+// `:lint:detekt` — project-specific detekt rules. JVM-only; consumed by the
+// `openptv.detekt` convention plugin via `detektPlugins(project(...))`. Not
+// the Android Lint framework — those custom checks would live under `:lint:android`
+// and ship in Phase 11 per the architecture spec.
+include(":lint:detekt")
