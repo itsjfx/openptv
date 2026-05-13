@@ -33,7 +33,10 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Custom runner lives in `:core:testing` and swaps the production `@HiltAndroidApp`
+        // for `HiltTestApplication`. Required for any `@HiltAndroidTest`. Mirrors NIA's
+        // `NiaTestRunner` wiring in `nowinandroid/app/build.gradle.kts`.
+        testInstrumentationRunner = "ac.jfx.openptv.core.testing.OpenPtvTestRunner"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -119,4 +122,10 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(libs.okhttp.mockwebserver)
+
+    // androidTest classpath needs `:core:testing` so the `OpenPtvTestRunner` declared in
+    // `testInstrumentationRunner` resolves at instrumented test time. No `androidTest`
+    // source set lives in `:app` yet, but having the dependency in place means the first
+    // androidTest someone adds will Just Work — same shape as NIA's `:app`.
+    androidTestImplementation(project(":core:testing"))
 }

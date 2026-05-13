@@ -24,5 +24,11 @@ plugins {
     // apply detekt at the root project level because there's no Kotlin source
     // here for it to analyse — only build scripts, which detekt doesn't lint.
     alias(libs.plugins.detekt) apply false
+    // Dependency Guard — applied directly in `:app/build.gradle.kts` (only the
+    // app rolls up the production APK classpath), but listed here `apply false`
+    // so every subproject sees the same plugin jar on its classpath. Mirrors
+    // NIA's root build script pattern of listing every used plugin with
+    // `apply false` so transitive plugin-dependency versions can't drift.
+    alias(libs.plugins.dependency.guard) apply false
     id("openptv.spotless")
 }

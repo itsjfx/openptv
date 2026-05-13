@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.feature.search
 
 import ac.jfx.openptv.core.data.test.FakeStopSearchRepository
@@ -28,7 +19,6 @@ import java.io.IOException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SearchViewModelTest {
-
     private val dispatcher = StandardTestDispatcher()
     private val repository = FakeStopSearchRepository()
     private lateinit var viewModel: SearchViewModel
@@ -45,92 +35,98 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun `initial state is Idle`() = runTest(dispatcher) {
-        viewModel.uiState.test {
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
-            cancelAndIgnoreRemainingEvents()
+    fun `initial state is Idle`() =
+        runTest(dispatcher) {
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun `single-character query triggers a search`() = runTest(dispatcher) {
-        repository.enqueueSuccess(listOf(StopMother.aStop().build()))
-        viewModel.uiState.test {
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
-            viewModel.onQueryChanged("f")
-            advanceTimeBy(350)
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
-            advanceUntilIdle()
-            assertThat(awaitItem()).isInstanceOf(SearchUiState.Results::class.java)
-            cancelAndIgnoreRemainingEvents()
+    fun `single-character query triggers a search`() =
+        runTest(dispatcher) {
+            repository.enqueueSuccess(listOf(StopMother.aStop().build()))
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                viewModel.onQueryChanged("f")
+                advanceTimeBy(350)
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
+                advanceUntilIdle()
+                assertThat(awaitItem()).isInstanceOf(SearchUiState.Results::class.java)
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(repository.requestedTerms).containsExactly("f")
         }
-        assertThat(repository.requestedTerms).containsExactly("f")
-    }
 
     @Test
-    fun `valid query transitions Loading then Results`() = runTest(dispatcher) {
-        repository.enqueueSuccess(listOf(StopMother.aStop().build()))
-        viewModel.uiState.test {
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
-            viewModel.onQueryChanged("flinders")
-            advanceTimeBy(350)
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
-            advanceUntilIdle()
-            val results = awaitItem()
-            assertThat(results).isInstanceOf(SearchUiState.Results::class.java)
-            assertThat((results as SearchUiState.Results).stops).hasSize(1)
-            cancelAndIgnoreRemainingEvents()
+    fun `valid query transitions Loading then Results`() =
+        runTest(dispatcher) {
+            repository.enqueueSuccess(listOf(StopMother.aStop().build()))
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                viewModel.onQueryChanged("flinders")
+                advanceTimeBy(350)
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
+                advanceUntilIdle()
+                val results = awaitItem()
+                assertThat(results).isInstanceOf(SearchUiState.Results::class.java)
+                assertThat((results as SearchUiState.Results).stops).hasSize(1)
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(repository.requestedTerms).containsExactly("flinders")
         }
-        assertThat(repository.requestedTerms).containsExactly("flinders")
-    }
 
     @Test
-    fun `valid query that returns empty list becomes Empty`() = runTest(dispatcher) {
-        repository.enqueueSuccess(emptyList())
-        viewModel.uiState.test {
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
-            viewModel.onQueryChanged("zzz")
-            advanceTimeBy(350)
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
-            advanceUntilIdle()
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Empty)
-            cancelAndIgnoreRemainingEvents()
+    fun `valid query that returns empty list becomes Empty`() =
+        runTest(dispatcher) {
+            repository.enqueueSuccess(emptyList())
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                viewModel.onQueryChanged("zzz")
+                advanceTimeBy(350)
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
+                advanceUntilIdle()
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Empty)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun `IOException becomes user-facing Error state`() = runTest(dispatcher) {
-        repository.enqueueError(IOException("boom"))
-        viewModel.uiState.test {
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
-            viewModel.onQueryChanged("flinders")
-            advanceTimeBy(350)
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
-            advanceUntilIdle()
-            val terminal = awaitItem()
-            assertThat(terminal).isInstanceOf(SearchUiState.Error::class.java)
-            assertThat((terminal as SearchUiState.Error).reason).contains("network")
-            cancelAndIgnoreRemainingEvents()
+    fun `IOException becomes user-facing Error state`() =
+        runTest(dispatcher) {
+            repository.enqueueError(IOException("boom"))
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                viewModel.onQueryChanged("flinders")
+                advanceTimeBy(350)
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
+                advanceUntilIdle()
+                val terminal = awaitItem()
+                assertThat(terminal).isInstanceOf(SearchUiState.Error::class.java)
+                assertThat((terminal as SearchUiState.Error).reason).contains("network")
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
 
     @Test
-    fun `fast keystrokes coalesce into one upstream call`() = runTest(dispatcher) {
-        repository.enqueueSuccess(listOf(StopMother.aStop().build()))
-        viewModel.uiState.test {
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
-            // Three rapid keystrokes within the debounce window.
-            viewModel.onQueryChanged("fli")
-            advanceTimeBy(50)
-            viewModel.onQueryChanged("flin")
-            advanceTimeBy(50)
-            viewModel.onQueryChanged("flinders")
-            advanceTimeBy(400)
-            assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
-            advanceUntilIdle()
-            awaitItem() // Results
-            cancelAndIgnoreRemainingEvents()
+    fun `fast keystrokes coalesce into one upstream call`() =
+        runTest(dispatcher) {
+            repository.enqueueSuccess(listOf(StopMother.aStop().build()))
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                // Three rapid keystrokes within the debounce window.
+                viewModel.onQueryChanged("fli")
+                advanceTimeBy(50)
+                viewModel.onQueryChanged("flin")
+                advanceTimeBy(50)
+                viewModel.onQueryChanged("flinders")
+                advanceTimeBy(400)
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
+                advanceUntilIdle()
+                awaitItem() // Results
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(repository.requestedTerms).containsExactly("flinders")
         }
-        assertThat(repository.requestedTerms).containsExactly("flinders")
-    }
 }

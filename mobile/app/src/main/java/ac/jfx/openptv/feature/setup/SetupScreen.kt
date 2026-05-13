@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.feature.setup
 
 import ac.jfx.openptv.R
@@ -75,11 +66,12 @@ internal fun SetupScreenContent(
         },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 24.dp)
-                .verticalScroll(rememberScrollState()),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 24.dp)
+                    .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Spacer(modifier = Modifier.height(8.dp))
@@ -110,9 +102,10 @@ internal fun SetupScreenContent(
                 OutlinedTextField(
                     value = state.customUrl,
                     onValueChange = onCustomUrlChanged,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag(TestTagCustomUrlField),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .testTag(TestTagCustomUrlField),
                     label = { Text(stringResource(R.string.setup_custom_field_label)) },
                     placeholder = { Text(stringResource(R.string.setup_custom_field_placeholder)) },
                     supportingText = { Text(stringResource(R.string.setup_custom_field_helper)) },
@@ -121,15 +114,16 @@ internal fun SetupScreenContent(
             }
 
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .selectable(
-                        selected = state.consentAccepted,
-                        onClick = { onConsentToggled(!state.consentAccepted) },
-                        role = Role.Checkbox,
-                    )
-                    .testTag(TestTagConsentRow)
-                    .padding(vertical = 8.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .selectable(
+                            selected = state.consentAccepted,
+                            onClick = { onConsentToggled(!state.consentAccepted) },
+                            role = Role.Checkbox,
+                        )
+                        .testTag(TestTagConsentRow)
+                        .padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Checkbox(
@@ -146,9 +140,10 @@ internal fun SetupScreenContent(
             Button(
                 onClick = onContinue,
                 enabled = state.canContinue,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(TestTagContinueButton),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTagContinueButton),
             ) {
                 Text(stringResource(R.string.setup_continue))
             }
@@ -167,15 +162,16 @@ private fun ServerChoiceRow(
     onClick: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .selectable(
-                selected = selected,
-                onClick = onClick,
-                role = Role.RadioButton,
-            )
-            .testTag(testTagFor(choice))
-            .padding(vertical = 8.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .selectable(
+                    selected = selected,
+                    onClick = onClick,
+                    role = Role.RadioButton,
+                )
+                .testTag(testTagFor(choice))
+                .padding(vertical = 8.dp),
         verticalAlignment = Alignment.Top,
     ) {
         RadioButton(selected = selected, onClick = null)
@@ -197,10 +193,11 @@ private fun ServerChoiceRow(
     }
 }
 
-private fun testTagFor(choice: ServerChoice): String = when (choice) {
-    ServerChoice.Default -> TestTagDefaultChoice
-    ServerChoice.Custom -> TestTagCustomChoice
-}
+private fun testTagFor(choice: ServerChoice): String =
+    when (choice) {
+        ServerChoice.Default -> TestTagDefaultChoice
+        ServerChoice.Custom -> TestTagCustomChoice
+    }
 
 internal const val TestTagDefaultChoice: String = "setup-default-choice"
 internal const val TestTagCustomChoice: String = "setup-custom-choice"

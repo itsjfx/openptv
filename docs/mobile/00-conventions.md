@@ -17,12 +17,12 @@ Shared rules every mobile phase assumes. Read once; phase docs reference this ra
 - **KSP** for all annotation processing (Hilt, Room, kotlinx.serialization). No KAPT.
 - **R8**: full mode in release builds.
 - **Lint / format**:
-  - **Spotless** (ktlint formatter) wired into every module via `openptv.spotless`. Apache-2.0
-    license header on every `.kt` source; `.gradle.kts` build scripts get ktlint-only so their
-    top-of-file explainer comments stay visible. Two ktlint rules are disabled in
-    `SpotlessConventionPlugin` (`standard:function-naming` so PascalCase composables are accepted,
-    `standard:property-naming` so `internal const val TestTagFoo` constants used by Compose UI
-    tests pass). Run `./gradlew spotlessApply` to fix, `./gradlew spotlessCheck` to verify.
+  - **Spotless** (ktlint formatter) wired into every module via `openptv.spotless`. Targets
+    `src/**/*.kt` and `*.gradle.kts`; when applied at the root project it also formats
+    `build-logic/convention/src/**/*.kt`. ktlint rule disables (composable / test naming, backing
+    properties, etc.) live in `mobile/.editorconfig` so the IDE and CLI see the same rule set —
+    mirrors NIA. ktlint version is pinned in `libs.versions.toml`. Run `./gradlew spotlessApply`
+    to fix, `./gradlew spotlessCheck` to verify.
   - **detekt** for static analysis (complexity, magic numbers, naming).
   - **Dependency Guard** baselines transitive deps for `:app` (catches accidental dep churn).
 

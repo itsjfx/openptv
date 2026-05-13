@@ -1,12 +1,3 @@
-/*
- * Copyright 2026 OpenPTV contributors.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- */
 package ac.jfx.openptv.core.datastore
 
 import ac.jfx.openptv.BuildConfig
@@ -35,34 +26,34 @@ import javax.inject.Singleton
  */
 @Singleton
 internal class SettingsRepositoryImpl
-@Inject
-constructor(
-    private val dataStore: DataStore<Preferences>,
-) : SettingsRepository {
-    override val settings: Flow<AppSettings> =
-        dataStore.data.map { prefs ->
-            AppSettings(
-                backendBaseUrl = prefs[KEY_BACKEND_BASE_URL] ?: BuildConfig.BACKEND_BASE_URL,
-                setupCompleted = prefs[KEY_SETUP_COMPLETED] == true,
-            )
+    @Inject
+    constructor(
+        private val dataStore: DataStore<Preferences>,
+    ) : SettingsRepository {
+        override val settings: Flow<AppSettings> =
+            dataStore.data.map { prefs ->
+                AppSettings(
+                    backendBaseUrl = prefs[KEY_BACKEND_BASE_URL] ?: BuildConfig.BACKEND_BASE_URL,
+                    setupCompleted = prefs[KEY_SETUP_COMPLETED] == true,
+                )
+            }
+
+        override suspend fun setBackendBaseUrl(url: String) {
+            dataStore.edit { prefs -> prefs[KEY_BACKEND_BASE_URL] = url.normalised() }
         }
 
-    override suspend fun setBackendBaseUrl(url: String) {
-        dataStore.edit { prefs -> prefs[KEY_BACKEND_BASE_URL] = url.normalised() }
-    }
+        override suspend fun completeSetup(url: String) {
+            dataStore.edit { prefs ->
+                prefs[KEY_BACKEND_BASE_URL] = url.normalised()
+                prefs[KEY_SETUP_COMPLETED] = true
+            }
+        }
 
-    override suspend fun completeSetup(url: String) {
-        dataStore.edit { prefs ->
-            prefs[KEY_BACKEND_BASE_URL] = url.normalised()
-            prefs[KEY_SETUP_COMPLETED] = true
+        private companion object {
+            val KEY_BACKEND_BASE_URL = stringPreferencesKey("backend_base_url")
+            val KEY_SETUP_COMPLETED = booleanPreferencesKey("setup_completed")
         }
     }
-
-    private companion object {
-        val KEY_BACKEND_BASE_URL = stringPreferencesKey("backend_base_url")
-        val KEY_SETUP_COMPLETED = booleanPreferencesKey("setup_completed")
-    }
-}
 
 /**
  * Retrofit treats a base URL without a trailing slash as relative to the parent path. Normalise
