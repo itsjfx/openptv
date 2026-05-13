@@ -19,21 +19,25 @@ import javax.inject.Inject
  * always render the Setup screen for a few ms, even for returning users.
  */
 @HiltViewModel
-class AppViewModel @Inject constructor(
-    settings: SettingsRepository,
-) : ViewModel() {
-
-    val gate: StateFlow<GateState> = settings.settings
-        .map { if (it.setupCompleted) GateState.Ready else GateState.NeedsSetup }
-        .stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.Eagerly,
-            initialValue = GateState.Loading,
-        )
-}
+class AppViewModel
+    @Inject
+    constructor(
+        settings: SettingsRepository,
+    ) : ViewModel() {
+        val gate: StateFlow<GateState> =
+            settings.settings
+                .map { if (it.setupCompleted) GateState.Ready else GateState.NeedsSetup }
+                .stateIn(
+                    scope = viewModelScope,
+                    started = SharingStarted.Eagerly,
+                    initialValue = GateState.Loading,
+                )
+    }
 
 sealed interface GateState {
     data object Loading : GateState
+
     data object NeedsSetup : GateState
+
     data object Ready : GateState
 }

@@ -20,35 +20,36 @@ import javax.inject.Inject
  * [SettingsUiState.savedUrl] — controls the enabled state of the Save button.
  */
 @HiltViewModel
-class SettingsViewModel @Inject constructor(
-    private val settings: SettingsRepository,
-) : ViewModel() {
+class SettingsViewModel
+    @Inject
+    constructor(
+        private val settings: SettingsRepository,
+    ) : ViewModel() {
+        private val _uiState = MutableStateFlow(SettingsUiState())
+        val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
-    private val _uiState = MutableStateFlow(SettingsUiState())
-    val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
+        init {
+            viewModelScope.launch {
+                val current = settings.settings.first().backendBaseUrl
+                _uiState.update {
+                    it.copy(savedUrl = current, draftUrl = current, loaded = true)
+                }
+            }
+        }
 
-    init {
-        viewModelScope.launch {
-            val current = settings.settings.first().backendBaseUrl
-            _uiState.update {
-                it.copy(savedUrl = current, draftUrl = current, loaded = true)
+        fun onDraftUrlChanged(url: String) {
+            _uiState.update { it.copy(draftUrl = url) }
+        }
+
+        fun onSave() {
+            val state = _uiState.value
+            if (!state.dirty || state.draftUrl.isBlank()) return
+            viewModelScope.launch {
+                settings.setBackendBaseUrl(state.draftUrl)
+                _uiState.update { it.copy(savedUrl = it.draftUrl) }
             }
         }
     }
-
-    fun onDraftUrlChanged(url: String) {
-        _uiState.update { it.copy(draftUrl = url) }
-    }
-
-    fun onSave() {
-        val state = _uiState.value
-        if (!state.dirty || state.draftUrl.isBlank()) return
-        viewModelScope.launch {
-            settings.setBackendBaseUrl(state.draftUrl)
-            _uiState.update { it.copy(savedUrl = it.draftUrl) }
-        }
-    }
-}
 
 data class SettingsUiState(
     val savedUrl: String = "",

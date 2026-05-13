@@ -16,6 +16,21 @@ Requires the Android SDK installed locally with `ANDROID_HOME` (or `sdk.dir` in 
 ./gradlew test
 ```
 
+## Formatting
+
+Spotless (ktlint) is wired into every Kotlin module via the `openptv.spotless` convention plugin —
+applied transitively through the android / jvm convention plugins, so individual modules don't
+need to opt in.
+
+```bash
+./gradlew spotlessApply   # rewrite anything off-style in place
+./gradlew spotlessCheck   # CI gate; fails on any drift
+```
+
+`spotlessApply` should be a no-op on a clean tree. CI runs `spotlessCheck`. A pre-commit hook
+recommendation is documented in
+[`../docs/mobile/00-conventions.md`](../docs/mobile/00-conventions.md#pre-commit).
+
 ## Modules
 
 The project is a multi-module Gradle build following Android's three-layer architecture.

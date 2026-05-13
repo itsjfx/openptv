@@ -14,6 +14,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
         with(target) {
             pluginManager.apply("com.android.library")
             pluginManager.apply("openptv.android.lint")
+            pluginManager.apply("openptv.spotless")
 
             extensions.configure<LibraryExtension> {
                 configureAndroidCommon(this)

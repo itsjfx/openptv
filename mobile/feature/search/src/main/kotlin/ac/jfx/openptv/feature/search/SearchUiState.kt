@@ -14,9 +14,13 @@ import ac.jfx.openptv.core.model.Stop
  */
 sealed interface SearchUiState {
     data object Idle : SearchUiState
+
     data object Loading : SearchUiState
+
     data object Empty : SearchUiState
+
     data class Results(val stops: List<Stop>) : SearchUiState
+
     data class Error(val reason: String) : SearchUiState
 }
 

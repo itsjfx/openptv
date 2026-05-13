@@ -21,5 +21,7 @@ import retrofit2.http.Url
  */
 internal interface BackendApiService {
     @GET
-    suspend fun searchStops(@Url url: String): SearchResponseDto
+    suspend fun searchStops(
+        @Url url: String,
+    ): SearchResponseDto
 }

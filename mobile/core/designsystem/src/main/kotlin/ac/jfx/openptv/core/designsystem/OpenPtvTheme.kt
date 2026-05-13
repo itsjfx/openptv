@@ -37,18 +37,20 @@ fun OpenPtvTheme(
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
-    val useDark = when (themeMode) {
-        ThemeMode.System -> systemDark
-        ThemeMode.Light -> false
-        ThemeMode.Dark -> true
-    }
+    val useDark =
+        when (themeMode) {
+            ThemeMode.System -> systemDark
+            ThemeMode.Light -> false
+            ThemeMode.Dark -> true
+        }
 
-    val colorScheme: ColorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        val ctx = LocalContext.current
-        if (useDark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-    } else {
-        if (useDark) darkColorScheme() else lightColorScheme()
-    }
+    val colorScheme: ColorScheme =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val ctx = LocalContext.current
+            if (useDark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
+        } else {
+            if (useDark) darkColorScheme() else lightColorScheme()
+        }
 
     MaterialTheme(
         colorScheme = colorScheme,

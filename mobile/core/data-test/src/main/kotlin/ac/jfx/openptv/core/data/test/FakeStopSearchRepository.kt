@@ -16,24 +16,26 @@ import javax.inject.Singleton
  * setUp() method would land on a different instance than the ViewModel ends up using.
  */
 @Singleton
-class FakeStopSearchRepository @Inject constructor() : StopSearchRepository {
-    private val queue: ArrayDeque<Result<List<Stop>>> = ArrayDeque()
-    val requestedTerms: MutableList<String> = mutableListOf()
+class FakeStopSearchRepository
+    @Inject
+    constructor() : StopSearchRepository {
+        private val queue: ArrayDeque<Result<List<Stop>>> = ArrayDeque()
+        val requestedTerms: MutableList<String> = mutableListOf()
 
-    fun enqueueResult(result: Result<List<Stop>>) {
-        queue.addLast(result)
-    }
+        fun enqueueResult(result: Result<List<Stop>>) {
+            queue.addLast(result)
+        }
 
-    fun enqueueSuccess(stops: List<Stop>) {
-        queue.addLast(Result.Success(stops))
-    }
+        fun enqueueSuccess(stops: List<Stop>) {
+            queue.addLast(Result.Success(stops))
+        }
 
-    fun enqueueError(throwable: Throwable) {
-        queue.addLast(Result.Error(throwable))
-    }
+        fun enqueueError(throwable: Throwable) {
+            queue.addLast(Result.Error(throwable))
+        }
 
-    override suspend fun searchStops(term: String): Result<List<Stop>> {
-        requestedTerms += term
-        return queue.removeFirstOrNull() ?: Result.Success(emptyList())
+        override suspend fun searchStops(term: String): Result<List<Stop>> {
+            requestedTerms += term
+            return queue.removeFirstOrNull() ?: Result.Success(emptyList())
+        }
     }
-}

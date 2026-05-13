@@ -25,7 +25,5 @@ import javax.inject.Singleton
 internal abstract class AppDataModule {
     @Binds
     @Singleton
-    internal abstract fun bindSettingsRepository(
-        impl: SettingsRepositoryImpl,
-    ): SettingsRepository
+    internal abstract fun bindSettingsRepository(impl: SettingsRepositoryImpl): SettingsRepository
 }

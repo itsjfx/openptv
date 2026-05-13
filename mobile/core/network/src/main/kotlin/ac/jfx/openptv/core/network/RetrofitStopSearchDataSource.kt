@@ -17,13 +17,15 @@ import javax.inject.Inject
  * URL-encoding the search term protects against terms containing `/` or `?` reaching the wire
  * untouched and against a misbehaving terminal-comma-on-end.
  */
-internal class RetrofitStopSearchDataSource @Inject constructor(
-    private val api: BackendApiService,
-    private val backendUrl: BackendUrlProvider,
-) : StopSearchDataSource {
-    override suspend fun searchStops(term: String): List<Stop> {
-        val baseUrl = backendUrl.backendBaseUrl()
-        val encodedTerm = URLEncoder.encode(term, Charsets.UTF_8.name())
-        return api.searchStops("${baseUrl}search/$encodedTerm").toDomain()
+internal class RetrofitStopSearchDataSource
+    @Inject
+    constructor(
+        private val api: BackendApiService,
+        private val backendUrl: BackendUrlProvider,
+    ) : StopSearchDataSource {
+        override suspend fun searchStops(term: String): List<Stop> {
+            val baseUrl = backendUrl.backendBaseUrl()
+            val encodedTerm = URLEncoder.encode(term, Charsets.UTF_8.name())
+            return api.searchStops("${baseUrl}search/$encodedTerm").toDomain()
+        }
     }
-}

@@ -13,16 +13,16 @@ import org.junit.Test
  * whitespace cleanup behaviour because PTV emits `"20 Matthew Flinders Ave "` in real responses.
  */
 class SearchDtoMapperTest {
-
     @Test
     fun `maps every documented route_type code`() {
-        val pairs = listOf(
-            0 to RouteType.Train,
-            1 to RouteType.Tram,
-            2 to RouteType.Bus,
-            3 to RouteType.VLine,
-            4 to RouteType.NightBus,
-        )
+        val pairs =
+            listOf(
+                0 to RouteType.Train,
+                1 to RouteType.Tram,
+                2 to RouteType.Bus,
+                3 to RouteType.VLine,
+                4 to RouteType.NightBus,
+            )
         pairs.forEach { (code, expected) ->
             assertThat(RouteType.fromCode(code)).isEqualTo(expected)
         }
@@ -35,10 +35,11 @@ class SearchDtoMapperTest {
 
     @Test
     fun `StopDto trims trailing whitespace on name and suburb`() {
-        val dto = StopDtoMother.aStopDto()
-            .withStopName("Flinders Street Railway Station ")
-            .withStopSuburb("Melbourne City  ")
-            .build()
+        val dto =
+            StopDtoMother.aStopDto()
+                .withStopName("Flinders Street Railway Station ")
+                .withStopSuburb("Melbourne City  ")
+                .build()
 
         val stop = dto.toDomain()
 
@@ -56,12 +57,14 @@ class SearchDtoMapperTest {
 
     @Test
     fun `mapper preserves entries that share a stop_id but differ in route_type`() {
-        val response = SearchResponseDto(
-            stops = listOf(
-                StopDtoMother.aStopDto().withRouteType(0).build(),
-                StopDtoMother.aStopDto().withRouteType(1).build(),
-            ),
-        )
+        val response =
+            SearchResponseDto(
+                stops =
+                    listOf(
+                        StopDtoMother.aStopDto().withRouteType(0).build(),
+                        StopDtoMother.aStopDto().withRouteType(1).build(),
+                    ),
+            )
 
         val stops = response.toDomain()
 

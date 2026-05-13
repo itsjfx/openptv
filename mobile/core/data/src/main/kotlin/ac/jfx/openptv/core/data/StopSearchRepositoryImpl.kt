@@ -15,14 +15,17 @@ import javax.inject.Inject
  * so [CancellationException] is rethrown rather than swallowed into [Result.Error] — the
  * conventional shape for catch-all blocks in coroutines.
  */
-internal class StopSearchRepositoryImpl @Inject constructor(
-    private val dataSource: StopSearchDataSource,
-) : StopSearchRepository {
-    override suspend fun searchStops(term: String): Result<List<Stop>> = try {
-        Result.Success(dataSource.searchStops(term))
-    } catch (cancellation: CancellationException) {
-        throw cancellation
-    } catch (t: Throwable) {
-        Result.Error(t)
+internal class StopSearchRepositoryImpl
+    @Inject
+    constructor(
+        private val dataSource: StopSearchDataSource,
+    ) : StopSearchRepository {
+        override suspend fun searchStops(term: String): Result<List<Stop>> =
+            try {
+                Result.Success(dataSource.searchStops(term))
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (t: Throwable) {
+                Result.Error(t)
+            }
     }
-}

@@ -27,30 +27,32 @@ import javax.inject.Singleton
  * `setX(state)` are a code smell because the seam to mutate state already exists.
  */
 @Singleton
-class FakeSettingsRepository @Inject constructor() : SettingsRepository {
+class FakeSettingsRepository
+    @Inject
+    constructor() : SettingsRepository {
+        private val state =
+            MutableStateFlow(
+                AppSettings(
+                    backendBaseUrl = "http://test.local/api/v3/",
+                    setupCompleted = true,
+                ),
+            )
+        override val settings: Flow<AppSettings> = state.asStateFlow()
 
-    private val state = MutableStateFlow(
-        AppSettings(
-            backendBaseUrl = "http://test.local/api/v3/",
-            setupCompleted = true,
-        ),
-    )
-    override val settings: Flow<AppSettings> = state.asStateFlow()
+        override suspend fun setBackendBaseUrl(url: String) {
+            state.update { it.copy(backendBaseUrl = url) }
+        }
 
-    override suspend fun setBackendBaseUrl(url: String) {
-        state.update { it.copy(backendBaseUrl = url) }
+        override suspend fun completeSetup(url: String) {
+            state.update { it.copy(backendBaseUrl = url, setupCompleted = true) }
+        }
+
+        /**
+         * Seed the in-memory store for a test that needs a particular initial state. Calling this
+         * resets both the URL and the setup flag in a single transaction so a test never observes
+         * an inconsistent intermediate state.
+         */
+        fun seed(settings: AppSettings) {
+            state.value = settings
+        }
     }
-
-    override suspend fun completeSetup(url: String) {
-        state.update { it.copy(backendBaseUrl = url, setupCompleted = true) }
-    }
-
-    /**
-     * Seed the in-memory store for a test that needs a particular initial state. Calling this
-     * resets both the URL and the setup flag in a single transaction so a test never observes
-     * an inconsistent intermediate state.
-     */
-    fun seed(settings: AppSettings) {
-        state.value = settings
-    }
-}

@@ -22,15 +22,15 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 internal object DataStoreModule {
-
     @Provides
     @Singleton
     fun providePreferencesDataStore(
         @ApplicationContext context: Context,
-    ): DataStore<Preferences> = PreferenceDataStoreFactory.create(
-        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-        produceFile = { context.preferencesDataStoreFile(PREFS_NAME) },
-    )
+    ): DataStore<Preferences> =
+        PreferenceDataStoreFactory.create(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+            produceFile = { context.preferencesDataStoreFile(PREFS_NAME) },
+        )
 
     private const val PREFS_NAME = "openptv_settings"
 }

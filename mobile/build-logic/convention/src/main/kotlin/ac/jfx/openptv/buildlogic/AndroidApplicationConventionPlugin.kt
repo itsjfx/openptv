@@ -14,6 +14,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
         with(target) {
             pluginManager.apply("com.android.application")
             pluginManager.apply("openptv.android.lint")
+            pluginManager.apply("openptv.spotless")
 
             extensions.configure<ApplicationExtension> {
                 configureAndroidCommon(this)

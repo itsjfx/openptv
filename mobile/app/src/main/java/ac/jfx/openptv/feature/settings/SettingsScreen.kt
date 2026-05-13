@@ -62,10 +62,11 @@ internal fun SettingsScreenContent(
         },
     ) { padding ->
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 24.dp),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
@@ -76,9 +77,10 @@ internal fun SettingsScreenContent(
             OutlinedTextField(
                 value = state.draftUrl,
                 onValueChange = onDraftUrlChanged,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(TestTagBackendUrlField),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTagBackendUrlField),
                 label = { Text(stringResource(R.string.settings_backend_label)) },
                 supportingText = { Text(stringResource(R.string.settings_backend_helper)) },
                 singleLine = true,
@@ -87,9 +89,10 @@ internal fun SettingsScreenContent(
             Button(
                 onClick = onSave,
                 enabled = state.dirty && state.draftUrl.isNotBlank(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag(TestTagSaveButton),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTagSaveButton),
             ) {
                 Text(stringResource(R.string.settings_save))
             }

@@ -26,14 +26,15 @@ enum class RouteType {
     ;
 
     companion object {
-        fun fromCode(code: Int): RouteType = when (code) {
-            0 -> Train
-            1 -> Tram
-            2 -> Bus
-            3 -> VLine
-            4 -> NightBus
-            else -> Unknown
-        }
+        fun fromCode(code: Int): RouteType =
+            when (code) {
+                0 -> Train
+                1 -> Tram
+                2 -> Bus
+                3 -> VLine
+                4 -> NightBus
+                else -> Unknown
+            }
     }
 }
 

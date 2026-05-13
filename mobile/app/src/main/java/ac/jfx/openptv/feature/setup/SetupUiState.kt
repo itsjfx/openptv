@@ -16,10 +16,11 @@ data class SetupUiState(
     val customUrl: String = "",
     val consentAccepted: Boolean = false,
 ) {
-    val effectiveUrl: String = when (serverChoice) {
-        ServerChoice.Default -> defaultUrl
-        ServerChoice.Custom -> customUrl
-    }
+    val effectiveUrl: String =
+        when (serverChoice) {
+            ServerChoice.Default -> defaultUrl
+            ServerChoice.Custom -> customUrl
+        }
 
     val canContinue: Boolean = consentAccepted && effectiveUrl.isNotBlank()
 }

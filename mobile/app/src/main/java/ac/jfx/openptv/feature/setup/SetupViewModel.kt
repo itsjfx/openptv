@@ -22,38 +22,39 @@ import javax.inject.Inject
  * the setup screen as soon as the write commits.
  */
 @HiltViewModel
-class SetupViewModel @Inject constructor(
-    private val settings: SettingsRepository,
-) : ViewModel() {
+class SetupViewModel
+    @Inject
+    constructor(
+        private val settings: SettingsRepository,
+    ) : ViewModel() {
+        private val _uiState = MutableStateFlow(SetupUiState(defaultUrl = ""))
+        val uiState: StateFlow<SetupUiState> = _uiState.asStateFlow()
 
-    private val _uiState = MutableStateFlow(SetupUiState(defaultUrl = ""))
-    val uiState: StateFlow<SetupUiState> = _uiState.asStateFlow()
+        init {
+            viewModelScope.launch {
+                val current = settings.settings.first()
+                _uiState.update { it.copy(defaultUrl = current.backendBaseUrl) }
+            }
+        }
 
-    init {
-        viewModelScope.launch {
-            val current = settings.settings.first()
-            _uiState.update { it.copy(defaultUrl = current.backendBaseUrl) }
+        fun onServerChoiceChanged(choice: ServerChoice) {
+            _uiState.update { it.copy(serverChoice = choice) }
+        }
+
+        fun onCustomUrlChanged(url: String) {
+            _uiState.update { it.copy(customUrl = url) }
+        }
+
+        fun onConsentToggled(accepted: Boolean) {
+            _uiState.update { it.copy(consentAccepted = accepted) }
+        }
+
+        fun completeSetup(onDone: () -> Unit) {
+            val state = _uiState.value
+            if (!state.canContinue) return
+            viewModelScope.launch {
+                settings.completeSetup(state.effectiveUrl)
+                onDone()
+            }
         }
     }
-
-    fun onServerChoiceChanged(choice: ServerChoice) {
-        _uiState.update { it.copy(serverChoice = choice) }
-    }
-
-    fun onCustomUrlChanged(url: String) {
-        _uiState.update { it.copy(customUrl = url) }
-    }
-
-    fun onConsentToggled(accepted: Boolean) {
-        _uiState.update { it.copy(consentAccepted = accepted) }
-    }
-
-    fun completeSetup(onDone: () -> Unit) {
-        val state = _uiState.value
-        if (!state.canContinue) return
-        viewModelScope.launch {
-            settings.completeSetup(state.effectiveUrl)
-            onDone()
-        }
-    }
-}
