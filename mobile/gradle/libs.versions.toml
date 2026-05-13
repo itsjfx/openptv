@@ -52,6 +52,9 @@ androidxTestRunner = "1.7.0"
 # uses ktlint internally, so the surface configured under `openptv.spotless`
 # stays identical.
 spotless = "7.0.4"
+# ktlint version Spotless drives. Pinned (vs. Spotless's bundled default) so
+# the formatter is reproducible across machines and CI. Matches NIA.
+ktlint = "1.4.0"
 
 [libraries]
 # AndroidX core

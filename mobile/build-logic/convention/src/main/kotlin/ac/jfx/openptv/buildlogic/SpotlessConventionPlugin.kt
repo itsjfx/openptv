@@ -5,53 +5,50 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.kotlin.dsl.configure
 
-// `openptv.spotless` — applies `com.diffplug.spotless` to every Kotlin module
-// and configures the same ktlint + license-header formats everywhere. Each
-// Android / JVM convention plugin re-applies this one so individual modules
-// don't have to opt in, matching NIA's pattern.
+// `openptv.spotless` — applies `com.diffplug.spotless` and configures the same
+// ktlint format everywhere. Re-applied by every Android / JVM convention plugin
+// so individual modules don't have to opt in, matching NIA's pattern.
 //
-// Targets:
-//   - `**/*.kt`        : ktlint + Apache-2.0 header.
-//   - `**/*.kts`       : ktlint only. Build scripts don't get a header so the
-//                        top-of-file comment that explains what each module is
-//                        stays visible.
+// When applied to the root project, also formats `build-logic/convention`'s
+// Kotlin sources and the `*.gradle.kts` files at the root + under `build-logic`.
+// NIA splits this into a separate `configureSpotlessForRootProject` function;
+// we do it inline because we don't need the per-target divergence (no XML
+// header to attach, no Apache header anywhere).
 //
-// Editorconfig overrides are intentionally absent — ktlint defaults until a
-// real rule starts biting.
-// Two ktlint rules clash with idiomatic Compose / Android code in this repo:
-//
-//   - `standard:function-naming` flags `@Composable fun App(...)`. Composables
-//     are PascalCase by convention; the Compose lint catches the inverse case.
-//   - `standard:property-naming` flags `internal const val TestTagFoo` style
-//     constants used by Compose UI tests. Android / Compose-land already
-//     standardised on PascalCase here.
-//
-// Both are well-known false positives. Mirrors what NIA's `.editorconfig`
-// already disables. If anyone wants stricter checking later, drop these
-// overrides and run `spotlessApply`.
-private val ktlintOverrides: Map<String, String> = mapOf(
-    "ktlint_standard_function-naming" to "disabled",
-    "ktlint_standard_property-naming" to "disabled",
-)
-
+// ktlint rule disables (composable / test naming, property-naming, etc.) live
+// in the top-level `.editorconfig` so the IDE and CLI see the same rule set.
+// Matches NIA.
 class SpotlessConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         with(target) {
             pluginManager.apply("com.diffplug.spotless")
 
-            val licenseHeaderFile = rootProject.file("spotless/license-header.kt")
+            val ktlintVersion = libs.findVersion("ktlint").get().requiredVersion
+            val isRoot = target == rootProject
 
             extensions.configure<SpotlessExtension> {
                 kotlin {
-                    target("src/**/*.kt")
-                    targetExclude("**/build/**", "**/generated/**")
-                    ktlint().editorConfigOverride(ktlintOverrides)
-                    licenseHeaderFile(licenseHeaderFile)
+                    if (isRoot) {
+                        target("build-logic/convention/src/**/*.kt")
+                    } else {
+                        target("src/**/*.kt")
+                        targetExclude("**/build/**", "**/generated/**")
+                    }
+                    ktlint(ktlintVersion)
+                    endWithNewline()
                 }
                 kotlinGradle {
-                    target("*.gradle.kts", "src/**/*.gradle.kts")
-                    targetExclude("**/build/**")
-                    ktlint().editorConfigOverride(ktlintOverrides)
+                    if (isRoot) {
+                        target(
+                            "*.gradle.kts",
+                            "build-logic/*.gradle.kts",
+                            "build-logic/convention/*.gradle.kts",
+                        )
+                    } else {
+                        target("*.gradle.kts")
+                    }
+                    ktlint(ktlintVersion)
+                    endWithNewline()
                 }
             }
         }
