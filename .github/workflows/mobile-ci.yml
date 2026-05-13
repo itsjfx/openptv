@@ -60,6 +60,7 @@ jobs:
         with:
           name: test-reports
           path: mobile/**/build/reports/tests/
+          retention-days: 3
 
   dependency-guard:
     runs-on: ubuntu-latest
@@ -93,7 +94,7 @@ jobs:
           name: app-debug-${{ github.sha }}
           path: mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
   # Opt-in: runs the Hilt-instrumented Compose UI tests in :feature:search on
   # a hardware-accelerated AOSP emulator via `reactivecircus/android-emulator-runner`.
@@ -144,3 +145,4 @@ jobs:
         with:
           name: connected-test-reports-${{ matrix.api-level }}
           path: mobile/feature/search/build/reports/androidTests/connected/
+          retention-days: 3
