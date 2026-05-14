@@ -9,6 +9,7 @@ import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ToggleFavouriteUseCase
 import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.Direction
+import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopDetail
@@ -248,10 +249,21 @@ class StopDetailViewModel
             direction: Direction,
         ) {
             val header = _uiState.value.header as? HeaderState.Loaded ?: return
+            val stop = header.detail.stop
+            // Prefer the projection from `servingRoutes` when present — gives us a real route
+            // number + name to cache. When the header response omits the route (PTV occasionally
+            // returns an empty `routes` block for tram stops with high churn), fall back to a
+            // synthetic projection built from the route id + this stop's mode so the favourite
+            // still persists. The favourites screen renders a `#N` placeholder for these and
+            // refreshes the display fields on the next re-favourite.
             val route =
                 header.detail.servingRoutes.firstOrNull { it.id == routeId }
-                    ?: return
-            val stop = header.detail.stop
+                    ?: Route(
+                        id = routeId,
+                        number = "",
+                        name = "",
+                        routeType = stop.routeType,
+                    )
             viewModelScope.launch {
                 toggleFavourite(stop = stop, route = route, direction = direction)
             }
