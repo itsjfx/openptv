@@ -24,6 +24,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Unit tests for [FavouritesRepositoryImpl] against a **real** in-memory Room DB + DAO. Per the
@@ -151,29 +152,34 @@ class FavouritesRepositoryImplTest {
     @Test
     fun `isFavourite is reactive — false initially, true after add, false after remove`() =
         runTest {
-            repository.isFavourite(StopId(STOP_ID), RouteId(ROUTE_ID), DirectionId(DIRECTION_ID)).test {
-                assertThat(awaitItem()).isFalse()
+            // Bumped Turbine timeout (default is 3 s) because Room's `Flow` propagation through
+            // the schema-tracked invalidation tracker is noticeably slower on the GHA `ubuntu-
+            // latest` Robolectric runner than on a developer laptop. 10 s is generous; the test
+            // typically completes in well under 1 s locally.
+            repository.isFavourite(StopId(STOP_ID), RouteId(ROUTE_ID), DirectionId(DIRECTION_ID))
+                .test(timeout = 10.seconds) {
+                    assertThat(awaitItem()).isFalse()
 
-                repository.add(
-                    stopId = StopId(STOP_ID),
-                    routeType = RouteType.Tram,
-                    routeId = RouteId(ROUTE_ID),
-                    directionId = DirectionId(DIRECTION_ID),
-                    stopName = "Flinders",
-                    stopSuburb = "City",
-                    routeNumber = "19",
-                    routeName = "North Coburg",
-                    directionName = "North Coburg",
-                    lat = 0.0,
-                    lng = 0.0,
-                )
-                assertThat(awaitItem()).isTrue()
+                    repository.add(
+                        stopId = StopId(STOP_ID),
+                        routeType = RouteType.Tram,
+                        routeId = RouteId(ROUTE_ID),
+                        directionId = DirectionId(DIRECTION_ID),
+                        stopName = "Flinders",
+                        stopSuburb = "City",
+                        routeNumber = "19",
+                        routeName = "North Coburg",
+                        directionName = "North Coburg",
+                        lat = 0.0,
+                        lng = 0.0,
+                    )
+                    assertThat(awaitItem()).isTrue()
 
-                repository.remove(StopId(STOP_ID), RouteId(ROUTE_ID), DirectionId(DIRECTION_ID))
-                assertThat(awaitItem()).isFalse()
+                    repository.remove(StopId(STOP_ID), RouteId(ROUTE_ID), DirectionId(DIRECTION_ID))
+                    assertThat(awaitItem()).isFalse()
 
-                cancelAndIgnoreRemainingEvents()
-            }
+                    cancelAndIgnoreRemainingEvents()
+                }
         }
 
     @Test
