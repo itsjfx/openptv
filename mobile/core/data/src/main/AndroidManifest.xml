@@ -1,2 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<!-- ACCESS_COARSE_LOCATION is declared at the `:core:data` boundary because this module owns the
+     `LocationManagerLocationProvider` impl that reads it. Manifest merging surfaces it on `:app`
+     automatically. No `ACCESS_FINE_LOCATION`, no `ACCESS_BACKGROUND_LOCATION` — coarse only,
+     foreground only, per docs/mobile/phase-05-nearby-map.md and issue #36's acceptance criteria. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+</manifest>

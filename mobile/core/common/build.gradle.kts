@@ -16,9 +16,16 @@ android {
 }
 
 dependencies {
-    // `RelativeTimeFormatter` exposes `kotlinx.datetime.Instant` / `Clock` in its public API,
-    // so the dep is `api` not `implementation`.
+    // `LocationProvider` exposes `Coordinates` (from `:core:model`) in its public API, and
+    // `RelativeTimeFormatter` exposes `kotlinx.datetime.Instant` / `Clock` — both deps are `api`
+    // so consumers don't have to re-declare them.
+    api(project(":core:model"))
     api(libs.kotlinx.datetime)
+
+    // `LocationProvider.observe()` returns a `Flow<Coordinates>` — Flow lives in
+    // `kotlinx-coroutines-core`, which `kotlinx-coroutines-android` already brings transitively.
+    // Add it as `api` so callers can collect the flow without an extra dep declaration.
+    api(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)

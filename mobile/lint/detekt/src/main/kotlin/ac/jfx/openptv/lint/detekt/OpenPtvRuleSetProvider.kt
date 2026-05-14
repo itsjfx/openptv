@@ -17,6 +17,7 @@ class OpenPtvRuleSetProvider : RuleSetProvider {
             ruleSetId,
             listOf(
                 ForbidAndroidLog(config),
+                ForbidPlayServices(config),
             ),
         )
 

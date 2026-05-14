@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Location permission rationale dialog (used by the upcoming `:feature:nearby` map screen
+         and any future "Nearest" sort consumer in `:feature:favourites`). Resource prefix tracks
+         the module: every string here starts with `core_designsystem_`. -->
+    <string name="core_designsystem_location_rationale_title">Use your location?</string>
+    <string name="core_designsystem_location_rationale_body">OpenPTV uses your location to show stops near you. We only ask for coarse (city-block) location, never background. You can change this in system settings any time.</string>
+    <string name="core_designsystem_location_rationale_confirm">Allow</string>
+    <string name="core_designsystem_location_rationale_dismiss">Not now</string>
+</resources>

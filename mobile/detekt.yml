@@ -115,9 +115,16 @@ style:
 # hard guard from #13 — direct `android.util.Log` usage must route through
 # `:core:common.Logger`. `:core:common.AndroidLogger` is the one sanctioned
 # exception, scoped here so a misplaced grep doesn't accidentally include it.
+#
+# `ForbidPlayServices` is the GrapheneOS guard from #36 — anything under
+# `com.google.android.gms.*` / `com.google.firebase.*` would crash on a device
+# without Play Services. `:app:dependencyGuard` catches the artifact-level
+# story; this rule catches the source-level story before CI even gets to it.
 openptv:
   active: true
   ForbidAndroidLog:
     active: true
     excludes:
       - '**/core/common/AndroidLogger.kt'
+  ForbidPlayServices:
+    active: true

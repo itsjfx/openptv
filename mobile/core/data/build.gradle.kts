@@ -31,6 +31,10 @@ dependencies {
     implementation(project(":core:database"))
 
     implementation(libs.kotlinx.coroutines.android)
+    // `LocationManagerLocationProvider` uses `androidx.core.content.ContextCompat.checkSelfPermission`
+    // to absorb pre-grant permission checks without throwing a `SecurityException`. Declared
+    // explicitly rather than relying on a transitive (Hilt / Compose already pull `core-ktx`).
+    implementation(libs.androidx.core.ktx)
 
     testImplementation(project(":core:testing"))
     // Reuses `FakeSettingsRepository` from `:core:data-test`. Pulling
