@@ -30,8 +30,12 @@
     </plurals>
     <string name="feature_stop_detail_disruption">Disruption affects this route</string>
     <string name="feature_stop_detail_disruption_snackbar">Disruption details land in Phase 10.</string>
-    <string name="feature_stop_detail_star_disabled">Favourite (coming in Phase 4)</string>
     <string name="feature_stop_detail_serving_routes">Routes serving this stop</string>
+
+    <!-- Favourite affordance on the per-route group header (issue #34). Slots:
+         route descriptor (e.g. "19"), direction name (e.g. "North Coburg"). -->
+    <string name="feature_stop_detail_favourite_route">Favourite route %1$s to %2$s</string>
+    <string name="feature_stop_detail_unfavourite_route">Unfavourite route %1$s to %2$s</string>
 
     <!-- Departure row content description. Slots: route number/name, direction destination,
          relative time phrase ("in 3 minutes"), platform clause ("from platform 2" or empty). -->

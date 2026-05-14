@@ -3,12 +3,19 @@ package ac.jfx.openptv.feature.stopdetail
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.test.FakeDepartureRepository
+import ac.jfx.openptv.core.data.test.FakeFavouritesRepository
 import ac.jfx.openptv.core.data.test.FakeStopDetailRepository
 import ac.jfx.openptv.core.domain.GetStopDetailUseCase
 import ac.jfx.openptv.core.domain.LoadMoreDeparturesUseCase
 import ac.jfx.openptv.core.domain.ObserveDeparturesUseCase
+import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
+import ac.jfx.openptv.core.domain.ToggleFavouriteUseCase
+import ac.jfx.openptv.core.model.Direction
+import ac.jfx.openptv.core.model.DirectionId
+import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.testing.DepartureMother
+import ac.jfx.openptv.core.testing.RouteMother
 import ac.jfx.openptv.core.testing.StopDetailMother
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
@@ -47,6 +54,7 @@ class StopDetailViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val stopDetailRepository = FakeStopDetailRepository()
     private val departureRepository = FakeDepartureRepository()
+    private val favouritesRepository = FakeFavouritesRepository()
     private val clock = FakeClock(Instant.parse("2026-05-14T09:00:00Z"))
     private val formatter = RelativeTimeFormatter(clock)
 
@@ -70,6 +78,8 @@ class StopDetailViewModelTest {
             getStopDetail = GetStopDetailUseCase(stopDetailRepository),
             observeDepartures = ObserveDeparturesUseCase(departureRepository),
             loadMoreDepartures = LoadMoreDeparturesUseCase(departureRepository),
+            observeFavourites = ObserveFavouritesUseCase(favouritesRepository),
+            toggleFavourite = ToggleFavouriteUseCase(favouritesRepository),
             clock = clock,
             timeFormatter = formatter,
         )
@@ -601,6 +611,174 @@ class StopDetailViewModelTest {
             assertThat(departureRepository.loadMoreCalls).isEmpty()
         }
 
+    // ---------- favourites (issue #34) ----------
+
+    @Test
+    fun `groups expose isFavourite false by default and toggleFavourite flips it to true`() =
+        runTest(dispatcher) {
+            // Header with a known serving route so toggleFavourite can resolve the Route projection.
+            val route =
+                RouteMother.aRoute()
+                    .withId(FAVE_ROUTE_ID)
+                    .withNumber("19")
+                    .withName("North Coburg")
+                    .withRouteType(RouteType.Tram)
+                    .build()
+            val detail =
+                StopDetailMother.aStopDetail()
+                    .withServingRoutes(listOf(route))
+                    .build()
+            stopDetailRepository.enqueueSuccess(detail)
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val departure =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID)
+                    .withDirectionId(FAVE_DIRECTION_ID)
+                    .withDirectionName("North Coburg")
+                    .build()
+            departureRepository.emitSuccess(listOf(departure))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.single().isFavourite).isFalse()
+
+            viewModel.toggleFavourite(
+                routeId = RouteId(FAVE_ROUTE_ID),
+                direction = Direction(id = DirectionId(FAVE_DIRECTION_ID), name = "North Coburg"),
+            )
+            advanceUntilIdle()
+
+            val afterToggle = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(afterToggle.groups.single().isFavourite).isTrue()
+            assertThat(favouritesRepository.current).hasSize(1)
+        }
+
+    @Test
+    fun `toggleFavourite a second time removes the favourite and flips isFavourite back to false`() =
+        runTest(dispatcher) {
+            val route =
+                RouteMother.aRoute()
+                    .withId(FAVE_ROUTE_ID)
+                    .withNumber("19")
+                    .withName("North Coburg")
+                    .withRouteType(RouteType.Tram)
+                    .build()
+            val detail =
+                StopDetailMother.aStopDetail()
+                    .withServingRoutes(listOf(route))
+                    .build()
+            stopDetailRepository.enqueueSuccess(detail)
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+            departureRepository.emitSuccess(
+                listOf(
+                    DepartureMother.aDeparture()
+                        .withRouteId(FAVE_ROUTE_ID)
+                        .withDirectionId(FAVE_DIRECTION_ID)
+                        .withDirectionName("North Coburg")
+                        .build(),
+                ),
+            )
+            advanceUntilIdle()
+
+            val direction = Direction(id = DirectionId(FAVE_DIRECTION_ID), name = "North Coburg")
+            viewModel.toggleFavourite(routeId = RouteId(FAVE_ROUTE_ID), direction = direction)
+            advanceUntilIdle()
+            viewModel.toggleFavourite(routeId = RouteId(FAVE_ROUTE_ID), direction = direction)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.single().isFavourite).isFalse()
+            assertThat(favouritesRepository.current).isEmpty()
+        }
+
+    @Test
+    fun `toggleFavourite affects only the matching group when two groups are visible`() =
+        runTest(dispatcher) {
+            val routeA =
+                RouteMother.aRoute()
+                    .withId(FAVE_ROUTE_ID)
+                    .withNumber("19")
+                    .withName("North Coburg")
+                    .withRouteType(RouteType.Tram)
+                    .build()
+            val routeB =
+                RouteMother.aRoute()
+                    .withId(OTHER_ROUTE_ID)
+                    .withNumber("96")
+                    .withName("East Brunswick")
+                    .withRouteType(RouteType.Tram)
+                    .build()
+            val detail =
+                StopDetailMother.aStopDetail()
+                    .withServingRoutes(listOf(routeA, routeB))
+                    .build()
+            stopDetailRepository.enqueueSuccess(detail)
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val departureA =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID)
+                    .withDirectionId(FAVE_DIRECTION_ID)
+                    .withRunRef("A-1")
+                    .withDirectionName("North Coburg")
+                    .build()
+            val departureB =
+                DepartureMother.aDeparture()
+                    .withRouteId(OTHER_ROUTE_ID)
+                    .withDirectionId(OTHER_DIRECTION_ID)
+                    .withRunRef("B-1")
+                    .withDirectionName("East Brunswick")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
+                    .build()
+            departureRepository.emitSuccess(listOf(departureA, departureB))
+            advanceUntilIdle()
+
+            // Star group A only.
+            viewModel.toggleFavourite(
+                routeId = RouteId(FAVE_ROUTE_ID),
+                direction = Direction(id = DirectionId(FAVE_DIRECTION_ID), name = "North Coburg"),
+            )
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            val faveGroup = loaded.groups.first { it.key.routeId == FAVE_ROUTE_ID }
+            val otherGroup = loaded.groups.first { it.key.routeId == OTHER_ROUTE_ID }
+            assertThat(faveGroup.isFavourite).isTrue()
+            assertThat(otherGroup.isFavourite).isFalse()
+        }
+
+    @Test
+    fun `toggleFavourite is a no-op when the header has not loaded yet`() =
+        runTest(dispatcher) {
+            // Header has been requested but the use case hasn't run yet — the queue is empty so
+            // the suspending repository call will never return inside the test. The toggle call
+            // must read the header from `_uiState.value` and bail when it's still `Loading`.
+            // Use a fake that errors on dequeue, then poke toggleFavourite synchronously.
+            stopDetailRepository.enqueueError(IOException("never resolves"))
+            val viewModel = newViewModel()
+            // Don't advance — header is still Loading.
+
+            viewModel.toggleFavourite(
+                routeId = RouteId(FAVE_ROUTE_ID),
+                direction = Direction(id = DirectionId(FAVE_DIRECTION_ID), name = "North Coburg"),
+            )
+            advanceUntilIdle()
+
+            // No favourites were added.
+            assertThat(favouritesRepository.current).isEmpty()
+        }
+
     /** A `Clock` that returns a fixed instant — same shape as the formatter's test-only clock. */
     private class FakeClock(private val instant: Instant) : Clock {
         override fun now(): Instant = instant
@@ -610,5 +788,9 @@ class StopDetailViewModelTest {
         const val DEFAULT_STOP_ID = 1071
         const val EARLY_ROUTE_ID = 1
         const val LATE_ROUTE_ID = 2
+        const val FAVE_ROUTE_ID = 1881
+        const val FAVE_DIRECTION_ID = 9
+        const val OTHER_ROUTE_ID = 1882
+        const val OTHER_DIRECTION_ID = 10
     }
 }

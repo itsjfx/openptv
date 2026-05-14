@@ -85,6 +85,14 @@ data class Group(
     val headerLabel: String,
     val departures: List<Departure>,
     val expanded: Boolean = false,
+    /**
+     * Whether the user has favourited this `(stopId, routeId, directionId)` triple. Populated by
+     * the ViewModel from `ObserveFavouritesUseCase`. Defaults to `false` so a freshly-loaded
+     * group renders the hollow glyph until the first favourites emission lands (which is
+     * immediate — `StateFlow` is hot — so the user never sees a "wrong" state for more than a
+     * frame).
+     */
+    val isFavourite: Boolean = false,
 )
 
 /** Section key — pair of (routeId, directionId). Stable for `key=` slots in `LazyColumn`. */

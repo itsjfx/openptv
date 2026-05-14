@@ -10,10 +10,12 @@
 package ac.jfx.openptv.feature.stopdetail
 
 import ac.jfx.openptv.core.data.test.FakeDepartureRepository
+import ac.jfx.openptv.core.data.test.FakeFavouritesRepository
 import ac.jfx.openptv.core.data.test.FakeStopDetailRepository
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.testing.DepartureMother
+import ac.jfx.openptv.core.testing.RouteMother
 import ac.jfx.openptv.core.testing.StopDetailMother
 import ac.jfx.openptv.core.testing.StopMother
 import ac.jfx.openptv.uitesthiltmanifest.HiltComponentActivity
@@ -60,6 +62,9 @@ class StopDetailScreenTest {
 
     @Inject
     lateinit var departureRepository: FakeDepartureRepository
+
+    @Inject
+    lateinit var favouritesRepository: FakeFavouritesRepository
 
     @Before
     fun setUp() {
@@ -348,8 +353,75 @@ class StopDetailScreenTest {
         composeTestRule.onNodeWithTag(TestTagDateDivider).assertIsDisplayed()
     }
 
+    /**
+     * Star affordance on the group header (issue #34). Render the screen with one group, tap the
+     * star, assert the fake repository received an add. Tap again, assert remove. Mirrors what
+     * the user does on real hardware.
+     */
+    @Test
+    fun favouriteStar_tapAddsThenRemovesFromRepository() {
+        val route =
+            RouteMother.aRoute()
+                .withId(FAVE_ROUTE_ID)
+                .withNumber("19")
+                .withName("North Coburg")
+                .withRouteType(RouteType.Tram)
+                .build()
+        stopDetailRepository.enqueueSuccess(
+            StopDetailMother.aStopDetail()
+                .withServingRoutes(listOf(route))
+                .build(),
+        )
+
+        composeTestRule.setContent {
+            StopDetailRoute(
+                stopId = StopId(STOP_ID),
+                routeType = RouteType.Train,
+                onBack = { /* no-op */ },
+            )
+        }
+
+        val now = Clock.System.now()
+        val departure =
+            DepartureMother.aDeparture()
+                .withRouteId(FAVE_ROUTE_ID)
+                .withDirectionId(FAVE_DIRECTION_ID)
+                .withDirectionName("North Coburg")
+                .withScheduledDepartureUtc(now + 5.minutes)
+                .withEstimatedDepartureUtc(now + 5.minutes)
+                .build()
+        runBlocking { departureRepository.emitSuccess(listOf(departure)) }
+
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(TestTagFavouriteToggle).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // Initial state: hollow star, repository empty.
+        composeTestRule.onNodeWithTag(TestTagFavouriteToggle).assertIsDisplayed()
+        assertThat(favouritesRepository.current).isEmpty()
+
+        // Tap to favourite.
+        composeTestRule.onNodeWithTag(TestTagFavouriteToggle).performClick()
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            favouritesRepository.current.isNotEmpty()
+        }
+        assertThat(favouritesRepository.current).hasSize(1)
+        val added = favouritesRepository.current.single()
+        assertThat(added.routeId.value).isEqualTo(FAVE_ROUTE_ID)
+        assertThat(added.directionId.value).isEqualTo(FAVE_DIRECTION_ID)
+
+        // Tap to unfavourite.
+        composeTestRule.onNodeWithTag(TestTagFavouriteToggle).performClick()
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            favouritesRepository.current.isEmpty()
+        }
+        assertThat(favouritesRepository.current).isEmpty()
+    }
+
     private companion object {
         const val STOP_ID = 1071
+        const val FAVE_ROUTE_ID = 1881
+        const val FAVE_DIRECTION_ID = 9
         const val WAIT_TIMEOUT_MILLIS: Long = 5_000
     }
 }
