@@ -8,6 +8,7 @@ import ac.jfx.openptv.core.model.StopId
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -83,5 +84,41 @@ class FakeDepartureRepository
         ): Flow<Result<List<Departure>>> {
             observedKeys += stopId to routeType
             return observedFlow.asSharedFlow()
+        }
+
+        // -------- paging --------
+
+        private val loadMoreQueue: ArrayDeque<Result<List<Departure>>> = ArrayDeque()
+        val loadMoreCalls: MutableList<LoadMoreCall> = mutableListOf()
+
+        data class LoadMoreCall(
+            val stopId: StopId,
+            val routeType: RouteType,
+            val after: Instant,
+            val maxResults: Int,
+        )
+
+        fun enqueueLoadMoreResult(result: Result<List<Departure>>) {
+            loadMoreQueue.addLast(result)
+        }
+
+        fun enqueueLoadMoreSuccess(departures: List<Departure>) {
+            loadMoreQueue.addLast(Result.Success(departures))
+        }
+
+        fun enqueueLoadMoreError(throwable: Throwable) {
+            loadMoreQueue.addLast(Result.Error(throwable))
+        }
+
+        override suspend fun loadMore(
+            stopId: StopId,
+            routeType: RouteType,
+            after: Instant,
+            maxResults: Int,
+        ): Result<List<Departure>> {
+            loadMoreCalls += LoadMoreCall(stopId, routeType, after, maxResults)
+            // Default to an empty success so feature tests that don't care about paging stay
+            // brief — they enqueue when they want to drive a specific page.
+            return loadMoreQueue.removeFirstOrNull() ?: Result.Success(emptyList())
         }
     }

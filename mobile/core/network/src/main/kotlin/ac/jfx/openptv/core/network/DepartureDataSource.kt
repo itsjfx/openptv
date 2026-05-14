@@ -3,15 +3,24 @@ package ac.jfx.openptv.core.network
 import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
+import kotlinx.datetime.Instant
 
 /**
  * Network-layer fetch for live [Departure]s at a stop. The polling cadence (30 s) lives in
  * `:core:data` — this interface is one-shot. If the proxy ever exposes a server-push channel
  * (SSE / WebSocket), a second implementation slots in without touching the data layer.
+ *
+ * Both [dateUtc] and [maxResults] are optional pass-throughs to the PTV API:
+ *  - `date_utc` shifts the window forward in time so we can page past midnight without locking
+ *    to the current calendar day.
+ *  - `max_results` is per-route (PTV applies it once `route_id` is omitted), so a stop with three
+ *    routes serving it returns up to `3 * max_results` departures.
  */
 interface DepartureDataSource {
     suspend fun getDepartures(
         stopId: StopId,
         routeType: RouteType,
+        dateUtc: Instant? = null,
+        maxResults: Int? = null,
     ): List<Departure>
 }

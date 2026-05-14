@@ -15,10 +15,12 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Instant
 import org.junit.Test
 import java.io.IOException
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Repository-end coverage for [DepartureRepositoryImpl]. Two test surfaces:
@@ -183,6 +185,55 @@ class DepartureRepositoryImplTest {
             }
         }
 
+    // ---------- loadMore ----------
+
+    @Test
+    fun `loadMore success wraps mapped list`() =
+        runTest {
+            val expected = listOf(DepartureMother.aDeparture().withRunRef("LM-1").build())
+            val ds = FakeDataSource(returning = expected)
+            val repo = DepartureRepositoryImpl(ds)
+
+            val anchor = Instant.parse("2026-05-14T09:30:00Z")
+            val result = repo.loadMore(StopId(1071), RouteType.Train, anchor, maxResults = 10)
+
+            assertThat(result).isInstanceOf(Result.Success::class.java)
+            assertThat((result as Result.Success).data).isEqualTo(expected)
+            assertThat(ds.lastDateUtc.get()).isEqualTo(anchor)
+            assertThat(ds.lastMaxResults.get()).isEqualTo(10)
+        }
+
+    @Test
+    fun `loadMore non-cancellation throwable becomes Result Error`() =
+        runTest {
+            val boom = IOException("offline")
+            val repo = DepartureRepositoryImpl(FakeDataSource(throwing = boom))
+            val anchor = Instant.parse("2026-05-14T09:30:00Z")
+
+            val result = repo.loadMore(StopId(1071), RouteType.Train, anchor, maxResults = 5)
+
+            assertThat(result).isInstanceOf(Result.Error::class.java)
+            assertThat((result as Result.Error).throwable).isSameInstanceAs(boom)
+        }
+
+    @Test
+    fun `observe head poll passes INITIAL_PAGE_SIZE_PER_ROUTE to data source`() =
+        runTest {
+            val ds = FakeDataSource(returning = listOf(DepartureMother.aDeparture().build()))
+            val repo = DepartureRepositoryImpl(ds)
+
+            repo.observeDepartures(StopId(1071), RouteType.Train).test {
+                // Loading + first success
+                awaitItem()
+                awaitItem()
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertThat(ds.lastMaxResults.get())
+                .isEqualTo(DepartureRepository.INITIAL_PAGE_SIZE_PER_ROUTE)
+            assertThat(ds.lastDateUtc.get()).isNull()
+        }
+
     // ---------- Inline fakes ----------
 
     private sealed class FakeOutcome {
@@ -231,12 +282,18 @@ class DepartureRepositoryImplTest {
         private val returningSeries: SnapshotSeries? = null,
     ) : DepartureDataSource {
         val callCount: AtomicInteger = AtomicInteger(0)
+        val lastDateUtc: AtomicReference<Instant?> = AtomicReference(null)
+        val lastMaxResults: AtomicReference<Int?> = AtomicReference(null)
 
         override suspend fun getDepartures(
             stopId: StopId,
             routeType: RouteType,
+            dateUtc: Instant?,
+            maxResults: Int?,
         ): List<Departure> {
             val index = callCount.getAndIncrement()
+            lastDateUtc.set(dateUtc)
+            lastMaxResults.set(maxResults)
             throwing?.let { throw it }
             if (returningSeries != null) {
                 return when (val outcome = returningSeries.outcomeAt(index)) {

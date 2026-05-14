@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.data.DepartureRepository.Companion.INITIAL_PAGE_SIZE_PER_ROUTE
 import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
@@ -9,6 +10,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -78,12 +80,40 @@ internal class DepartureRepositoryImpl
             }
 
         @Suppress("TooGenericExceptionCaught")
+        override suspend fun loadMore(
+            stopId: StopId,
+            routeType: RouteType,
+            after: Instant,
+            maxResults: Int,
+        ): Result<List<Departure>> =
+            try {
+                Result.Success(
+                    dataSource.getDepartures(
+                        stopId = stopId,
+                        routeType = routeType,
+                        dateUtc = after,
+                        maxResults = maxResults,
+                    ),
+                )
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (t: Throwable) {
+                Result.Error(t)
+            }
+
+        @Suppress("TooGenericExceptionCaught")
         private suspend fun fetchOnce(
             stopId: StopId,
             routeType: RouteType,
         ): Result<List<Departure>> =
             try {
-                Result.Success(dataSource.getDepartures(stopId, routeType))
+                Result.Success(
+                    dataSource.getDepartures(
+                        stopId = stopId,
+                        routeType = routeType,
+                        maxResults = INITIAL_PAGE_SIZE_PER_ROUTE,
+                    ),
+                )
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (t: Throwable) {

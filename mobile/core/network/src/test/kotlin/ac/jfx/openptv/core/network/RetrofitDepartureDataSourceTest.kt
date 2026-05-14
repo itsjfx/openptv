@@ -4,6 +4,7 @@ import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Instant
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -115,5 +116,54 @@ class RetrofitDepartureDataSourceTest {
             val recorded = server.takeRequest()
             assertThat(recorded.path)
                 .isEqualTo("/api/v3/departures/route_type/1/stop/1071?expand=Run&expand=Direction&expand=Route&expand=Disruption")
+        }
+
+    @Test
+    fun `request URL appends date_utc when supplied`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"departures":[],"directions":{}}"""),
+            )
+
+            dataSource.getDepartures(
+                StopId(1071),
+                RouteType.Train,
+                dateUtc = Instant.parse("2026-05-14T12:30:00Z"),
+            )
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).contains("date_utc=2026-05-14T12:30:00Z")
+        }
+
+    @Test
+    fun `request URL appends max_results when supplied`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"departures":[],"directions":{}}"""),
+            )
+
+            dataSource.getDepartures(StopId(1071), RouteType.Train, maxResults = 10)
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).contains("max_results=10")
+        }
+
+    @Test
+    fun `request URL appends both date_utc and max_results when both supplied`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"departures":[],"directions":{}}"""),
+            )
+
+            dataSource.getDepartures(
+                StopId(1071),
+                RouteType.Train,
+                dateUtc = Instant.parse("2026-05-14T12:30:00Z"),
+                maxResults = 5,
+            )
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).contains("date_utc=2026-05-14T12:30:00Z")
+            assertThat(recorded.path).contains("max_results=5")
         }
 }

@@ -4,6 +4,7 @@ import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.network.model.toDomain
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 
 /**
@@ -13,6 +14,10 @@ import javax.inject.Inject
  * Per the phase doc the picked `expand` set is `Run,Direction,Route,Disruption` — enough for the
  * mapper to resolve direction names client-side without dragging the full PTV response shape
  * through the wire.
+ *
+ * `date_utc` and `max_results` are forwarded verbatim when callers supply them. PTV expects
+ * `date_utc` as ISO-8601 without a trailing fractional second; `Instant.toString()` already emits
+ * the right shape (e.g. `2026-05-14T09:00:00Z`).
  */
 internal class RetrofitDepartureDataSource
     @Inject
@@ -23,11 +28,16 @@ internal class RetrofitDepartureDataSource
         override suspend fun getDepartures(
             stopId: StopId,
             routeType: RouteType,
+            dateUtc: Instant?,
+            maxResults: Int?,
         ): List<Departure> {
             val base = backendUrl.backendBaseUrl()
             val typeCode = routeType.toPtvCode()
-            val url =
-                "${base}departures/route_type/$typeCode/stop/${stopId.value}?expand=Run&expand=Direction&expand=Route&expand=Disruption"
-            return api.getDepartures(url).toDomain()
+            val baseUrl =
+                "${base}departures/route_type/$typeCode/stop/${stopId.value}" +
+                    "?expand=Run&expand=Direction&expand=Route&expand=Disruption"
+            val dateParam = dateUtc?.let { "&date_utc=$it" }.orEmpty()
+            val maxParam = maxResults?.let { "&max_results=$it" }.orEmpty()
+            return api.getDepartures("$baseUrl$dateParam$maxParam").toDomain()
         }
     }

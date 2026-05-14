@@ -5,18 +5,26 @@ import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import kotlinx.coroutines.flow.Flow
+import kotlinx.datetime.Instant
 
 /**
- * Repository for live [Departure]s at a stop. Two surfaces:
+ * Repository for live [Departure]s at a stop. Three surfaces:
  *
  *  - [getDepartures] — one-shot fetch, useful for pull-to-refresh and for the Glance widget
  *    (which doesn't keep a long-lived collector around).
  *  - [observeDepartures] — a hot-ish `Flow<Result<List<Departure>>>` that re-emits on a 30 s
  *    tick. Collector lifetime drives the polling loop: cancelling the collector cancels the
  *    underlying `delay` and `fetch`, no orphan coroutines. The Flow emits `Result.Loading`
- *    immediately on subscribe and on each subsequent refresh, then the fetched result.
+ *    immediately on subscribe and on each subsequent refresh, then the fetched result. The head
+ *    poll asks PTV for [INITIAL_PAGE_SIZE_PER_ROUTE] entries per route via `max_results`, which
+ *    keeps the live tick cheap while still giving each route enough rows to show its collapsed
+ *    head.
+ *  - [loadMore] — paginated one-shot anchored at a given instant (`date_utc`). Powers both the
+ *    "show more" expansion within a group and the "scroll past midnight" tail. The caller is
+ *    expected to hand the time-anchor in (typically the `effectiveDepartureUtc` of the last row
+ *    they currently hold) and merge the new entries into their view by `runRef`.
  *
- * Both surfaces fold non-cancellation throwables into [Result.Error]; cancellation propagates.
+ * All surfaces fold non-cancellation throwables into [Result.Error]; cancellation propagates.
  *
  * Errors mid-poll do not break the loop — the next tick recovers naturally. Tests pin that
  * behaviour in `DepartureRepositoryImplTest`.
@@ -31,4 +39,26 @@ interface DepartureRepository {
         stopId: StopId,
         routeType: RouteType,
     ): Flow<Result<List<Departure>>>
+
+    /**
+     * One-shot fetch anchored at [after] for paging. Asks PTV for up to [maxResults] entries per
+     * route starting at the given instant; the live tick continues independently and keeps the
+     * head of the list fresh.
+     */
+    suspend fun loadMore(
+        stopId: StopId,
+        routeType: RouteType,
+        after: Instant,
+        maxResults: Int,
+    ): Result<List<Departure>>
+
+    companion object {
+        /**
+         * Head-poll `max_results` parameter. PTV applies this per route, so a stop with N routes
+         * returns up to `N * INITIAL_PAGE_SIZE_PER_ROUTE` rows on each tick. Sized to comfortably
+         * cover the collapsed "show 3" affordance plus a small expansion buffer before the user
+         * has to fall back to [loadMore].
+         */
+        const val INITIAL_PAGE_SIZE_PER_ROUTE: Int = 5
+    }
 }
