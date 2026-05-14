@@ -17,15 +17,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -36,7 +32,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.launch
 
 /**
  * Stateful entry point wired from the navigation graph. Hoists [SearchViewModel] off Hilt and
@@ -65,14 +60,10 @@ internal fun SearchScreenContent(
     onQueryChanged: (String) -> Unit,
     onStopSelected: (Stop) -> Unit,
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-
     Scaffold(
         topBar = {
             TopAppBar(title = { Text(stringResource(R.string.feature_search_title)) })
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         Column(
             modifier =
@@ -111,12 +102,10 @@ internal fun SearchScreenContent(
                 is SearchUiState.Results ->
                     StopList(
                         stops = state.stops,
-                        onStopSelected = { stop ->
-                            onStopSelected(stop)
-                            scope.launch {
-                                snackbarHostState.showSnackbar(stop.name)
-                            }
-                        },
+                        // Phase 02 surfaced a snackbar here as a placeholder navigation target.
+                        // Phase 03 wires the real destination via the `onStopSelected` hoist —
+                        // the app composition root pushes `AppNavKey.StopDetail`.
+                        onStopSelected = onStopSelected,
                     )
                 is SearchUiState.Error -> CenteredMessage(text = state.reason)
             }

@@ -38,6 +38,7 @@ include(":core:common")
 include(":core:data")
 include(":core:data-test")
 include(":core:designsystem")
+include(":core:domain")
 include(":core:model")
 include(":core:navigation")
 include(":core:network")
@@ -48,6 +49,7 @@ include(":core:testing")
 // feature convention plugin guards those with `findProject` so missing ones are
 // a no-op, not a build break).
 include(":feature:search")
+include(":feature:stop-detail")
 
 // `:ui-test-hilt-manifest` — minimal Hilt-aware Activity that feature
 // androidTests host themselves in for Compose UI tests. Borrowed verbatim from

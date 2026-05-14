@@ -39,6 +39,22 @@ enum class RouteType {
                 else -> Unknown
             }
     }
+
+    /**
+     * Inverse of [fromCode]. [Unknown] maps to `-1` (never round-trips back to itself) — feature
+     * code should never put an [Unknown] on the wire; the type is the runtime fall-back, not a
+     * normal value. Navigation uses this to serialise the route-type into the destination key.
+     */
+    @Suppress("MagicNumber")
+    fun toCode(): Int =
+        when (this) {
+            Train -> 0
+            Tram -> 1
+            Bus -> 2
+            VLine -> 3
+            NightBus -> 4
+            Unknown -> -1
+        }
 }
 
 /**

@@ -34,6 +34,18 @@ abstract class DataModule {
 
     @Binds
     @Singleton
+    internal abstract fun bindStopDetailRepository(
+        impl: StopDetailRepositoryImpl,
+    ): StopDetailRepository
+
+    @Binds
+    @Singleton
+    internal abstract fun bindDepartureRepository(
+        impl: DepartureRepositoryImpl,
+    ): DepartureRepository
+
+    @Binds
+    @Singleton
     internal abstract fun bindBackendUrlProvider(
         impl: SettingsBackendUrlProvider,
     ): BackendUrlProvider

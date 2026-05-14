@@ -87,6 +87,7 @@ dependencies {
 
     // Features composed by the root nav graph.
     implementation(project(":feature:search"))
+    implementation(project(":feature:stop-detail"))
 
     // AndroidX core
     implementation(libs.androidx.core.ktx)

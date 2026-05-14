@@ -1,0 +1,32 @@
+package ac.jfx.openptv.core.domain
+
+import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.data.DepartureRepository
+import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.model.StopId
+import kotlinx.coroutines.flow.Flow
+import javax.inject.Inject
+
+/**
+ * Use case: observe live departures at a stop.
+ *
+ * Returns a `Flow<Result<List<Departure>>>` that re-emits on the repository's 30 s tick and
+ * emits [Result.Loading] each time a refresh is in flight. Collector lifetime drives the
+ * polling loop — the ViewModel layer is expected to wrap this in `repeatOnLifecycle(RESUMED)`
+ * so polling pauses while the screen is backgrounded.
+ *
+ * Pure pass-through today; lives behind a use case so future ordering / filtering (e.g.
+ * "hide departed runs older than two minutes", "promote starred routes to the top") slots in
+ * without touching the ViewModel.
+ */
+class ObserveDeparturesUseCase
+    @Inject
+    constructor(
+        private val repository: DepartureRepository,
+    ) {
+        operator fun invoke(
+            stopId: StopId,
+            routeType: RouteType,
+        ): Flow<Result<List<Departure>>> = repository.observeDepartures(stopId, routeType)
+    }

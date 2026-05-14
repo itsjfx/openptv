@@ -2,7 +2,11 @@ package ac.jfx.openptv.core.network.di
 
 import ac.jfx.openptv.core.network.BackendApiService
 import ac.jfx.openptv.core.network.BuildConfig
+import ac.jfx.openptv.core.network.DepartureDataSource
+import ac.jfx.openptv.core.network.RetrofitDepartureDataSource
+import ac.jfx.openptv.core.network.RetrofitStopDetailDataSource
 import ac.jfx.openptv.core.network.RetrofitStopSearchDataSource
+import ac.jfx.openptv.core.network.StopDetailDataSource
 import ac.jfx.openptv.core.network.StopSearchDataSource
 import dagger.Binds
 import dagger.Module
@@ -101,4 +105,16 @@ internal abstract class NetworkBindings {
     internal abstract fun bindStopSearchDataSource(
         impl: RetrofitStopSearchDataSource,
     ): StopSearchDataSource
+
+    @Binds
+    @Singleton
+    internal abstract fun bindStopDetailDataSource(
+        impl: RetrofitStopDetailDataSource,
+    ): StopDetailDataSource
+
+    @Binds
+    @Singleton
+    internal abstract fun bindDepartureDataSource(
+        impl: RetrofitDepartureDataSource,
+    ): DepartureDataSource
 }
