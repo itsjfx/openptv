@@ -49,6 +49,12 @@ data class FavouriteRow(
     val directionName: String,
     val nextDeparture: NextDepartureState,
     val position: Int,
+    // `lat` / `lng` carry the favourite's stored stop coordinates so the Nearest sort (Phase 05)
+    // can compute haversine distance from the user's last-known fix without re-reading the
+    // repository. Set to 0 / 0 if the original favourite was added without a geo fix (legacy
+    // pre-Phase-05 entries, see the `onUndoDelete` comment in FavouritesViewModel).
+    val lat: Double,
+    val lng: Double,
 )
 
 /**

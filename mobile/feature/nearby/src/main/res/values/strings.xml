@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Resource prefix matches the AGP `resourcePrefix` set by the `openptv.android.library`
+         convention plugin: every string here starts with `feature_nearby_`. -->
+
+    <string name="feature_nearby_title">Nearby</string>
+
+    <!-- Permission banner -->
+    <string name="feature_nearby_permission_denied_banner">Location off — showing Melbourne CBD. Open settings to enable.</string>
+    <string name="feature_nearby_permission_open_settings">Open settings</string>
+    <string name="feature_nearby_permission_allow">Allow location</string>
+
+    <!-- Follow-me FAB -->
+    <string name="feature_nearby_follow_me">Centre on my location</string>
+
+    <!-- Bottom sheet -->
+    <string name="feature_nearby_view_stop">View stop</string>
+
+    <!-- Empty state -->
+    <string name="feature_nearby_no_stops">No PTV stops in this area.</string>
+    <string name="feature_nearby_no_stops_hint">Pan to a denser part of Victoria to find nearby stops.</string>
+
+    <!-- Bottom-nav -->
+    <string name="feature_nearby_tab_label">Nearby</string>
+</resources>

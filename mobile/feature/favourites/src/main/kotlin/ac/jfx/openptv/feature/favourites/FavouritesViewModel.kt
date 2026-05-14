@@ -1,5 +1,6 @@
 package ac.jfx.openptv.feature.favourites
 
+import ac.jfx.openptv.core.common.LocationProvider
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.FavouritesRepository
@@ -8,6 +9,7 @@ import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
 import ac.jfx.openptv.core.domain.LoadNextDepartureUseCase
 import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ReorderFavouritesUseCase
+import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.DirectionId
 import ac.jfx.openptv.core.model.FavouriteRouteAtStop
 import ac.jfx.openptv.core.model.RouteId
@@ -71,7 +73,25 @@ class FavouritesViewModel
         private val favouritesRepository: FavouritesRepository,
         private val userPreferences: UserPreferencesDataStore,
         private val timeFormatter: RelativeTimeFormatter,
+        private val locationProvider: LocationProvider,
     ) : ViewModel() {
+        /**
+         * Latest snapshot of `LocationProvider.lastKnown()`. Read once on entry (Phase 05
+         * acceptance criterion is "Nearest sort orders by distance from last-known fix"); a
+         * fresher fix from the active observer is plumbed in via [refreshLocationSnapshot]. Null
+         * means the user hasn't granted location yet — the Nearest sort degrades to Manual.
+         */
+        private val locationSnapshot: MutableStateFlow<Coordinates?> = MutableStateFlow(null)
+
+        init {
+            // Kick off a one-shot lastKnown() snapshot. Doesn't subscribe to `observe()` — the
+            // favourites screen only needs an ordering hint, not a live stream. A user who wants
+            // a freshness guarantee can tap a row's stop-detail.
+            viewModelScope.launch {
+                locationSnapshot.value = locationProvider.lastKnown()
+            }
+        }
+
         /**
          * Cache of next-departure state per favourite. Mutated by the tick coroutine; the screen
          * reads it indirectly via the projection that merges this with the favourites list.
@@ -111,8 +131,15 @@ class FavouritesViewModel
                 userPreferences.favouritesSort.onStart { emit(FavouritesSortPreference.default) },
                 nextDepartures,
                 pendingUndo,
-            ) { favourites, sort, nexts, undo ->
-                projectState(favourites = favourites, sort = sort, nexts = nexts, undo = undo)
+                locationSnapshot,
+            ) { favourites, sort, nexts, undo, location ->
+                projectState(
+                    favourites = favourites,
+                    sort = sort,
+                    nexts = nexts,
+                    undo = undo,
+                    location = location,
+                )
             }.stateIn(
                 scope = viewModelScope,
                 started = SharingStarted.Eagerly,
@@ -305,6 +332,7 @@ class FavouritesViewModel
             sort: FavouritesSortPreference,
             nexts: Map<FavouriteKey, NextDepartureState>,
             undo: PendingUndo?,
+            location: Coordinates?,
         ): FavouritesUiState {
             if (favourites.isEmpty()) {
                 // An active undo means the user just swiped — keep the screen in Loaded so the
@@ -316,13 +344,14 @@ class FavouritesViewModel
                 }
             }
             val rows = favourites.map { it.toRow(nexts[it.toKey()] ?: NextDepartureState.Loading) }
-            val sorted = applySort(rows, sort)
+            val sorted = applySort(rows = rows, sort = sort, location = location)
             return FavouritesUiState.Loaded(rows = sorted, sort = sort, pendingUndo = undo)
         }
 
         private fun applySort(
             rows: List<FavouriteRow>,
             sort: FavouritesSortPreference,
+            location: Coordinates?,
         ): List<FavouriteRow> =
             when (sort) {
                 FavouritesSortPreference.Manual -> rows.sortedBy { it.position }
@@ -330,9 +359,16 @@ class FavouritesViewModel
                     rows.sortedWith(
                         compareBy({ it.stopName.lowercase() }, { it.routeNumber }),
                     )
-                // Nearest is disabled in the UI; if a stale value somehow lands here, fall back to
-                // Manual so we don't render an undefined order.
-                FavouritesSortPreference.Nearest -> rows.sortedBy { it.position }
+                FavouritesSortPreference.Nearest ->
+                    // Phase 05: sort by haversine distance from the last-known fix. If we have no
+                    // fix yet (user hasn't granted location, or the provider hasn't returned one),
+                    // degrade to Manual rather than render an undefined order — flagged in PR body.
+                    // `cc @itsjfx`
+                    if (location == null) {
+                        rows.sortedBy { it.position }
+                    } else {
+                        rows.sortedBy { row -> location.distanceTo(Coordinates(row.lat, row.lng)) }
+                    }
             }
 
         private fun FavouriteRouteAtStop.toKey(): FavouriteKey =
@@ -353,6 +389,8 @@ class FavouritesViewModel
                 directionName = directionName,
                 nextDeparture = next,
                 position = position,
+                lat = lat,
+                lng = lng,
             )
 
         private companion object {

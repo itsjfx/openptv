@@ -13,7 +13,10 @@
     <string name="feature_favourites_sort_manual">Manual</string>
     <string name="feature_favourites_sort_alphabetical">Alphabetical</string>
     <string name="feature_favourites_sort_nearest">Nearest</string>
-    <string name="feature_favourites_sort_nearest_subtitle">Available with location (Phase 05)</string>
+    <!-- Phase 05: Nearest no longer requires a separate subtitle — the chip is enabled now. The
+         old "Available with location (Phase 05)" string has been removed; if a stale layout still
+         references it, the build will fail clearly. -->
+    <string name="feature_favourites_sort_nearest_no_location">Location not available — sorted by manual order</string>
 
     <!-- Row -->
     <string name="feature_favourites_row_drag_handle">Drag to reorder</string>

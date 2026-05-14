@@ -44,6 +44,15 @@ androidxRoom = "2.7.2"
 okhttp = "5.3.2"
 retrofit = "3.0.0"
 
+# Maps. MapLibre Android (BSD-2) is the only MapLibre binding available on
+# Maven Central — the spec named `org.maplibre.compose:maplibre-compose`
+# which doesn't exist as a published artifact today. We pull in the raw SDK
+# and wrap it via `AndroidView` inside the `:feature:nearby/OpenPtvMap`
+# composable; the wrap is mandatory anyway for the test seam (the Hilt-
+# Compose UI test injects a `FakeOpenPtvMap`). License is BSD-2-Clause and
+# no GMS deps — verified via `:app:dependencyGuard` baseline diff.
+maplibreAndroid = "11.11.0"
+
 # Testing
 junit = "4.13.2"
 truth = "1.4.4"
@@ -133,6 +142,9 @@ okhttp-logging-interceptor = { module = "com.squareup.okhttp3:logging-intercepto
 okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver", version.ref = "okhttp" }
 retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit" }
 retrofit-kotlinx-serialization-converter = { module = "com.squareup.retrofit2:converter-kotlinx-serialization", version.ref = "retrofit" }
+
+# Maps
+maplibre-android-sdk = { module = "org.maplibre.gl:android-sdk", version.ref = "maplibreAndroid" }
 
 # Testing
 junit = { module = "junit:junit", version.ref = "junit" }

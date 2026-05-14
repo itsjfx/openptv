@@ -8,6 +8,7 @@
     <!-- Bottom-navigation tab labels. Plain glyphs stand in for Material Icons so :app stays
          off the icons artifact. -->
     <string name="bottom_nav_favourites">Favourites</string>
+    <string name="bottom_nav_nearby">Nearby</string>
     <string name="bottom_nav_search">Search</string>
     <string name="bottom_nav_settings">Settings</string>
 
