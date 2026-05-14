@@ -3,6 +3,7 @@ package ac.jfx.openptv.feature.stopdetail
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.domain.GetStopDetailUseCase
+import ac.jfx.openptv.core.domain.LoadMoreDeparturesUseCase
 import ac.jfx.openptv.core.domain.ObserveDeparturesUseCase
 import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.RouteType
@@ -21,17 +22,21 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 import retrofit2.HttpException
 import java.io.IOException
 
 /**
- * Stop-detail ViewModel. Owns three things:
+ * Stop-detail ViewModel. Owns four things:
  *
  *  1. A one-shot header fetch on init ([loadHeader]). Re-runs on retry.
  *  2. A 30 s polling Flow of departures, kicked off whenever the screen enters
  *     [androidx.lifecycle.Lifecycle.State.RESUMED] and cancelled when it leaves. The UI driver is
  *     [startObserving] / [stopObserving]; the Compose layer wraps these in `repeatOnLifecycle`.
  *  3. Pull-to-refresh, which forces a new collection cycle ([refresh]).
+ *  4. Pagination — per-group expansion ([toggleExpand]) and "scrolled to the tail" ([loadMore]).
+ *     Pagination uses a separate read path that appends to the in-memory tail, deduping by
+ *     `runRef`. The head poll keeps running underneath so the top of the list stays live.
  *
  * `Clock` and `RelativeTimeFormatter` come from Hilt's `SingletonComponent`; `stopId` and
  * `routeType` are assisted so the Compose layer can hand the destination key into the ViewModel
@@ -50,6 +55,7 @@ class StopDetailViewModel
         @Assisted("routeTypeCode") private val routeTypeCode: Int,
         private val getStopDetail: GetStopDetailUseCase,
         private val observeDepartures: ObserveDeparturesUseCase,
+        private val loadMoreDepartures: LoadMoreDeparturesUseCase,
         private val clock: Clock,
         /**
          * Exposed for the Compose layer so the screen renders relative times under the same
@@ -80,6 +86,25 @@ class StopDetailViewModel
 
         /** Tracks the active observation coroutine so `startObserving` is idempotent. */
         private var observeJob: Job? = null
+
+        /** Tracks the active loadMore coroutine so concurrent scroll triggers coalesce. */
+        private var loadMoreJob: Job? = null
+
+        /**
+         * Accumulated paginated departures — anything past the head-poll window. Stored keyed by
+         * `runRef` so the merge step is O(1) per row and a row's existence is idempotent across
+         * head re-emissions and overlapping page fetches.
+         */
+        private val pagedByRunRef: MutableMap<String, Departure> = mutableMapOf()
+
+        /**
+         * Most-recent successful head poll, retained so [rebuildGroups] can re-fold pages on top
+         * of it without waiting for the next 30 s tick.
+         */
+        private var lastHeadPoll: List<Departure> = emptyList()
+
+        /** Which group keys the user has expanded. Persists across head emissions. */
+        private val expandedGroups: MutableSet<GroupKey> = mutableSetOf()
 
         init {
             loadHeader()
@@ -121,6 +146,51 @@ class StopDetailViewModel
             loadHeader()
         }
 
+        /**
+         * Toggle the per-group expanded state. Expanding for the first time kicks off a
+         * [loadMore] so the user sees more than the head poll provides (the head poll only asks
+         * for [ac.jfx.openptv.core.data.DepartureRepository.INITIAL_PAGE_SIZE_PER_ROUTE] rows
+         * per route).
+         */
+        fun toggleExpand(key: GroupKey) {
+            val nowExpanded = !expandedGroups.contains(key)
+            if (nowExpanded) {
+                expandedGroups += key
+            } else {
+                expandedGroups -= key
+            }
+            _uiState.update { it.copy(departures = it.departures.applyExpansion()) }
+            if (nowExpanded) {
+                loadMore()
+            }
+        }
+
+        /**
+         * Request the next page of departures. Called by the UI when the user scrolls past the
+         * tail of the list, and by [toggleExpand] when a group is first opened. Coalesces
+         * concurrent calls — if a page is already in flight, the trigger is a no-op.
+         */
+        fun loadMore() {
+            if (loadMoreJob?.isActive == true) return
+            val tail = currentTailAnchor() ?: return
+            loadMoreJob =
+                viewModelScope.launch {
+                    _uiState.update { it.copy(departures = it.departures.withLoadingMore(true)) }
+                    val result = loadMoreDepartures(stopId, routeType, tail, PAGE_SIZE)
+                    when (result) {
+                        is Result.Success -> {
+                            result.data.forEach { dep -> pagedByRunRef[dep.runRef.value] = dep }
+                        }
+                        is Result.Error, Result.Loading -> { /* swallow — head poll will recover */ }
+                    }
+                    _uiState.update { current ->
+                        current.copy(
+                            departures = current.departures.withLoadingMore(false),
+                        ).rebuildGroups()
+                    }
+                }
+        }
+
         private fun loadHeader() {
             viewModelScope.launch {
                 val result: Result<StopDetail> = getStopDetail(stopId, routeType)
@@ -132,7 +202,7 @@ class StopDetailViewModel
                                 is Result.Success -> HeaderState.Loaded(result.data)
                                 is Result.Error -> HeaderState.Error(result.throwable.toUserFacingReason())
                             },
-                    )
+                    ).rebuildGroups()
                 }
             }
         }
@@ -141,7 +211,9 @@ class StopDetailViewModel
             when (result) {
                 is Result.Loading -> copy(departures = DeparturesState.Loading)
                 is Result.Success -> {
-                    val groups = result.data.toGroupedList(currentHeader = header)
+                    lastHeadPoll = result.data
+                    val merged = mergeDepartures(headPoll = result.data)
+                    val groups = merged.toGroupedList(currentHeader = header)
                     copy(
                         departures =
                             if (groups.isEmpty()) DeparturesState.Empty else DeparturesState.Loaded(groups),
@@ -155,6 +227,74 @@ class StopDetailViewModel
                         isRefreshing = false,
                     )
             }
+
+        /**
+         * Merge the most-recent head poll with the accumulated page cache. The head poll is the
+         * source of truth for the rows it covers (its `estimatedDepartureUtc` is freshest), so we
+         * overlay it on top of [pagedByRunRef]. Any pages that referenced runs the head poll has
+         * since dropped (because they departed) get garbage-collected by the "departed filter"
+         * in [toGroupedList] further down, so the map doesn't grow unbounded over a long screen
+         * session.
+         */
+        private fun mergeDepartures(headPoll: List<Departure>): List<Departure> {
+            val map = LinkedHashMap<String, Departure>(pagedByRunRef.size + headPoll.size)
+            pagedByRunRef.values.forEach { map[it.runRef.value] = it }
+            headPoll.forEach { map[it.runRef.value] = it }
+            return map.values.toList()
+        }
+
+        /**
+         * Apply the latest [expandedGroups] set to whatever groups the UI is currently rendering.
+         * Used by [toggleExpand] which mutates expansion *without* fetching new data —
+         * re-running the full merge / sort would be wasteful when only one boolean changed.
+         */
+        private fun DeparturesState.applyExpansion(): DeparturesState =
+            when (this) {
+                is DeparturesState.Loaded ->
+                    copy(
+                        groups =
+                            groups.map { g ->
+                                g.copy(expanded = expandedGroups.contains(g.key))
+                            },
+                    )
+                else -> this
+            }
+
+        private fun DeparturesState.withLoadingMore(value: Boolean): DeparturesState =
+            when (this) {
+                is DeparturesState.Loaded -> copy(isLoadingMore = value)
+                else -> this
+            }
+
+        /**
+         * Recompute the groups list from the current page cache. Called after [loadMore] lands
+         * its page and after the header resolves (the route projection is needed to fill in
+         * each group's badge). Idempotent when nothing has changed.
+         */
+        private fun StopDetailUiState.rebuildGroups(): StopDetailUiState {
+            // Only run if we already have at least one departure to show — the head poll's
+            // own emission will rebuild via `applyDepartureResult` otherwise, and we don't
+            // want to overwrite a Loading/Error state with an artificial Empty.
+            if (departures !is DeparturesState.Loaded && pagedByRunRef.isEmpty() && lastHeadPoll.isEmpty()) {
+                return this
+            }
+            val merged = mergeDepartures(headPoll = lastHeadPoll)
+            val groups = merged.toGroupedList(currentHeader = header)
+            val newDepartures =
+                if (groups.isEmpty()) DeparturesState.Empty else DeparturesState.Loaded(groups)
+            return copy(departures = newDepartures)
+        }
+
+        /**
+         * Anchor instant for the next [loadMore] call — the latest known departure across all
+         * groups. Returns null if we have no rows yet (which means there's nothing to anchor
+         * paging on; either wait for the head poll or skip the trigger).
+         */
+        private fun currentTailAnchor(): Instant? {
+            val state = _uiState.value.departures as? DeparturesState.Loaded ?: return null
+            val all = state.groups.flatMap { it.departures }
+            return all.maxOfOrNull { it.effectiveDepartureUtc() }
+        }
 
         /**
          * Group departures by (routeId, directionId), preserving insertion order within each
@@ -171,8 +311,12 @@ class StopDetailViewModel
                 }
             // Issue #30 acceptance criterion: departed entries drop off. Use the formatter's
             // own threshold so a row that would render as "now" is never filtered, and a row
-            // that would render as "departed" is never shown.
-            return filterNot { timeFormatter.isDeparted(it.scheduledDepartureUtc, it.estimatedDepartureUtc) }
+            // that would render as "departed" is never shown. Also garbage-collects departed
+            // rows from `pagedByRunRef` so it doesn't grow without bound over a long session.
+            val filtered = filterNot { timeFormatter.isDeparted(it.scheduledDepartureUtc, it.estimatedDepartureUtc) }
+            val keptRefs = filtered.map { it.runRef.value }.toHashSet()
+            pagedByRunRef.keys.retainAll(keptRefs)
+            return filtered
                 .groupBy { GroupKey(it.routeId.value, it.direction.id.value) }
                 .map { (key, departures) ->
                     val route = servingRoutes[key.routeId]
@@ -183,6 +327,7 @@ class StopDetailViewModel
                         routeType = route?.routeType ?: routeType,
                         headerLabel = "Route $routeNumber · ${departures.first().direction.name}",
                         departures = departures.sortedBy { it.effectiveDepartureUtc() },
+                        expanded = expandedGroups.contains(key),
                     )
                 }
                 .sortedBy { it.departures.first().effectiveDepartureUtc() }

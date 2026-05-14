@@ -19,7 +19,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -38,9 +39,11 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -55,8 +58,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
@@ -105,6 +110,8 @@ fun StopDetailRoute(
         onRefresh = viewModel::refresh,
         onRetry = viewModel::retryHeader,
         onDepartureClicked = onDepartureClicked,
+        onToggleExpand = viewModel::toggleExpand,
+        onReachedEnd = viewModel::loadMore,
         timeFormatter = viewModel.timeFormatter,
     )
 }
@@ -117,11 +124,45 @@ internal fun StopDetailScreenContent(
     onRefresh: () -> Unit,
     onRetry: () -> Unit,
     onDepartureClicked: (Departure) -> Unit,
+    onToggleExpand: (GroupKey) -> Unit,
+    onReachedEnd: () -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val disruptionMessage = stringResource(R.string.feature_stop_detail_disruption_snackbar)
+    val listState = rememberLazyListState()
+
+    // Pagination trigger — observe the last visible row index and fire `onReachedEnd` when it
+    // gets within END_TRIGGER_BUFFER of the tail. `derivedStateOf` keeps the snapshot subscription
+    // cheap (only fires when the predicate flips). `collectLatest` keeps the trigger from
+    // re-firing in a tight loop while the ViewModel is fulfilling the request.
+    val totalItems by remember { derivedStateOf { listState.layoutInfo.totalItemsCount } }
+    val lastVisibleIndex by remember {
+        derivedStateOf {
+            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        }
+    }
+    LaunchedEffect(onReachedEnd) {
+        snapshotFlow {
+            // Only trigger when the list actually has items and the user is near the end. Skip
+            // the very-small-list case where `totalItems < END_TRIGGER_BUFFER` would always be
+            // true and we'd page-storm at the bottom of a five-row list.
+            val total = totalItems
+            val last = lastVisibleIndex
+            total > END_TRIGGER_BUFFER && last >= total - END_TRIGGER_BUFFER
+        }.collectLatest { atEnd ->
+            if (atEnd) onReachedEnd()
+        }
+    }
+    // Compute "today" once outside LazyListScope. The asOf timestamp anchors the calendar so the
+    // banner stays correct when tests inject a fixed clock; in production it tracks wall-clock
+    // via the head poll's `clock.now()` write.
+    val todayLocal: LocalDate =
+        remember(uiState.asOf) {
+            (uiState.asOf ?: Instant.parse("1970-01-01T00:00:00Z"))
+                .toLocalDateTime(TimeZone.currentSystemDefault()).date
+        }
 
     Scaffold(
         topBar = {
@@ -173,6 +214,7 @@ internal fun StopDetailScreenContent(
                     .testTag(TestTagRoot),
         ) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
             ) {
                 item(key = "header") {
@@ -187,52 +229,130 @@ internal fun StopDetailScreenContent(
                     AsOfRow(asOf = uiState.asOf)
                 }
 
-                when (val list = uiState.departures) {
-                    DeparturesState.Loading -> {
-                        item(key = "loading") {
-                            LoadingSkeleton(modifier = Modifier.testTag(TestTagLoading))
-                        }
-                    }
-                    DeparturesState.Empty -> {
-                        item(key = "empty") {
-                            EmptyState(modifier = Modifier.testTag(TestTagEmpty))
-                        }
-                    }
-                    is DeparturesState.Error -> {
-                        item(key = "error") {
-                            ErrorState(
-                                reason = list.reason,
-                                onRetry = onRefresh,
-                                modifier = Modifier.testTag(TestTagError),
-                            )
-                        }
-                    }
-                    is DeparturesState.Loaded -> {
-                        list.groups.forEach { group ->
-                            item(key = "group-${group.key.routeId}-${group.key.directionId}") {
-                                GroupHeader(group = group)
-                            }
-                            items(
-                                items = group.departures,
-                                key = { dep -> "${group.key.routeId}-${group.key.directionId}-${dep.runRef.value}" },
-                            ) { dep ->
-                                DepartureRow(
-                                    departure = dep,
-                                    timeFormatter = timeFormatter,
-                                    routeBadge = group.headerLabel,
-                                    onDisruptionClicked = {
-                                        scope.launch {
-                                            snackbarHostState.showSnackbar(disruptionMessage)
-                                        }
-                                    },
-                                    onClicked = { onDepartureClicked(dep) },
-                                )
-                                HorizontalDivider()
-                            }
-                        }
-                    }
+                departuresSection(
+                    state = uiState.departures,
+                    today = todayLocal,
+                    timeFormatter = timeFormatter,
+                    onToggleExpand = onToggleExpand,
+                    onDepartureClicked = onDepartureClicked,
+                    onRefresh = onRefresh,
+                    onDisruptionClicked = {
+                        scope.launch { snackbarHostState.showSnackbar(disruptionMessage) }
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Render the lower part of the screen — the loading / empty / error / loaded states for the
+ * departures list. Lives as a `LazyListScope` extension rather than a `@Composable` so the
+ * `item { ... }` calls remain in the parent's lazy list context. Pulled out of the parent so
+ * detekt's cyclomatic-complexity check doesn't choke on the deeply-nested `when`.
+ */
+private fun LazyListScope.departuresSection(
+    state: DeparturesState,
+    today: LocalDate,
+    timeFormatter: RelativeTimeFormatter,
+    onToggleExpand: (GroupKey) -> Unit,
+    onDepartureClicked: (Departure) -> Unit,
+    onRefresh: () -> Unit,
+    onDisruptionClicked: () -> Unit,
+) {
+    when (state) {
+        DeparturesState.Loading -> {
+            item(key = "loading") {
+                LoadingSkeleton(modifier = Modifier.testTag(TestTagLoading))
+            }
+        }
+        DeparturesState.Empty -> {
+            item(key = "empty") {
+                EmptyState(modifier = Modifier.testTag(TestTagEmpty))
+            }
+        }
+        is DeparturesState.Error -> {
+            item(key = "error") {
+                ErrorState(
+                    reason = state.reason,
+                    onRetry = onRefresh,
+                    modifier = Modifier.testTag(TestTagError),
+                )
+            }
+        }
+        is DeparturesState.Loaded -> {
+            state.groups.forEach { group ->
+                groupSection(
+                    group = group,
+                    today = today,
+                    timeFormatter = timeFormatter,
+                    onToggleExpand = onToggleExpand,
+                    onDepartureClicked = onDepartureClicked,
+                    onDisruptionClicked = onDisruptionClicked,
+                )
+            }
+            if (state.isLoadingMore) {
+                item(key = "load-more-spinner") {
+                    LoadMoreSpinner()
                 }
             }
+        }
+    }
+}
+
+private fun LazyListScope.groupSection(
+    group: Group,
+    today: LocalDate,
+    timeFormatter: RelativeTimeFormatter,
+    onToggleExpand: (GroupKey) -> Unit,
+    onDepartureClicked: (Departure) -> Unit,
+    onDisruptionClicked: () -> Unit,
+) {
+    item(key = "group-${group.key.routeId}-${group.key.directionId}") {
+        GroupHeader(
+            group = group,
+            onToggleExpand = { onToggleExpand(group.key) },
+        )
+    }
+    val visible =
+        if (group.expanded) {
+            group.departures
+        } else {
+            group.departures.take(COLLAPSED_VISIBLE)
+        }
+    var lastDate: LocalDate? = null
+    visible.forEach { dep ->
+        val depDate =
+            dep.effectiveDepartureUtc()
+                .toLocalDateTime(TimeZone.currentSystemDefault())
+                .date
+        // Insert a date divider when we cross into a new calendar day. Same-day rows above the
+        // divider stay free of header chrome — it'd be noise to show "Wed 14 May" before today's
+        // first row.
+        if (depDate != today && depDate != lastDate) {
+            item(key = "date-${group.key.routeId}-${group.key.directionId}-$depDate") {
+                DateDivider(date = depDate)
+            }
+        }
+        lastDate = depDate
+        item(key = "${group.key.routeId}-${group.key.directionId}-${dep.runRef.value}") {
+            DepartureRow(
+                departure = dep,
+                timeFormatter = timeFormatter,
+                routeBadge = group.headerLabel,
+                onDisruptionClicked = onDisruptionClicked,
+                onClicked = { onDepartureClicked(dep) },
+            )
+            HorizontalDivider()
+        }
+    }
+    if (!group.expanded && group.departures.size > COLLAPSED_VISIBLE) {
+        item(key = "show-more-${group.key.routeId}-${group.key.directionId}") {
+            ShowMoreRow(
+                hiddenCount = group.departures.size - COLLAPSED_VISIBLE,
+                onClick = { onToggleExpand(group.key) },
+            )
+            HorizontalDivider()
         }
     }
 }
@@ -328,16 +448,91 @@ private fun StopHeader(
 }
 
 @Composable
-private fun GroupHeader(group: Group) {
+private fun GroupHeader(
+    group: Group,
+    onToggleExpand: () -> Unit,
+) {
     Surface(
-        modifier = Modifier.fillMaxWidth().testTag(TestTagGroupHeader),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggleExpand)
+                .testTag(TestTagGroupHeader),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = group.headerLabel,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.weight(1f),
+            )
+            // Chevron glyph: closed when collapsed, open when expanded. Material icons aren't
+            // pulled into this module to keep the dep surface tight (same trade as the back
+            // arrow); plain text glyphs are good enough for a v1.
+            Text(
+                text = if (group.expanded) "˅" else "›",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ShowMoreRow(
+    hiddenCount: Int,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .testTag(TestTagShowMore),
+    ) {
+        Text(
+            text = pluralStringResource(R.plurals.feature_stop_detail_show_more, hiddenCount, hiddenCount),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        )
+    }
+}
+
+@Composable
+private fun DateDivider(date: LocalDate) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().testTag(TestTagDateDivider),
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Text(
-            text = group.headerLabel,
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            text = date.formatHeader(),
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
         )
+    }
+}
+
+/** "Wed 14 May" — short, friendly, and bakes no calendar logic into the domain. */
+private fun LocalDate.formatHeader(): String {
+    val day = dayOfWeek.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
+    val month = month.name.take(3).lowercase().replaceFirstChar { it.uppercase() }
+    return "$day $dayOfMonth $month"
+}
+
+@Composable
+private fun LoadMoreSpinner() {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .testTag(TestTagLoadMoreSpinner),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(24.dp))
     }
 }
 
@@ -576,6 +771,14 @@ private fun RouteType.label(): String =
 private const val MAX_INLINE_ROUTE_CHIPS = 6
 private const val SKELETON_ROWS = 5
 
+/**
+ * How many items from the tail of the list count as "the user is near the end" and should
+ * trigger the next page fetch. Tuned so the page lands before the user actually runs out of
+ * rows, but not so eager that we page on every screen scroll. Mirrors the same heuristic
+ * Paging 3 ships with by default.
+ */
+private const val END_TRIGGER_BUFFER = 3
+
 internal const val TestTagRoot: String = "stop-detail-root"
 internal const val TestTagRouteChips: String = "stop-detail-route-chips"
 internal const val TestTagGroupHeader: String = "stop-detail-group-header"
@@ -587,3 +790,6 @@ internal const val TestTagEmpty: String = "stop-detail-empty"
 internal const val TestTagError: String = "stop-detail-error"
 internal const val TestTagHeaderRetry: String = "stop-detail-header-retry"
 internal const val TestTagDeparturesRetry: String = "stop-detail-departures-retry"
+internal const val TestTagShowMore: String = "stop-detail-show-more"
+internal const val TestTagDateDivider: String = "stop-detail-date-divider"
+internal const val TestTagLoadMoreSpinner: String = "stop-detail-load-more-spinner"

@@ -24,14 +24,18 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import com.google.common.truth.Truth.assertThat
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import kotlinx.coroutines.runBlocking
+import kotlinx.datetime.Clock
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import java.io.IOException
 import javax.inject.Inject
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Hilt-instrumented Compose UI tests for [StopDetailRoute]. Hosts the stateful route entry inside
@@ -250,6 +254,98 @@ class StopDetailScreenTest {
                 .isNotEmpty()
         }
         composeTestRule.onNodeWithText("Flinders Street Railway Station").assertIsDisplayed()
+    }
+
+    /**
+     * Collapsed-by-default groups (issue #68). A successful emission with more than three rows in
+     * one group renders only the first three plus a "Show N more" affordance — tapping the row
+     * expands the group and reveals every loaded row.
+     */
+    @Test
+    fun collapsedGroup_showsFirstThreeRowsAndShowMoreAffordance() {
+        stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+
+        composeTestRule.setContent {
+            StopDetailRoute(
+                stopId = StopId(STOP_ID),
+                routeType = RouteType.Train,
+                onBack = { /* no-op */ },
+            )
+        }
+
+        // Five rows for one (routeId, directionId) — collapsed view shows three.
+        val now = Clock.System.now()
+        val rows =
+            (0 until 5).map { i ->
+                DepartureMother.aDeparture()
+                    .withRunRef("ROW-$i")
+                    .withScheduledDepartureUtc(now + (i + 5).minutes)
+                    .withEstimatedDepartureUtc(now + (i + 5).minutes)
+                    .build()
+            }
+        runBlocking { departureRepository.emitSuccess(rows) }
+
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(TestTagDepartureRow).fetchSemanticsNodes().isNotEmpty()
+        }
+
+        // Only the first three rows render while collapsed; the show-more affordance is visible.
+        assertThat(composeTestRule.onAllNodesWithTag(TestTagDepartureRow).fetchSemanticsNodes())
+            .hasSize(COLLAPSED_VISIBLE)
+        composeTestRule.onNodeWithTag(TestTagShowMore).assertIsDisplayed()
+
+        // Tap it — every row is now visible.
+        composeTestRule.onNodeWithTag(TestTagShowMore).performClick()
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(TestTagDepartureRow).fetchSemanticsNodes().size >= rows.size
+        }
+        assertThat(composeTestRule.onAllNodesWithTag(TestTagDepartureRow).fetchSemanticsNodes())
+            .hasSize(rows.size)
+    }
+
+    /**
+     * Next-day date divider (issue #69). When a group's departures cross midnight local time,
+     * a date header is inserted between the rows that fall on different calendar dates.
+     */
+    @Test
+    fun crossingMidnight_rendersDateDividerBetweenDays() {
+        stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+
+        composeTestRule.setContent {
+            StopDetailRoute(
+                stopId = StopId(STOP_ID),
+                routeType = RouteType.Train,
+                onBack = { /* no-op */ },
+            )
+        }
+
+        // Anchor the test on a known instant that's late evening locally. Use system clock-anchored
+        // offsets so the test isn't sensitive to TZ shifts — we just need two rows that fall on
+        // different calendar days in the current zone.
+        val now = Clock.System.now()
+        val tomorrow = now + 24.hours
+        val today = now + 5.minutes
+        val rows =
+            listOf(
+                DepartureMother.aDeparture()
+                    .withRunRef("TODAY-1")
+                    .withScheduledDepartureUtc(today)
+                    .withEstimatedDepartureUtc(today)
+                    .build(),
+                DepartureMother.aDeparture()
+                    .withRunRef("TMRW-1")
+                    .withScheduledDepartureUtc(tomorrow)
+                    .withEstimatedDepartureUtc(tomorrow)
+                    .build(),
+            )
+        runBlocking { departureRepository.emitSuccess(rows) }
+
+        // Group has 2 rows, both visible while collapsed (≤ COLLAPSED_VISIBLE), so we don't need
+        // to tap show-more. The date divider is keyed by the next-day local date.
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(TestTagDateDivider).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeTestRule.onNodeWithTag(TestTagDateDivider).assertIsDisplayed()
     }
 
     private companion object {

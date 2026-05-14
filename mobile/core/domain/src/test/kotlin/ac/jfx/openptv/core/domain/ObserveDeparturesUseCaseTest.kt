@@ -11,6 +11,7 @@ import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Instant
 import org.junit.Test
 
 /**
@@ -55,5 +56,12 @@ class ObserveDeparturesUseCaseTest {
             calls += stopId to routeType
             return source
         }
+
+        override suspend fun loadMore(
+            stopId: StopId,
+            routeType: RouteType,
+            after: Instant,
+            maxResults: Int,
+        ): Result<List<Departure>> = error("not used")
     }
 }
