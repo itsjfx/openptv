@@ -209,25 +209,15 @@ private fun SortChipsRow(
             label = { Text(stringResource(R.string.feature_favourites_sort_alphabetical)) },
             modifier = Modifier.testTag(TestTagSortAlphabetical),
         )
-        // Nearest is disabled until Phase 05 lands location. We use `enabled = false` rather than
-        // a Snackbar-on-tap because the chip's visible state is honest at a glance — the user
-        // sees "this is grayed out, why?" and the subtitle (rendered below the chip row) answers
-        // the question. Snackbar-on-tap requires a tap to discover and clutters the lower
-        // portion of the screen.
+        // Phase 05 — Nearest is enabled. The sort degrades to Manual when LocationProvider has
+        // no fix (e.g. user denied coarse location, or device hasn't returned one yet).
         FilterChip(
-            selected = false,
-            enabled = false,
-            onClick = { /* disabled */ },
+            selected = selected == FavouritesSortPreference.Nearest,
+            onClick = { onSortSelected(FavouritesSortPreference.Nearest) },
             label = { Text(stringResource(R.string.feature_favourites_sort_nearest)) },
             modifier = Modifier.testTag(TestTagSortNearest),
         )
     }
-    Text(
-        text = stringResource(R.string.feature_favourites_sort_nearest_subtitle),
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-    )
 }
 
 @Composable

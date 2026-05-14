@@ -7,6 +7,7 @@ import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.navigation.AppNavKey
 import ac.jfx.openptv.feature.favourites.FavouritesRoute
+import ac.jfx.openptv.feature.nearby.NearbyRoute
 import ac.jfx.openptv.feature.search.SearchScreen
 import ac.jfx.openptv.feature.settings.SettingsRoute
 import ac.jfx.openptv.feature.setup.SetupScreen
@@ -106,6 +107,18 @@ private fun MainNav() {
                         onOpenSearch = { backStack.add(AppNavKey.Search) },
                     )
                 }
+                entry<AppNavKey.Nearby> {
+                    NearbyRoute(
+                        onOpenStopDetail = { stopId, routeTypeCode ->
+                            backStack.add(
+                                AppNavKey.StopDetail(
+                                    stopId = stopId,
+                                    routeTypeCode = routeTypeCode,
+                                ),
+                            )
+                        },
+                    )
+                }
                 entry<AppNavKey.StopDetail> { key ->
                     StopDetailRoute(
                         stopId = StopId(key.stopId),
@@ -179,6 +192,12 @@ private fun HomeScaffold(
                         // the bottom-nav surface.
                         onOpenSearch = { selectedTab = HomeTab.Search },
                     )
+                HomeTab.Nearby ->
+                    NearbyRoute(
+                        onOpenStopDetail = { stopId, routeTypeCode ->
+                            onOpenStopDetail(stopId, routeTypeCode, -1, -1)
+                        },
+                    )
                 HomeTab.Search ->
                     SearchScreen(
                         onStopSelected = { stop ->
@@ -196,6 +215,10 @@ private fun HomeScaffold(
     }
 }
 
+// Bottom-nav tab order: Favourites (default surface), Nearby (Phase 05 — map-based discovery),
+// Search (text discovery), Settings. Nearby slots between Favourites and Search because both
+// Nearby and Search are "find a stop" surfaces — Nearby by geography, Search by name — and
+// reviewers can tap-cycle between them without crossing Settings. `cc @itsjfx` to confirm.
 private enum class HomeTab(
     val glyph: String,
     val labelRes: Int,
@@ -203,6 +226,7 @@ private enum class HomeTab(
     val testTag: String,
 ) {
     Favourites("★", R.string.bottom_nav_favourites, "Favourites tab", TestTagTabFavourites),
+    Nearby("🗺", R.string.bottom_nav_nearby, "Nearby tab", TestTagTabNearby),
     Search("⌕", R.string.bottom_nav_search, "Search tab", TestTagTabSearch),
     Settings("⚙", R.string.bottom_nav_settings, "Settings tab", TestTagTabSettings),
 }
@@ -224,6 +248,7 @@ private fun SplashLoader() {
 
 internal const val TestTagHomeScaffold: String = "home-scaffold"
 internal const val TestTagTabFavourites: String = "home-tab-favourites"
+internal const val TestTagTabNearby: String = "home-tab-nearby"
 internal const val TestTagTabSearch: String = "home-tab-search"
 internal const val TestTagTabSettings: String = "home-tab-settings"
 

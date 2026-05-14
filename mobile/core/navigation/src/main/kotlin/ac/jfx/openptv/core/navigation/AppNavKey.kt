@@ -32,6 +32,15 @@ sealed interface AppNavKey : NavKey {
     data object Favourites : AppNavKey
 
     /**
+     * Nearby map screen (issue #37). MapLibre + OpenFreeMap tiles, user-location dot, clustered
+     * stop pins. The destination itself takes no args — the user's last camera position is held in
+     * the ViewModel's StateFlow across tab switches (no DataStore for v1; a "remember last view"
+     * cross-launch is a follow-up).
+     */
+    @Serializable
+    data object Nearby : AppNavKey
+
+    /**
      * Stop detail destination. Carries the `stopId` and `routeType` raw int values rather than the
      * domain types because Navigation 3 serialises keys via `kotlinx.serialization` and the value
      * classes (`@JvmInline value class StopId(val value: Int)`) don't have a serializer wired —

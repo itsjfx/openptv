@@ -3,7 +3,9 @@ package ac.jfx.openptv.core.network.di
 import ac.jfx.openptv.core.network.BackendApiService
 import ac.jfx.openptv.core.network.BuildConfig
 import ac.jfx.openptv.core.network.DepartureDataSource
+import ac.jfx.openptv.core.network.NearbyStopsDataSource
 import ac.jfx.openptv.core.network.RetrofitDepartureDataSource
+import ac.jfx.openptv.core.network.RetrofitNearbyStopsDataSource
 import ac.jfx.openptv.core.network.RetrofitStopDetailDataSource
 import ac.jfx.openptv.core.network.RetrofitStopSearchDataSource
 import ac.jfx.openptv.core.network.StopDetailDataSource
@@ -117,4 +119,10 @@ internal abstract class NetworkBindings {
     internal abstract fun bindDepartureDataSource(
         impl: RetrofitDepartureDataSource,
     ): DepartureDataSource
+
+    @Binds
+    @Singleton
+    internal abstract fun bindNearbyStopsDataSource(
+        impl: RetrofitNearbyStopsDataSource,
+    ): NearbyStopsDataSource
 }

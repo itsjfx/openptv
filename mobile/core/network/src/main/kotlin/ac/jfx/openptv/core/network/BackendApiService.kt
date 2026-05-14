@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.network
 
 import ac.jfx.openptv.core.network.model.DeparturesResponseDto
+import ac.jfx.openptv.core.network.model.NearbyStopsResponseDto
 import ac.jfx.openptv.core.network.model.SearchResponseDto
 import ac.jfx.openptv.core.network.model.StopResponseDto
 import retrofit2.http.GET
@@ -46,4 +47,15 @@ internal interface BackendApiService {
     suspend fun getDepartures(
         @Url url: String,
     ): DeparturesResponseDto
+
+    /**
+     * PTV `GET /api/v3/stops/location/{latitude},{longitude}` — stops within a configurable radius
+     * of a geographic point. Used by `:feature:nearby` (issue #37) to drive map pins. The data
+     * source composes the absolute URL (with `max_distance=<metres>` + optional `route_types`)
+     * before calling.
+     */
+    @GET
+    suspend fun stopsNearLocation(
+        @Url url: String,
+    ): NearbyStopsResponseDto
 }

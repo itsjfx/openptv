@@ -3,12 +3,14 @@ package ac.jfx.openptv.feature.favourites
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.data.test.FakeDepartureRepository
 import ac.jfx.openptv.core.data.test.FakeFavouritesRepository
+import ac.jfx.openptv.core.data.test.FakeLocationProvider
 import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
 import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
 import ac.jfx.openptv.core.domain.LoadNextDepartureUseCase
 import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ReorderFavouritesUseCase
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.testing.CoordinatesMother
 import ac.jfx.openptv.core.testing.DepartureMother
 import ac.jfx.openptv.core.testing.FavouriteRouteAtStopMother
 import androidx.datastore.core.DataStore
@@ -56,6 +58,7 @@ class FavouritesViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val favouritesRepository = FakeFavouritesRepository()
     private val departureRepository = FakeDepartureRepository()
+    private val locationProvider = FakeLocationProvider()
     private val clock = FakeClock(Instant.parse("2026-05-14T09:00:00Z"))
     private val formatter = RelativeTimeFormatter(clock)
 
@@ -100,6 +103,7 @@ class FavouritesViewModelTest {
             favouritesRepository = favouritesRepository,
             userPreferences = userPreferences,
             timeFormatter = formatter,
+            locationProvider = locationProvider,
         ).also { activeViewModel = it }
 
     /**
@@ -451,10 +455,46 @@ class FavouritesViewModelTest {
         }
 
     @Test
-    fun `Nearest sort applied via pre-seeded DataStore falls back to Manual ordering until Phase 05`() =
+    fun `Nearest sort orders rows by haversine distance from the user's last-known fix`() =
         runTest(dispatcher) {
-            // Pre-seed Nearest into the DataStore so the combined flow's first emission already
-            // reflects it (same workaround as the Alphabetical pre-seed test above).
+            // User is at Flinders Street. Brunswick is ~5.6 km north; Aberfeldie is ~10.5 km
+            // north-west — Brunswick should sort before Aberfeldie.
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            runBlocking {
+                FavouritesSortPreference.Nearest.put(dataStoreScope, preferencesDataStore)
+                userPreferences.favouritesSort.first { it == FavouritesSortPreference.Nearest }
+            }
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(1).withRouteId(11).withDirectionId(111)
+                        .withStopName("Aberfeldie").withPosition(0)
+                        .withLat(-37.7510).withLng(144.8970)
+                        .build(),
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(2).withRouteId(22).withDirectionId(222)
+                        .withStopName("Brunswick").withPosition(1)
+                        .withLat(-37.7670).withLng(144.9610)
+                        .build(),
+                ),
+            )
+            val viewModel = newViewModel()
+            drain()
+
+            val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
+            assertThat(loaded.sort).isEqualTo(FavouritesSortPreference.Nearest)
+            // Brunswick is closer to Flinders Street, so it should come first under Nearest.
+            assertThat(loaded.rows.map { it.stopName })
+                .containsExactly("Brunswick", "Aberfeldie")
+                .inOrder()
+        }
+
+    @Test
+    fun `Nearest sort with no fix falls back to Manual order`() =
+        runTest(dispatcher) {
+            // No location ever returned — the Nearest sort should degrade to Manual rather than
+            // render an undefined order. `cc @itsjfx`
+            locationProvider.seed(null)
             runBlocking {
                 FavouritesSortPreference.Nearest.put(dataStoreScope, preferencesDataStore)
                 userPreferences.favouritesSort.first { it == FavouritesSortPreference.Nearest }
@@ -476,7 +516,7 @@ class FavouritesViewModelTest {
 
             val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
             assertThat(loaded.sort).isEqualTo(FavouritesSortPreference.Nearest)
-            // Falls back to Manual ordering (by position), not Alphabetical.
+            // Falls back to Manual ordering (by position).
             assertThat(loaded.rows.map { it.stopName })
                 .containsExactly("Brunswick", "Aberfeldie")
                 .inOrder()

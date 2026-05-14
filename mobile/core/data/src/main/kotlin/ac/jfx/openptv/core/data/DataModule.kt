@@ -52,6 +52,12 @@ abstract class DataModule {
 
     @Binds
     @Singleton
+    internal abstract fun bindNearbyStopsRepository(
+        impl: NearbyStopsRepositoryImpl,
+    ): NearbyStopsRepository
+
+    @Binds
+    @Singleton
     internal abstract fun bindBackendUrlProvider(
         impl: SettingsBackendUrlProvider,
     ): BackendUrlProvider
