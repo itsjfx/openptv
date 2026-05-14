@@ -87,6 +87,7 @@ dependencies {
     implementation(project(":core:network"))
 
     // Features composed by the root nav graph.
+    implementation(project(":feature:favourites"))
     implementation(project(":feature:search"))
     implementation(project(":feature:settings"))
     implementation(project(":feature:stop-detail"))

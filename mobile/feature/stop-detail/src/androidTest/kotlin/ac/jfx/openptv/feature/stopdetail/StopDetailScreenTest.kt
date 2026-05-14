@@ -418,10 +418,77 @@ class StopDetailScreenTest {
         assertThat(favouritesRepository.current).isEmpty()
     }
 
+    /**
+     * Issue #35: when entered with `focusRouteId` + `focusDirectionId`, the screen filters down
+     * to only the matching `(routeId, directionId)` group — the other group's header is not
+     * rendered.
+     */
+    @Test
+    fun focusArgs_filterDeparturesToASingleGroup() {
+        val faveRoute =
+            RouteMother.aRoute()
+                .withId(FAVE_ROUTE_ID)
+                .withNumber("19")
+                .withName("North Coburg")
+                .withRouteType(RouteType.Tram)
+                .build()
+        val otherRoute =
+            RouteMother.aRoute()
+                .withId(OTHER_ROUTE_ID)
+                .withNumber("96")
+                .withName("East Brunswick")
+                .withRouteType(RouteType.Tram)
+                .build()
+        stopDetailRepository.enqueueSuccess(
+            StopDetailMother.aStopDetail()
+                .withServingRoutes(listOf(faveRoute, otherRoute))
+                .build(),
+        )
+
+        composeTestRule.setContent {
+            StopDetailRoute(
+                stopId = StopId(STOP_ID),
+                routeType = RouteType.Tram,
+                focusRouteId = FAVE_ROUTE_ID,
+                focusDirectionId = FAVE_DIRECTION_ID,
+                onBack = { /* no-op */ },
+            )
+        }
+
+        val now = Clock.System.now()
+        val matching =
+            DepartureMother.aDeparture()
+                .withRouteId(FAVE_ROUTE_ID)
+                .withDirectionId(FAVE_DIRECTION_ID)
+                .withDirectionName("North Coburg")
+                .withRunRef("MATCH-1")
+                .withScheduledDepartureUtc(now + 5.minutes)
+                .withEstimatedDepartureUtc(now + 5.minutes)
+                .build()
+        val other =
+            DepartureMother.aDeparture()
+                .withRouteId(OTHER_ROUTE_ID)
+                .withDirectionId(99)
+                .withDirectionName("East Brunswick")
+                .withRunRef("OTHER-1")
+                .withScheduledDepartureUtc(now + 5.minutes)
+                .withEstimatedDepartureUtc(now + 5.minutes)
+                .build()
+        runBlocking { departureRepository.emitSuccess(listOf(matching, other)) }
+
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(TestTagGroupHeader).fetchSemanticsNodes().isNotEmpty()
+        }
+        // Exactly one group header on screen — the filtered one.
+        assertThat(composeTestRule.onAllNodesWithTag(TestTagGroupHeader).fetchSemanticsNodes())
+            .hasSize(1)
+    }
+
     private companion object {
         const val STOP_ID = 1071
         const val FAVE_ROUTE_ID = 1881
         const val FAVE_DIRECTION_ID = 9
+        const val OTHER_ROUTE_ID = 1882
         const val WAIT_TIMEOUT_MILLIS: Long = 5_000
     }
 }

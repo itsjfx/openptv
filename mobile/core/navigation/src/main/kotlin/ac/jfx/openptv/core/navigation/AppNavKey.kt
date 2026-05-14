@@ -23,16 +23,32 @@ sealed interface AppNavKey : NavKey {
     data object Settings : AppNavKey
 
     /**
+     * Favourites screen. Each row is a favourited `(stopId, routeId, directionId)` triple; tapping
+     * one navigates to [StopDetail] with `focusRouteId` + `focusDirectionId` set so the screen
+     * renders only the matching group. The destination itself takes no args — the user's
+     * favourites are read off the repository at composition time.
+     */
+    @Serializable
+    data object Favourites : AppNavKey
+
+    /**
      * Stop detail destination. Carries the `stopId` and `routeType` raw int values rather than the
      * domain types because Navigation 3 serialises keys via `kotlinx.serialization` and the value
      * classes (`@JvmInline value class StopId(val value: Int)`) don't have a serializer wired —
      * passing the ints keeps the surface trivially `Bundle`-able across process death. The
      * destination's composable lifts them back into [`ac.jfx.openptv.core.model.StopId`] /
      * [`ac.jfx.openptv.core.model.RouteType`] at the boundary.
+     *
+     * `focusRouteId` + `focusDirectionId` are optional — when both are non-null the stop-detail
+     * screen renders only the matching `(routeId, directionId)` group (single-group filtered view
+     * for the favourites tap-through, per issue #35). When either is null, stop-detail renders its
+     * existing full grouped list. Default null keeps every existing call site source-compatible.
      */
     @Serializable
     data class StopDetail(
         val stopId: Int,
         val routeTypeCode: Int,
+        val focusRouteId: Int? = null,
+        val focusDirectionId: Int? = null,
     ) : AppNavKey
 }

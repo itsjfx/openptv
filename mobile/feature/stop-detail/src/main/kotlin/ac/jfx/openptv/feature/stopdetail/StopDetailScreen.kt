@@ -84,12 +84,22 @@ fun StopDetailRoute(
     stopId: StopId,
     routeType: RouteType,
     onBack: () -> Unit,
+    focusRouteId: Int? = null,
+    focusDirectionId: Int? = null,
     onDepartureClicked: (Departure) -> Unit = {},
     viewModel: StopDetailViewModel =
         hiltViewModel<StopDetailViewModel, StopDetailViewModel.Factory>(
-            key = "stop-detail-${stopId.value}-${routeType.name}",
+            // The focus args are part of the ViewModel store key so tapping the same favourite
+            // twice in a row reuses the cached ViewModel, but navigating to the same stop *without*
+            // the focus filter (e.g. via search) allocates a fresh one and renders the full list.
+            key = "stop-detail-${stopId.value}-${routeType.name}-${focusRouteId ?: -1}-${focusDirectionId ?: -1}",
         ) { factory ->
-            factory.create(stopId = stopId.value, routeTypeCode = routeType.toCode())
+            factory.create(
+                stopId = stopId.value,
+                routeTypeCode = routeType.toCode(),
+                focusRouteId = focusRouteId ?: -1,
+                focusDirectionId = focusDirectionId ?: -1,
+            )
         },
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

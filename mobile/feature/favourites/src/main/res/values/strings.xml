@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Favourites screen. Resource prefix matches the AGP `resourcePrefix` set by the
+         `openptv.android.library` convention plugin: every string here starts with
+         `feature_favourites_`. -->
+    <string name="feature_favourites_title">Favourites</string>
+
+    <!-- Empty state -->
+    <string name="feature_favourites_empty">Star a route at a stop to favourite it.</string>
+    <string name="feature_favourites_empty_cta">Search for a stop</string>
+
+    <!-- Sort selector -->
+    <string name="feature_favourites_sort_manual">Manual</string>
+    <string name="feature_favourites_sort_alphabetical">Alphabetical</string>
+    <string name="feature_favourites_sort_nearest">Nearest</string>
+    <string name="feature_favourites_sort_nearest_subtitle">Available with location (Phase 05)</string>
+
+    <!-- Row -->
+    <string name="feature_favourites_row_drag_handle">Drag to reorder</string>
+    <string name="feature_favourites_next_loading">Loading…</string>
+    <string name="feature_favourites_next_none">No upcoming departures</string>
+    <string name="feature_favourites_next_error">No data</string>
+
+    <!-- Undo snackbar -->
+    <string name="feature_favourites_removed">Removed</string>
+    <string name="feature_favourites_undo">Undo</string>
+
+    <!-- Row content description: stop, suburb, route number, direction, next departure phrase -->
+    <string name="feature_favourites_row_content_description">%1$s, %2$s. Route %3$s to %4$s. Next departure %5$s.</string>
+
+    <!-- Bottom-nav glyph stand-ins (no Material Icons dep) -->
+    <string name="feature_favourites_tab_label">Favourites</string>
+</resources>

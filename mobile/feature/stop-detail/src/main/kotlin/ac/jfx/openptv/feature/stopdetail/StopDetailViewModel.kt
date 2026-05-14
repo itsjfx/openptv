@@ -59,6 +59,16 @@ class StopDetailViewModel
     constructor(
         @Assisted("stopId") private val stopIdValue: Int,
         @Assisted("routeTypeCode") private val routeTypeCode: Int,
+        /**
+         * Optional filter — when both `focusRouteId` and `focusDirectionId` are non-null the
+         * `Loaded` departures state surfaces only the matching `(routeId, directionId)` group.
+         * Wired in by the favourites tap-through (issue #35) so the user lands on a single-group
+         * filtered view instead of the full grouped list. Negative sentinel `-1` stands in for
+         * `null` over the assisted boundary because Dagger assisted-inject doesn't generate
+         * nullable primitive bindings cleanly — the ViewModel lifts back to a real `Int?` here.
+         */
+        @Assisted("focusRouteId") private val focusRouteIdValue: Int,
+        @Assisted("focusDirectionId") private val focusDirectionIdValue: Int,
         private val getStopDetail: GetStopDetailUseCase,
         private val observeDepartures: ObserveDeparturesUseCase,
         private val loadMoreDepartures: LoadMoreDeparturesUseCase,
@@ -73,6 +83,12 @@ class StopDetailViewModel
     ) : ViewModel() {
         private val stopId: StopId = StopId(stopIdValue)
         private val routeType: RouteType = RouteType.fromCode(routeTypeCode)
+        private val focusKey: GroupKey? =
+            if (focusRouteIdValue >= 0 && focusDirectionIdValue >= 0) {
+                GroupKey(routeId = focusRouteIdValue, directionId = focusDirectionIdValue)
+            } else {
+                null
+            }
 
         /**
          * Assisted-injection factory. Takes raw `Int`s rather than the domain value classes
@@ -80,12 +96,19 @@ class StopDetailViewModel
          * deal with the mangled JVM names that Kotlin value classes use as method parameters
          * (the symptom is `not a valid name: create-…` at KSP time). Boxing to the value class
          * happens at the ViewModel boundary instead — same effect, no name-mangling.
+         *
+         * `focusRouteId` / `focusDirectionId` use `-1` as the sentinel for "no filter" because
+         * the same nullable-primitive limitation applies — assisted-inject doesn't generate a
+         * `Int?` parameter; the ViewModel converts the sentinel back into the real `null` (see
+         * `focusKey` above).
          */
         @AssistedFactory
         interface Factory {
             fun create(
                 @Assisted("stopId") stopId: Int,
                 @Assisted("routeTypeCode") routeTypeCode: Int,
+                @Assisted("focusRouteId") focusRouteId: Int,
+                @Assisted("focusDirectionId") focusDirectionId: Int,
             ): StopDetailViewModel
         }
 
@@ -396,6 +419,13 @@ class StopDetailViewModel
             pagedByRunRef.keys.retainAll(keptRefs)
             return filtered
                 .groupBy { GroupKey(it.routeId.value, it.direction.id.value) }
+                // Single-group filtered view — when the screen was entered with `focusRouteId` +
+                // `focusDirectionId` set (favourites tap-through, issue #35), drop every other
+                // group so the user sees only the route+direction they tapped. The filter sits
+                // here rather than in the UI layer because the grouping is the source of truth
+                // for the screen's `Empty` state (an emission with no matching group becomes
+                // Empty, not Loaded with zero groups).
+                .let { groups -> if (focusKey != null) groups.filterKeys { it == focusKey } else groups }
                 .map { (key, departures) ->
                     val route = servingRoutes[key.routeId]
                     val routeNumber = route?.number?.ifBlank { route.name }.orEmpty().ifBlank { "#${key.routeId}" }

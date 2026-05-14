@@ -6,33 +6,31 @@ import ac.jfx.openptv.core.designsystem.ThemeMode
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.navigation.AppNavKey
+import ac.jfx.openptv.feature.favourites.FavouritesRoute
 import ac.jfx.openptv.feature.search.SearchScreen
 import ac.jfx.openptv.feature.settings.SettingsRoute
 import ac.jfx.openptv.feature.setup.SetupScreen
 import ac.jfx.openptv.feature.stopdetail.StopDetailRoute
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.entryProvider
@@ -41,11 +39,8 @@ import androidx.navigation3.ui.NavDisplay
 
 /**
  * Root composable. The persisted theme mode is wrapped around this composable in
- * [ac.jfx.openptv.MainActivity] via `SettingsProvider`, so children read
- * `LocalThemeMode.current` directly without an extra ViewModel hop. The temporary
- * theme-mode cycle button from PR #72 is gone — Phase 04's `:feature:settings` screen
- * now owns appearance writes, and the Home top app bar exposes a gear `IconButton`
- * that navigates there.
+ * [ac.jfx.openptv.MainActivity] via `SettingsProvider`, so children read `LocalThemeMode.current`
+ * directly without an extra ViewModel hop.
  *
  * Setup gating still goes through the existing `:app`-owned `SettingsRepository` (backend URL
  * + `setupCompleted` flag) — that's a separate concern from user preferences.
@@ -71,17 +66,22 @@ private fun MainNav() {
         entryProvider =
             entryProvider {
                 entry<AppNavKey.Home> {
-                    HomeScreen(
-                        onOpenSearch = { backStack.add(AppNavKey.Search) },
-                        onOpenSettings = { backStack.add(AppNavKey.Settings) },
+                    HomeScaffold(
+                        onOpenStopDetail = { stopId, routeTypeCode, focusRouteId, focusDirectionId ->
+                            backStack.add(
+                                AppNavKey.StopDetail(
+                                    stopId = stopId,
+                                    routeTypeCode = routeTypeCode,
+                                    focusRouteId = focusRouteId,
+                                    focusDirectionId = focusDirectionId,
+                                ),
+                            )
+                        },
                     )
                 }
                 entry<AppNavKey.Search> {
                     SearchScreen(
                         onStopSelected = { stop ->
-                            // Phase 03: replace the search-screen snackbar with real navigation
-                            // into stop detail. The screen now snackbar's on its own only as a
-                            // visual confirmation; the real action is the back-stack push.
                             backStack.add(
                                 AppNavKey.StopDetail(
                                     stopId = stop.id.value,
@@ -91,10 +91,27 @@ private fun MainNav() {
                         },
                     )
                 }
+                entry<AppNavKey.Favourites> {
+                    FavouritesRoute(
+                        onOpenStopDetail = { stopId, routeTypeCode, focusRouteId, focusDirectionId ->
+                            backStack.add(
+                                AppNavKey.StopDetail(
+                                    stopId = stopId,
+                                    routeTypeCode = routeTypeCode,
+                                    focusRouteId = focusRouteId,
+                                    focusDirectionId = focusDirectionId,
+                                ),
+                            )
+                        },
+                        onOpenSearch = { backStack.add(AppNavKey.Search) },
+                    )
+                }
                 entry<AppNavKey.StopDetail> { key ->
                     StopDetailRoute(
                         stopId = StopId(key.stopId),
                         routeType = RouteType.fromCode(key.routeTypeCode),
+                        focusRouteId = key.focusRouteId,
+                        focusDirectionId = key.focusDirectionId,
                         onBack = { backStack.removeLastOrNull() },
                     )
                 }
@@ -103,6 +120,91 @@ private fun MainNav() {
                 }
             },
     )
+}
+
+/**
+ * Bottom-nav scaffold hosting the three top-level tabs: Favourites (default), Search, Settings.
+ * Each tab swaps the content under the [Scaffold] without pushing a back-stack entry, so the
+ * system back button still pops out of the gate (consistent with the Material 3 bottom-nav
+ * pattern).
+ *
+ * `selectedTab` is saved via `rememberSaveable` so a configuration change (rotation, dark-mode
+ * flip) keeps the user on the same tab; cold-launch always lands on Favourites because the issue
+ * calls Favourites the user's primary surface.
+ *
+ * Search-tab clicks open the existing [SearchScreen] in place; selecting a stop inside it pushes
+ * the stop-detail destination onto the back stack at the [MainNav] level. The Search destination
+ * is *also* navigable directly (the favourites empty-state CTA pushes it as a destination), so
+ * the tab variant and the destination variant are both wired.
+ */
+@Composable
+private fun HomeScaffold(
+    onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusRouteId: Int, focusDirectionId: Int) -> Unit,
+) {
+    var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Favourites) }
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                HomeTab.values().forEach { tab ->
+                    NavigationBarItem(
+                        selected = selectedTab == tab,
+                        onClick = { selectedTab = tab },
+                        icon = {
+                            // Glyph stand-ins keep `:app` off the Material Icons artifact, same
+                            // trade as the back arrow and favourite star elsewhere.
+                            Text(
+                                text = tab.glyph,
+                                style = MaterialTheme.typography.titleLarge,
+                            )
+                        },
+                        label = { Text(stringResource(tab.labelRes)) },
+                        modifier =
+                            Modifier
+                                .testTag(tab.testTag)
+                                .semantics { contentDescription = tab.semanticLabel },
+                    )
+                }
+            }
+        },
+        modifier = Modifier.testTag(TestTagHomeScaffold),
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+            when (selectedTab) {
+                HomeTab.Favourites ->
+                    FavouritesRoute(
+                        onOpenStopDetail = onOpenStopDetail,
+                        // Tapping "Search for a stop" from the empty-state CTA flips to the
+                        // Search tab rather than pushing a destination, so the user stays inside
+                        // the bottom-nav surface.
+                        onOpenSearch = { selectedTab = HomeTab.Search },
+                    )
+                HomeTab.Search ->
+                    SearchScreen(
+                        onStopSelected = { stop ->
+                            onOpenStopDetail(stop.id.value, stop.routeType.toCode(), -1, -1)
+                        },
+                    )
+                HomeTab.Settings ->
+                    SettingsRoute(
+                        // Back inside Settings just flips the tab back to Favourites because the
+                        // user is inside a bottom-nav surface with no real "back" target.
+                        onBack = { selectedTab = HomeTab.Favourites },
+                    )
+            }
+        }
+    }
+}
+
+private enum class HomeTab(
+    val glyph: String,
+    val labelRes: Int,
+    val semanticLabel: String,
+    val testTag: String,
+) {
+    Favourites("★", R.string.bottom_nav_favourites, "Favourites tab", TestTagTabFavourites),
+    Search("⌕", R.string.bottom_nav_search, "Search tab", TestTagTabSearch),
+    Settings("⚙", R.string.bottom_nav_settings, "Settings tab", TestTagTabSettings),
 }
 
 @Composable
@@ -120,66 +222,10 @@ private fun SplashLoader() {
     }
 }
 
-/**
- * Placeholder Home destination. Top app bar carries a gear `IconButton` that opens the new
- * `:feature:settings` Appearance screen. The body keeps the existing "Search stops" entry as
- * the primary action; subsequent Phase 04 work (favourites) will replace the placeholder body.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun HomeScreen(
-    onOpenSearch: () -> Unit,
-    onOpenSettings: () -> Unit,
-) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(text = stringResource(R.string.home_title)) },
-                actions = {
-                    IconButton(
-                        onClick = onOpenSettings,
-                        modifier =
-                            Modifier
-                                .testTag(TestTagHomeSettings)
-                                .semantics {
-                                    contentDescription = "Open settings"
-                                },
-                    ) {
-                        // Material icons aren't pulled into `:app` to keep the dep surface
-                        // tight; a glyph stand-in keeps the affordance. Mirrors the
-                        // `:feature:stop-detail` back arrow + favourite-icon convention.
-                        Text(
-                            text = "⚙",
-                            style = MaterialTheme.typography.titleLarge,
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(),
-            )
-        },
-    ) { paddingValues ->
-        Column(
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .padding(24.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = stringResource(R.string.home_subtitle),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(bottom = 24.dp),
-            )
-            Button(onClick = onOpenSearch) {
-                Text(text = stringResource(R.string.home_open_search))
-            }
-        }
-    }
-}
-
-internal const val TestTagHomeSettings: String = "home-open-settings"
+internal const val TestTagHomeScaffold: String = "home-scaffold"
+internal const val TestTagTabFavourites: String = "home-tab-favourites"
+internal const val TestTagTabSearch: String = "home-tab-search"
+internal const val TestTagTabSettings: String = "home-tab-settings"
 
 /**
  * Maps the `:core:datastore` user-preference theme enum to the `:core:designsystem`

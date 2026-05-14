@@ -50,6 +50,10 @@ import kotlin.time.Duration.Companion.seconds
  *  - `stopObserving` cancels the collector so subsequent `emit` calls don't reach the UI state.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+// Test file grouped by feature area (header, polling, expand, paging, favourites, focus filter)
+// rather than split into a class per scenario, so the JUnit report stays in one place. Splitting
+// would mean three @Before duplications and three sets of helper fixtures for no readability gain.
+@Suppress("LargeClass")
 class StopDetailViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val stopDetailRepository = FakeStopDetailRepository()
@@ -71,10 +75,14 @@ class StopDetailViewModelTest {
     private fun newViewModel(
         stopId: Int = DEFAULT_STOP_ID,
         routeTypeCode: Int = RouteType.Train.toCode(),
+        focusRouteId: Int = -1,
+        focusDirectionId: Int = -1,
     ): StopDetailViewModel =
         StopDetailViewModel(
             stopIdValue = stopId,
             routeTypeCode = routeTypeCode,
+            focusRouteIdValue = focusRouteId,
+            focusDirectionIdValue = focusDirectionId,
             getStopDetail = GetStopDetailUseCase(stopDetailRepository),
             observeDepartures = ObserveDeparturesUseCase(departureRepository),
             loadMoreDepartures = LoadMoreDeparturesUseCase(departureRepository),
@@ -756,6 +764,99 @@ class StopDetailViewModelTest {
             val otherGroup = loaded.groups.first { it.key.routeId == OTHER_ROUTE_ID }
             assertThat(faveGroup.isFavourite).isTrue()
             assertThat(otherGroup.isFavourite).isFalse()
+        }
+
+    // ---------- focus filter (issue #35) ----------
+
+    @Test
+    fun `focusRouteId and focusDirectionId filter the Loaded groups to a single matching group`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel =
+                newViewModel(
+                    focusRouteId = FAVE_ROUTE_ID,
+                    focusDirectionId = FAVE_DIRECTION_ID,
+                )
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val matching =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID)
+                    .withDirectionId(FAVE_DIRECTION_ID)
+                    .withRunRef("MATCH-1")
+                    .build()
+            val other =
+                DepartureMother.aDeparture()
+                    .withRouteId(OTHER_ROUTE_ID)
+                    .withDirectionId(OTHER_DIRECTION_ID)
+                    .withRunRef("OTHER-1")
+                    .build()
+            departureRepository.emitSuccess(listOf(matching, other))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups).hasSize(1)
+            assertThat(loaded.groups.single().key.routeId).isEqualTo(FAVE_ROUTE_ID)
+            assertThat(loaded.groups.single().key.directionId).isEqualTo(FAVE_DIRECTION_ID)
+        }
+
+    @Test
+    fun `focus filter with no matching group surfaces Empty rather than Loaded`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel =
+                newViewModel(
+                    focusRouteId = FAVE_ROUTE_ID,
+                    focusDirectionId = FAVE_DIRECTION_ID,
+                )
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            // Only a non-matching departure — the focus filter drops it, so the screen is Empty.
+            val other =
+                DepartureMother.aDeparture()
+                    .withRouteId(OTHER_ROUTE_ID)
+                    .withDirectionId(OTHER_DIRECTION_ID)
+                    .withRunRef("OTHER-1")
+                    .build()
+            departureRepository.emitSuccess(listOf(other))
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Empty)
+        }
+
+    @Test
+    fun `no focus filter renders every group as before`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            // Default `newViewModel()` passes `-1` sentinels → no filter.
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val a =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID)
+                    .withDirectionId(FAVE_DIRECTION_ID)
+                    .withRunRef("A-1")
+                    .build()
+            val b =
+                DepartureMother.aDeparture()
+                    .withRouteId(OTHER_ROUTE_ID)
+                    .withDirectionId(OTHER_DIRECTION_ID)
+                    .withRunRef("B-1")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
+                    .build()
+            departureRepository.emitSuccess(listOf(a, b))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups).hasSize(2)
         }
 
     @Test

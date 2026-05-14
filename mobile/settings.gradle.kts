@@ -50,6 +50,7 @@ include(":core:testing")
 // `:core:designsystem`, `:core:ui`, `:core:common`, `:core:navigation` (the
 // feature convention plugin guards those with `findProject` so missing ones are
 // a no-op, not a build break).
+include(":feature:favourites")
 include(":feature:search")
 include(":feature:settings")
 include(":feature:stop-detail")
