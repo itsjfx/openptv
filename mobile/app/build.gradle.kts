@@ -80,6 +80,7 @@ dependencies {
     // Core libs — :app is a consumer of every core module it composes.
     implementation(project(":core:common"))
     implementation(project(":core:data"))
+    implementation(project(":core:datastore"))
     implementation(project(":core:designsystem"))
     implementation(project(":core:model"))
     implementation(project(":core:navigation"))

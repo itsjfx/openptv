@@ -1,6 +1,7 @@
 package ac.jfx.openptv.ui
 
 import ac.jfx.openptv.core.data.SettingsRepository
+import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,7 +12,9 @@ import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 
 /**
- * Top-level ViewModel for root-graph decisions — currently just the setup-completion gate.
+ * Top-level ViewModel for root-graph decisions — currently the setup-completion gate plus a
+ * passthrough handle to [UserPreferencesDataStore] so the root composable can write theme-mode
+ * changes from the Home screen's cycle button without an extra Hilt entry-point shim.
  *
  * The state is a sealed [GateState] rather than a raw boolean so the UI can show a tiny loader
  * while DataStore reads the first value off disk, then animate into either the setup flow or
@@ -23,6 +26,7 @@ class AppViewModel
     @Inject
     constructor(
         settings: SettingsRepository,
+        val userPreferences: UserPreferencesDataStore,
     ) : ViewModel() {
         val gate: StateFlow<GateState> =
             settings.settings
