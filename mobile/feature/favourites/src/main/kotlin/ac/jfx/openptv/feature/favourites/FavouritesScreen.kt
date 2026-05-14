@@ -280,7 +280,10 @@ private fun RowList(
                 .fillMaxSize()
                 .testTag(TestTagRowList),
     ) {
-        items(working, key = { it.key }) { row ->
+        // `LazyColumn`'s `key =` slot is round-tripped through `Bundle` for state restoration,
+        // which only accepts primitives. `FavouriteKey` is a data class, so we serialise it to a
+        // dotted string here — same identity, Bundle-safe.
+        items(working, key = { it.key.asLazyListKey() }) { row ->
             val isDragging = draggingKey == row.key
             val rowModifier =
                 Modifier
@@ -464,6 +467,20 @@ internal fun testTagForRow(key: FavouriteKey): String =
 
 internal fun testTagForDelete(key: FavouriteKey): String =
     "favourites-delete-${key.stopId}-${key.routeId}-${key.directionId}"
+
+/**
+ * Bundle-safe string projection of [FavouriteKey] for `LazyColumn`'s `key =` slot.
+ *
+ * `LazyColumn` round-trips the key through `Bundle` via `SaveableStateHolder` for state
+ * restoration, and `Bundle` rejects anything that isn't a registered primitive / `Parcelable` /
+ * `Serializable` — a Kotlin `data class` matches `Serializable` only if explicitly declared so,
+ * which [FavouriteKey] is not. Passing the data class directly throws
+ * `IllegalArgumentException: Type of the key ... is not supported` on the first composition that
+ * actually has rows. Project to a delimited `String` instead — same uniqueness, Bundle-safe.
+ *
+ * Visible to tests so a JVM regression can assert the contract without booting an emulator.
+ */
+internal fun FavouriteKey.asLazyListKey(): String = "$stopId.$routeId.$directionId"
 
 /** How many pixels of vertical drag count as one row-swap. Tuned for a typical ~64.dp row. */
 private const val REORDER_THRESHOLD_PX: Float = 80f

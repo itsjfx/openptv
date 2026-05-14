@@ -22,6 +22,12 @@ android {
         // `HiltTestApplication` for these androidTests. Mirrors `:feature:stop-detail`.
         testInstrumentationRunner = "ac.jfx.openptv.core.testing.OpenPtvTestRunner"
     }
+
+    // Robolectric (used by `FavouritesScreenKeyTest`) needs the manifest + resources from the
+    // module on the test classpath. Same shape as `:core:datastore` / `:core:database`.
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
@@ -48,6 +54,11 @@ dependencies {
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    // Robolectric gives JVM tests a shadowed `android.os.Bundle` that enforces the real type
+    // whitelist. Used by `FavouritesScreenKeyTest` to pin the Bundle-safe `LazyColumn` key
+    // contract without booting an emulator.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.ext.junit)
 
     // Hilt-instrumented Compose UI tests. Same wiring as `:feature:stop-detail` /
     // `:feature:settings`.
