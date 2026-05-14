@@ -5,6 +5,12 @@
     <string name="home_subtitle">Public Transport Victoria, Material You.</string>
     <string name="home_open_search">Search stops</string>
 
+    <!-- Bottom-navigation tab labels. Plain glyphs stand in for Material Icons so :app stays
+         off the icons artifact. -->
+    <string name="bottom_nav_favourites">Favourites</string>
+    <string name="bottom_nav_search">Search</string>
+    <string name="bottom_nav_settings">Settings</string>
+
     <!-- Stop search strings live in :feature:search/.../strings.xml.
          Settings (theme mode + dynamic colour) strings live in :feature:settings. -->
 
