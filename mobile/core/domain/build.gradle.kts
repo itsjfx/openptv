@@ -35,4 +35,8 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     testImplementation(project(":core:testing"))
+    // `ToggleFavouriteUseCaseTest` drives the use case against `FakeFavouritesRepository` from
+    // `:core:data-test`. Mocking a repository interface that already has a hand-written fake is
+    // a code smell — see `CLAUDE.md` testing priority order.
+    testImplementation(project(":core:data-test"))
 }

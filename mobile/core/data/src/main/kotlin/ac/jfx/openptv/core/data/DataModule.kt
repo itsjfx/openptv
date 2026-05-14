@@ -46,6 +46,12 @@ abstract class DataModule {
 
     @Binds
     @Singleton
+    internal abstract fun bindFavouritesRepository(
+        impl: FavouritesRepositoryImpl,
+    ): FavouritesRepository
+
+    @Binds
+    @Singleton
     internal abstract fun bindBackendUrlProvider(
         impl: SettingsBackendUrlProvider,
     ): BackendUrlProvider

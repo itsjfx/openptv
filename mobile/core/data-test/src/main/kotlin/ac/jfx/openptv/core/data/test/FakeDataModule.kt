@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.data.test
 
 import ac.jfx.openptv.core.data.DataModule
 import ac.jfx.openptv.core.data.DepartureRepository
+import ac.jfx.openptv.core.data.FavouritesRepository
 import ac.jfx.openptv.core.data.StopDetailRepository
 import ac.jfx.openptv.core.data.StopSearchRepository
 import dagger.Binds
@@ -45,4 +46,10 @@ abstract class FakeDataModule {
     internal abstract fun bindDepartureRepository(
         impl: FakeDepartureRepository,
     ): DepartureRepository
+
+    @Binds
+    @Singleton
+    internal abstract fun bindFavouritesRepository(
+        impl: FakeFavouritesRepository,
+    ): FavouritesRepository
 }

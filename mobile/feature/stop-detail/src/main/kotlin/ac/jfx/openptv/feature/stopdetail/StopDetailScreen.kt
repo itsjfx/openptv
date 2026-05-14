@@ -2,11 +2,14 @@ package ac.jfx.openptv.feature.stopdetail
 
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.Direction
 import ac.jfx.openptv.core.model.Route
+import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.feature.stopdetail.R
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -111,6 +114,7 @@ fun StopDetailRoute(
         onRetry = viewModel::retryHeader,
         onDepartureClicked = onDepartureClicked,
         onToggleExpand = viewModel::toggleExpand,
+        onToggleFavourite = viewModel::toggleFavourite,
         onReachedEnd = viewModel::loadMore,
         timeFormatter = viewModel.timeFormatter,
     )
@@ -125,6 +129,7 @@ internal fun StopDetailScreenContent(
     onRetry: () -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onToggleExpand: (GroupKey) -> Unit,
+    onToggleFavourite: (RouteId, Direction) -> Unit,
     onReachedEnd: () -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
@@ -184,21 +189,9 @@ internal fun StopDetailScreenContent(
                         Text(text = "‹", style = MaterialTheme.typography.headlineMedium)
                     }
                 },
-                actions = {
-                    // Disabled favourite icon — Phase 04 wires it up. Modelled here so the layout
-                    // doesn't shift when the feature lands.
-                    IconButton(
-                        onClick = { /* disabled */ },
-                        enabled = false,
-                        modifier =
-                            Modifier.semantics {
-                                contentDescription =
-                                    "Favourite (coming in Phase 4)"
-                            },
-                    ) {
-                        Text(text = "☆", style = MaterialTheme.typography.titleLarge)
-                    }
-                },
+                // Favourite affordance moved into the per-route `GroupHeader` (issue #34). The
+                // favourites unit is `(stopId, routeId, directionId)` — a service — not a whole
+                // stop, so the star belongs at the group's granularity.
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },
@@ -234,6 +227,7 @@ internal fun StopDetailScreenContent(
                     today = todayLocal,
                     timeFormatter = timeFormatter,
                     onToggleExpand = onToggleExpand,
+                    onToggleFavourite = onToggleFavourite,
                     onDepartureClicked = onDepartureClicked,
                     onRefresh = onRefresh,
                     onDisruptionClicked = {
@@ -251,11 +245,13 @@ internal fun StopDetailScreenContent(
  * `item { ... }` calls remain in the parent's lazy list context. Pulled out of the parent so
  * detekt's cyclomatic-complexity check doesn't choke on the deeply-nested `when`.
  */
+@Suppress("LongParameterList") // composables thread several callbacks through — bundling buys nothing for clarity
 private fun LazyListScope.departuresSection(
     state: DeparturesState,
     today: LocalDate,
     timeFormatter: RelativeTimeFormatter,
     onToggleExpand: (GroupKey) -> Unit,
+    onToggleFavourite: (RouteId, Direction) -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onRefresh: () -> Unit,
     onDisruptionClicked: () -> Unit,
@@ -287,6 +283,7 @@ private fun LazyListScope.departuresSection(
                     today = today,
                     timeFormatter = timeFormatter,
                     onToggleExpand = onToggleExpand,
+                    onToggleFavourite = onToggleFavourite,
                     onDepartureClicked = onDepartureClicked,
                     onDisruptionClicked = onDisruptionClicked,
                 )
@@ -305,6 +302,7 @@ private fun LazyListScope.groupSection(
     today: LocalDate,
     timeFormatter: RelativeTimeFormatter,
     onToggleExpand: (GroupKey) -> Unit,
+    onToggleFavourite: (RouteId, Direction) -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onDisruptionClicked: () -> Unit,
 ) {
@@ -312,6 +310,12 @@ private fun LazyListScope.groupSection(
         GroupHeader(
             group = group,
             onToggleExpand = { onToggleExpand(group.key) },
+            onToggleFavourite = {
+                // The favourites use case needs the [Direction] (id + name) — the group's first
+                // departure is the source of truth for that on the screen.
+                val first = group.departures.firstOrNull() ?: return@GroupHeader
+                onToggleFavourite(first.routeId, first.direction)
+            },
         )
     }
     val visible =
@@ -451,7 +455,20 @@ private fun StopHeader(
 private fun GroupHeader(
     group: Group,
     onToggleExpand: () -> Unit,
+    onToggleFavourite: () -> Unit,
 ) {
+    // Compute the favourite affordance's content description here so the `IconButton` semantics
+    // include the route + direction context for TalkBack. The route descriptor mirrors what the
+    // departure-row TalkBack copy uses elsewhere on the screen.
+    val routeDescriptor = group.headerLabel.removePrefix("Route ").substringBefore(" ·")
+    val directionName = group.departures.firstOrNull()?.direction?.name.orEmpty()
+    val favouriteDescription =
+        if (group.isFavourite) {
+            stringResource(R.string.feature_stop_detail_unfavourite_route, routeDescriptor, directionName)
+        } else {
+            stringResource(R.string.feature_stop_detail_favourite_route, routeDescriptor, directionName)
+        }
+
     Surface(
         modifier =
             Modifier
@@ -461,7 +478,7 @@ private fun GroupHeader(
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -469,9 +486,34 @@ private fun GroupHeader(
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier.weight(1f),
             )
-            // Chevron glyph: closed when collapsed, open when expanded. Material icons aren't
-            // pulled into this module to keep the dep surface tight (same trade as the back
-            // arrow); plain text glyphs are good enough for a v1.
+            // Star glyph — filled when favourited, hollow otherwise. `Crossfade` animates between
+            // the two states so the user gets feedback on the tap without flicker. Material
+            // icons aren't pulled into this module to keep the dep surface tight (same trade as
+            // the back arrow and the chevron); plain text glyphs are good enough for a v1.
+            IconButton(
+                onClick = onToggleFavourite,
+                modifier =
+                    Modifier
+                        .testTag(TestTagFavouriteToggle)
+                        .semantics { contentDescription = favouriteDescription },
+            ) {
+                Crossfade(
+                    targetState = group.isFavourite,
+                    label = "favourite-star",
+                ) { favourited ->
+                    Text(
+                        text = if (favourited) "★" else "☆",
+                        style = MaterialTheme.typography.titleLarge,
+                        color =
+                            if (favourited) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                    )
+                }
+            }
+            // Chevron glyph: closed when collapsed, open when expanded.
             Text(
                 text = if (group.expanded) "˅" else "›",
                 style = MaterialTheme.typography.titleMedium,
@@ -782,6 +824,7 @@ private const val END_TRIGGER_BUFFER = 3
 internal const val TestTagRoot: String = "stop-detail-root"
 internal const val TestTagRouteChips: String = "stop-detail-route-chips"
 internal const val TestTagGroupHeader: String = "stop-detail-group-header"
+internal const val TestTagFavouriteToggle: String = "stop-detail-favourite-toggle"
 internal const val TestTagDepartureRow: String = "stop-detail-departure-row"
 internal const val TestTagDisruptionFlag: String = "stop-detail-disruption-flag"
 internal const val TestTagAsOf: String = "stop-detail-as-of"

@@ -5,7 +5,12 @@ import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.domain.GetStopDetailUseCase
 import ac.jfx.openptv.core.domain.LoadMoreDeparturesUseCase
 import ac.jfx.openptv.core.domain.ObserveDeparturesUseCase
+import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
+import ac.jfx.openptv.core.domain.ToggleFavouriteUseCase
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.Direction
+import ac.jfx.openptv.core.model.Route
+import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopDetail
 import ac.jfx.openptv.core.model.StopId
@@ -48,6 +53,7 @@ import java.io.IOException
  * mirrors the contract spelled out in [`ac.jfx.openptv.core.data.DepartureRepository`].
  */
 @HiltViewModel(assistedFactory = StopDetailViewModel.Factory::class)
+@Suppress("LongParameterList") // ViewModel composes several use cases — splitting would be churn for no clarity win
 class StopDetailViewModel
     @AssistedInject
     constructor(
@@ -56,6 +62,8 @@ class StopDetailViewModel
         private val getStopDetail: GetStopDetailUseCase,
         private val observeDepartures: ObserveDeparturesUseCase,
         private val loadMoreDepartures: LoadMoreDeparturesUseCase,
+        private val observeFavourites: ObserveFavouritesUseCase,
+        private val toggleFavourite: ToggleFavouriteUseCase,
         private val clock: Clock,
         /**
          * Exposed for the Compose layer so the screen renders relative times under the same
@@ -106,8 +114,17 @@ class StopDetailViewModel
         /** Which group keys the user has expanded. Persists across head emissions. */
         private val expandedGroups: MutableSet<GroupKey> = mutableSetOf()
 
+        /**
+         * Snapshot of every `(routeId, directionId)` triple at the current stop the user has
+         * favourited. Updated by the favourites flow; consumed when [rebuildGroups] projects each
+         * `Group.isFavourite`. Kept as an in-memory `Set` so the per-group lookup is O(1) and the
+         * cost of a favourites emission is one set rebuild rather than one DAO query per group.
+         */
+        private var favouriteKeys: Set<GroupKey> = emptySet()
+
         init {
             loadHeader()
+            observeFavouritesAtThisStop()
         }
 
         /**
@@ -189,6 +206,67 @@ class StopDetailViewModel
                         ).rebuildGroups()
                     }
                 }
+        }
+
+        /**
+         * Subscribe to the global favourites flow and project it down to "which `(routeId,
+         * directionId)` triples at *this* stop are favourited". Updates [favouriteKeys] and
+         * re-runs [rebuildGroups] so the star fill state in the UI reflects external mutations
+         * (favourites screen, widget) immediately.
+         *
+         * Scoped to [viewModelScope] rather than the per-Resume [observeJob] because favourites
+         * are a small in-memory flow — there's no battery cost to keeping the collector alive
+         * across the screen's Pause cycles, and not tearing down means we don't miss a star-state
+         * change made on another screen while this one is backgrounded.
+         */
+        private fun observeFavouritesAtThisStop() {
+            viewModelScope.launch {
+                observeFavourites().collect { favourites ->
+                    favouriteKeys =
+                        favourites
+                            .asSequence()
+                            .filter { it.stopId == stopId }
+                            .map { GroupKey(routeId = it.routeId.value, directionId = it.directionId.value) }
+                            .toSet()
+                    _uiState.update { current -> current.rebuildGroups() }
+                }
+            }
+        }
+
+        /**
+         * Toggle the favourited state of the `(routeId, directionId)` group at this stop. The
+         * call relies on the header being loaded (so we have a [StopDetail.stop] to enrich the
+         * favourite with display fields) and on at least one departure existing in the group (so
+         * we have a [Direction] name to cache). Both preconditions hold whenever the star
+         * affordance is visible — the star is rendered inside a `GroupHeader`, which only exists
+         * once a group has been built from a successful departures emission.
+         *
+         * No-op if either precondition isn't met — silently dropping the tap is the right call
+         * because the affordance shouldn't be reachable in those cases.
+         */
+        fun toggleFavourite(
+            routeId: RouteId,
+            direction: Direction,
+        ) {
+            val header = _uiState.value.header as? HeaderState.Loaded ?: return
+            val stop = header.detail.stop
+            // Prefer the projection from `servingRoutes` when present — gives us a real route
+            // number + name to cache. When the header response omits the route (PTV occasionally
+            // returns an empty `routes` block for tram stops with high churn), fall back to a
+            // synthetic projection built from the route id + this stop's mode so the favourite
+            // still persists. The favourites screen renders a `#N` placeholder for these and
+            // refreshes the display fields on the next re-favourite.
+            val route =
+                header.detail.servingRoutes.firstOrNull { it.id == routeId }
+                    ?: Route(
+                        id = routeId,
+                        number = "",
+                        name = "",
+                        routeType = stop.routeType,
+                    )
+            viewModelScope.launch {
+                toggleFavourite(stop = stop, route = route, direction = direction)
+            }
         }
 
         private fun loadHeader() {
@@ -328,6 +406,7 @@ class StopDetailViewModel
                         headerLabel = "Route $routeNumber · ${departures.first().direction.name}",
                         departures = departures.sortedBy { it.effectiveDepartureUtc() },
                         expanded = expandedGroups.contains(key),
+                        isFavourite = favouriteKeys.contains(key),
                     )
                 }
                 .sortedBy { it.departures.first().effectiveDepartureUtc() }
