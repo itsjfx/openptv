@@ -1,14 +1,9 @@
 package ac.jfx.openptv.core.designsystem
 
-import androidx.compose.runtime.compositionLocalOf
-
 /**
- * Three-way theme mode. Persisted via DataStore in Phase 4; in-memory only for the barebones skeleton.
+ * Three-way theme mode the designsystem renders against. Mirrored by
+ * `ac.jfx.openptv.core.datastore.preference.ThemeModePreference.ThemeMode` — `:core:datastore`
+ * owns the persisted preference DSL and exposes its own composition local; the designsystem
+ * stays decoupled and consumes the value as a regular parameter.
  */
 enum class ThemeMode { System, Light, Dark }
-
-/**
- * Composition local for the active theme mode. Screens read this to render a toggle UI.
- * The actual mutable state lives in the `App` composable for the barebones cut.
- */
-val LocalThemeMode = compositionLocalOf { ThemeMode.System }

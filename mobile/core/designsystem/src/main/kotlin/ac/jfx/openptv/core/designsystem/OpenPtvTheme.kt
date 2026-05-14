@@ -18,10 +18,14 @@ import androidx.compose.ui.platform.LocalContext
  *  - Below Android 12: fall back to a Material 3 default palette. ReadYou's tonal-palette port
  *    lands in a follow-up issue; until then, the stock M3 defaults are a deliberate placeholder
  *    so non-dynamic devices feel "Material 3", not "styled-by-accident".
+ *
+ * `themeMode` is a required parameter rather than reading from a designsystem-owned composition
+ * local because the persisted-preference DSL in `:core:datastore` is the single source of truth.
+ * The app root reads `LocalThemeMode.current` from `:core:datastore` and passes the value here.
  */
 @Composable
 fun OpenPtvTheme(
-    themeMode: ThemeMode = LocalThemeMode.current,
+    themeMode: ThemeMode,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()

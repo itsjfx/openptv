@@ -1,8 +1,9 @@
 package ac.jfx.openptv.ui
 
 import ac.jfx.openptv.R
-import ac.jfx.openptv.core.designsystem.LocalThemeMode
-import ac.jfx.openptv.core.designsystem.OpenPtvTheme
+import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
+import ac.jfx.openptv.core.datastore.preference.LocalThemeMode
+import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
 import ac.jfx.openptv.core.designsystem.ThemeMode
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
@@ -22,11 +23,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -36,36 +34,52 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import kotlinx.coroutines.CoroutineScope
 
 /**
- * Root composable. Owns the theme-mode state (in-memory for the barebones cut; DataStore lands
- * in Phase 04) and gates the main navigation behind the first-run setup flow. Nav keys come from
- * `:core:navigation` so feature modules can navigate to each other without depending on each
- * other.
+ * Root composable. The theme mode is read from `LocalThemeMode.current` (provided by
+ * `SettingsProvider` at `MainActivity`'s `setContent`) and written back via the typed
+ * [ThemeModePreference] DSL — the previous `rememberSaveable { ThemeMode.System }` switcher
+ * is gone now that `:core:datastore` owns persisted preferences.
+ *
+ * Setup gating still goes through the existing `:app`-owned `SettingsRepository` (backend URL
+ * + `setupCompleted` flag) — that's a separate concern from user preferences.
  */
 @Composable
 fun App(appViewModel: AppViewModel = hiltViewModel()) {
-    var themeMode by rememberSaveable { mutableStateOf(ThemeMode.System) }
     val gate by appViewModel.gate.collectAsStateWithLifecycle()
+    val themePreference = LocalThemeMode.current
+    val scope = rememberCoroutineScope()
+    val userPreferences = appViewModel.userPreferences
 
-    CompositionLocalProvider(LocalThemeMode provides themeMode) {
-        OpenPtvTheme(themeMode = themeMode) {
-            when (gate) {
-                GateState.Loading -> SplashLoader()
-                GateState.NeedsSetup -> SetupScreen(onSetupComplete = { /* gate flow flips */ })
-                GateState.Ready ->
-                    MainNav(
-                        themeMode = themeMode,
-                        onCycleTheme = { themeMode = themeMode.next() },
-                    )
-            }
-        }
+    when (gate) {
+        GateState.Loading -> SplashLoader()
+        GateState.NeedsSetup -> SetupScreen(onSetupComplete = { /* gate flow flips */ })
+        GateState.Ready ->
+            MainNav(
+                themeMode = themePreference.value,
+                onCycleTheme = { cycle(themePreference, scope, userPreferences) },
+            )
     }
+}
+
+private fun cycle(
+    current: ThemeModePreference,
+    scope: CoroutineScope,
+    userPreferences: UserPreferencesDataStore,
+) {
+    val next =
+        when (current) {
+            ThemeModePreference.System -> ThemeModePreference.Light
+            ThemeModePreference.Light -> ThemeModePreference.Dark
+            ThemeModePreference.Dark -> ThemeModePreference.System
+        }
+    next.put(scope, userPreferences.dataStore)
 }
 
 @Composable
 private fun MainNav(
-    themeMode: ThemeMode,
+    themeMode: ThemeModePreference.ThemeMode,
     onCycleTheme: () -> Unit,
 ) {
     val backStack = rememberNavBackStack(AppNavKey.Home)
@@ -133,7 +147,7 @@ private fun SplashLoader() {
  */
 @Composable
 private fun HomeScreen(
-    themeMode: ThemeMode,
+    themeMode: ThemeModePreference.ThemeMode,
     onCycleTheme: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -182,16 +196,21 @@ private fun HomeScreen(
     }
 }
 
-private fun ThemeMode.next(): ThemeMode =
+private fun ThemeModePreference.ThemeMode.labelRes(): Int =
     when (this) {
-        ThemeMode.System -> ThemeMode.Light
-        ThemeMode.Light -> ThemeMode.Dark
-        ThemeMode.Dark -> ThemeMode.System
+        ThemeModePreference.ThemeMode.System -> R.string.theme_mode_system
+        ThemeModePreference.ThemeMode.Light -> R.string.theme_mode_light
+        ThemeModePreference.ThemeMode.Dark -> R.string.theme_mode_dark
     }
 
-private fun ThemeMode.labelRes(): Int =
+/**
+ * Maps the `:core:datastore` user-preference theme enum to the `:core:designsystem`
+ * theme enum. The two are intentionally kept separate so the designsystem doesn't depend on
+ * datastore — this single hop lives in `:app`'s composition root.
+ */
+internal fun ThemeModePreference.ThemeMode.toDesignSystem(): ThemeMode =
     when (this) {
-        ThemeMode.System -> R.string.theme_mode_system
-        ThemeMode.Light -> R.string.theme_mode_light
-        ThemeMode.Dark -> R.string.theme_mode_dark
+        ThemeModePreference.ThemeMode.System -> ThemeMode.System
+        ThemeModePreference.ThemeMode.Light -> ThemeMode.Light
+        ThemeModePreference.ThemeMode.Dark -> ThemeMode.Dark
     }
