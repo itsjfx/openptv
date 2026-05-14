@@ -78,6 +78,9 @@ jobs:
 
   assemble-debug:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     defaults:
       run:
         working-directory: mobile
@@ -89,12 +92,40 @@ jobs:
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew :app:assembleDebug
-      - uses: actions/upload-artifact@v7
+      - id: upload
+        uses: actions/upload-artifact@v7
         with:
           name: app-debug-${{ github.sha }}
           path: mobile/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 3
+      # Post (or update) a sticky PR comment linking the debug APK artifact so
+      # reviewers can grab a build without booting an emulator. The marker
+      # comment lets the next CI run rewrite the same comment in place instead
+      # of stacking a fresh one per push.
+      - name: Comment debug APK link on PR
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          marker='<!-- debug-apk-link -->'
+          body="${marker}
+          **Debug APK:** [app-debug-${SHA}.apk](${ARTIFACT_URL}) (built from \`${SHA:0:7}\`)
+
+          <sub>Requires GitHub login. Artifact expires after 3 days.</sub>"
+          existing="$(gh api "repos/${REPO}/issues/${PR}/comments" \
+            --jq ".[] | select(.body | startswith(\"${marker}\")) | .id" \
+            | head -n1)"
+          if [[ -n "$existing" ]]; then
+            gh api -X PATCH "repos/${REPO}/issues/comments/${existing}" \
+              -f body="$body" >/dev/null
+          else
+            gh pr comment "$PR" --repo "$REPO" --body "$body"
+          fi
 
   # Opt-in: runs the Hilt-instrumented Compose UI tests in :feature:search on
   # a hardware-accelerated AOSP emulator via `reactivecircus/android-emulator-runner`.

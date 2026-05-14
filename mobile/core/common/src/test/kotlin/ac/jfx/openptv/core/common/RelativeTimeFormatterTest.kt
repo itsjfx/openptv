@@ -27,7 +27,7 @@ class RelativeTimeFormatterTest {
     }
 
     @Test
-    fun `target within 30s of now returns now label`() {
+    fun `target within the now grace window returns now label`() {
         val result =
             formatter.format(
                 scheduled = now,
@@ -37,17 +37,29 @@ class RelativeTimeFormatterTest {
     }
 
     @Test
-    fun `target 1 minute out returns minutes phrase`() {
-        val result =
-            formatter.format(
-                scheduled = now,
-                estimated = now + 1.minutes,
-            )
-        assertThat(result).isEqualTo("in 1 min")
+    fun `target one minute past now still returns now label`() {
+        // Locks in the 2 min grace — a row that's a minute past zero stays as "now"
+        // rather than flipping to "departed".
+        val result = formatter.format(scheduled = now, estimated = now - 1.minutes)
+        assertThat(result).isEqualTo("now")
     }
 
     @Test
-    fun `target 3 minutes out returns minutes phrase`() {
+    fun `target three minutes past now returns departed label`() {
+        // Just outside the 2 min grace.
+        val result = formatter.format(scheduled = now, estimated = now - 3.minutes)
+        assertThat(result).isEqualTo("departed")
+    }
+
+    @Test
+    fun `target inside the grace window returns now label rather than minutes phrase`() {
+        // 1 min is inside the 2 min grace — falls through to the "now" branch.
+        val result = formatter.format(scheduled = now, estimated = now + 1.minutes)
+        assertThat(result).isEqualTo("now")
+    }
+
+    @Test
+    fun `target just outside the grace window returns minutes phrase`() {
         val result =
             formatter.format(
                 scheduled = now,
@@ -145,9 +157,37 @@ class RelativeTimeFormatterTest {
     }
 
     @Test
-    fun `null estimated within 30s of now returns now label`() {
+    fun `null estimated within the now grace window returns now label`() {
         val result = formatter.format(scheduled = now + 10.seconds, estimated = null)
         assertThat(result).isEqualTo("now")
+    }
+
+    @Test
+    fun `isDeparted returns true for an estimate well in the past`() {
+        assertThat(formatter.isDeparted(scheduled = now, estimated = now - 5.minutes)).isTrue()
+    }
+
+    @Test
+    fun `isDeparted returns false within the now grace window`() {
+        // Same window the formatter uses for the "now" label — keep rows the user still sees as "now".
+        assertThat(formatter.isDeparted(scheduled = now, estimated = now - 90.seconds)).isFalse()
+    }
+
+    @Test
+    fun `isDeparted returns true once past the grace window`() {
+        // Three minutes past target, well outside the 2 min grace.
+        assertThat(formatter.isDeparted(scheduled = now, estimated = now - 3.minutes)).isTrue()
+    }
+
+    @Test
+    fun `isDeparted returns false for a future estimate`() {
+        assertThat(formatter.isDeparted(scheduled = now, estimated = now + 2.minutes)).isFalse()
+    }
+
+    @Test
+    fun `isDeparted falls back to scheduled when estimate is null`() {
+        assertThat(formatter.isDeparted(scheduled = now - 5.minutes, estimated = null)).isTrue()
+        assertThat(formatter.isDeparted(scheduled = now + 5.minutes, estimated = null)).isFalse()
     }
 
     @Test

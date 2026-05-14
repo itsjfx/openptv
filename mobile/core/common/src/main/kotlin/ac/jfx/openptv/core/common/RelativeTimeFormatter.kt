@@ -8,7 +8,7 @@ import kotlin.math.abs
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
-import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Formats a departure [Instant] as a short relative string for the stop-detail screen and the
@@ -65,6 +65,21 @@ class RelativeTimeFormatter
             }
         }
 
+        /**
+         * True iff the departure has passed by more than the `now` grace window — i.e. iff
+         * [format] would return `"departed"`. Callers use this to drop stale rows from the
+         * stop-detail list. Aligning on the same threshold means a row labelled `"now"` is
+         * never filtered out, and a row labelled `"departed"` is never shown.
+         */
+        fun isDeparted(
+            scheduled: Instant,
+            estimated: Instant? = null,
+        ): Boolean {
+            val target = estimated ?: scheduled
+            val delta = target - clock.now()
+            return delta.isNegative() && !delta.isWithinNowWindow()
+        }
+
         // ±NOW_THRESHOLD of the target counts as "now" rather than "in 0 min" / "departed".
         private fun Duration.isWithinNowWindow(): Boolean = abs(this.inWholeSeconds) <= NOW_THRESHOLD.inWholeSeconds
 
@@ -82,9 +97,11 @@ class RelativeTimeFormatter
         }
 
         private companion object {
-            // 30 s matches the polling cadence so a row that ticks past zero only shows
-            // "departed" on the next refresh, not for a single frame mid-cycle.
-            private val NOW_THRESHOLD: Duration = 30.seconds
+            // Window of "the row still says 'now' and stays on screen" around the target
+            // instant. Two minutes accommodates real-world slop — services often depart a
+            // touch late even when the live feed has caught up to zero — without rows
+            // lingering long enough to feel stale.
+            private val NOW_THRESHOLD: Duration = 2.minutes
             private val ONE_HOUR: Duration = 1.hours
             private val ONE_DAY: Duration = 1.days
 
