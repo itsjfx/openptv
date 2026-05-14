@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Settings screen. Resource prefix matches the AGP `resourcePrefix` set by the
+         `openptv.android.library` convention plugin: every string in :feature:settings starts
+         with `feature_settings_`. -->
+    <string name="feature_settings_title">Settings</string>
+    <string name="feature_settings_back">Back</string>
+
+    <!-- Appearance section -->
+    <string name="feature_settings_appearance_section">Appearance</string>
+
+    <!-- Theme mode -->
+    <string name="feature_settings_theme_mode_label">Theme</string>
+    <string name="feature_settings_theme_mode_system">System default</string>
+    <string name="feature_settings_theme_mode_light">Light</string>
+    <string name="feature_settings_theme_mode_dark">Dark</string>
+
+    <!-- Dynamic colour -->
+    <string name="feature_settings_dynamic_colour_label">Dynamic colour</string>
+    <string name="feature_settings_dynamic_colour_supported_subtitle">Use colours derived from your wallpaper.</string>
+    <string name="feature_settings_dynamic_colour_unsupported_subtitle">Available on Android 12+</string>
+</resources>

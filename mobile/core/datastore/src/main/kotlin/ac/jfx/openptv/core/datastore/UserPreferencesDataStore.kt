@@ -25,12 +25,16 @@ import kotlinx.coroutines.flow.map
  * "preferences are written through the typed DSL, not via raw key edits" invariant — there is
  * no public mutating method on this class.
  *
- * Construction is `internal` because production code resolves this class through Hilt
- * ([UserPreferencesDataStoreModule] provides a `@Singleton` instance backed by the
- * `@UserPreferences` qualified `DataStore`). Tests in this module build a tested instance
- * directly against a `MockDataStore` or a temp-file-backed real DataStore.
+ * Production code resolves this class through Hilt ([UserPreferencesDataStoreModule] provides
+ * a `@Singleton` instance backed by the `@UserPreferences` qualified `DataStore`). The
+ * constructor is `public` so consumer-module tests (e.g. `:feature:settings`'s
+ * `SettingsViewModelTest`) can build a temp-file-backed real DataStore and wrap it directly
+ * without taking a Hilt dependency. The class is otherwise stateless beyond the underlying
+ * store, so a hand-rolled fake would just re-implement the typed flows around an in-memory
+ * map and earn nothing — using the real wrapper against a real DataStore catches more wire-
+ * format issues at unit-test speed.
  */
-class UserPreferencesDataStore internal constructor(
+class UserPreferencesDataStore(
     val dataStore: DataStore<Preferences>,
 ) {
     /** Current [ThemeModePreference], re-emitted on every write. */
