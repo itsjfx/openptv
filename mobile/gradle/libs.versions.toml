@@ -34,6 +34,11 @@ kotlinxCoroutines = "1.10.2"
 
 # Persistence
 androidxDatastore = "1.1.1"
+# Room is the local DB. Pinned to the latest stable 2.7.x line — 2.7 ships the
+# KSP2-compatible compiler so KSP `kotlin = "2.3.20"` resolves cleanly. Schema
+# export is on (see `:core:database/build.gradle.kts`) so the JSON under
+# `core/database/schemas/` is committed and migrations can diff against v1.
+androidxRoom = "2.7.2"
 
 # Networking
 okhttp = "5.3.2"
@@ -43,6 +48,11 @@ retrofit = "3.0.0"
 junit = "4.13.2"
 truth = "1.4.4"
 turbine = "1.2.1"
+# Robolectric — only `:core:database` uses it (so far) to give Room
+# in-memory DAO tests a `Context` without an emulator. Pinned to the 4.x line
+# that supports AGP 9 + JDK 21. Other modules continue to use plain JUnit;
+# this is not the default test runtime.
+robolectric = "4.14.1"
 androidxTestRunner = "1.7.0"
 # AndroidX test core + JUnit4 extension — pulled in by Compose UI tests and by
 # `createAndroidComposeRule`. Versions track the AndroidX test BOM line that
@@ -110,6 +120,12 @@ kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutine
 
 # Persistence
 androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "androidxDatastore" }
+androidx-room-runtime = { module = "androidx.room:room-runtime", version.ref = "androidxRoom" }
+androidx-room-ktx = { module = "androidx.room:room-ktx", version.ref = "androidxRoom" }
+androidx-room-compiler = { module = "androidx.room:room-compiler", version.ref = "androidxRoom" }
+# Room migration test harness. `androidTestImplementation` only — runs on a
+# device/emulator because it instantiates a real SQLite database via Room.
+androidx-room-testing = { module = "androidx.room:room-testing", version.ref = "androidxRoom" }
 
 # Networking
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
@@ -127,6 +143,7 @@ androidx-test-runner = { module = "androidx.test:runner", version.ref = "android
 androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTestCore" }
 androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestExt" }
 androidx-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "androidxEspresso" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 
 # Compose UI test surface — `androidx.compose.ui:ui-test-junit4` provides the
 # `createAndroidComposeRule` builder and the assertion DSL; `ui-test-manifest`
