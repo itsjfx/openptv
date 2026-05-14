@@ -8,10 +8,22 @@ plugins {
 
 android {
     namespace = "ac.jfx.openptv.core.designsystem"
+
+    // Robolectric drives `createComposeRule` in `LocationPermissionRationaleTest`; same
+    // shape as `:core:datastore` / `:feature:favourites` use for JVM Compose smoke tests.
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
 dependencies {
-    // Compose deps come from `openptv.android.library.compose`; nothing extra
-    // needed here yet. ReadYou palette / typography land in the phase that
-    // ships them.
+    // Compose deps come from `openptv.android.library.compose`. ReadYou palette / typography
+    // land in the phase that ships them.
+
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    testImplementation(libs.androidx.test.ext.junit)
+    testImplementation(libs.robolectric)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
