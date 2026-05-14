@@ -26,4 +26,12 @@ dependencies {
     // `hilt-android-testing` dependency (it's pulled in by `dagger.hilt.android.testing.HiltAndroidRule`).
     // NIA scopes the same dependency as `implementation` on its `:core:data-test`.
     implementation(libs.hilt.android.testing)
+
+    // Smoke tests for `FakeLocationProvider` live in this module (the fake is itself test-only,
+    // so the tests stay co-located). Same pairing the other `:core:data-test` consumers use.
+    testImplementation(project(":core:testing"))
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.turbine)
 }
