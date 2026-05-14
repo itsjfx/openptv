@@ -39,10 +39,14 @@ annotation class UserPreferences
  * underlying coroutine scope (with its `SupervisorJob`) lives for the application lifetime —
  * a process-wide singleton is what the AndroidX `preferencesDataStore` delegate gives you
  * implicitly; we open-code it here so the [UserPreferences] qualifier is the only knob.
+ *
+ * Module is `public` (not `internal`) so consumer-module Hilt androidTests can swap it via
+ * `@TestInstallIn(replaces = [UserPreferencesDataStoreModule::class])` from their own test
+ * source set without taking a runtime dependency on `:core:datastore`'s internals.
  */
 @Module
 @InstallIn(SingletonComponent::class)
-internal object UserPreferencesDataStoreModule {
+object UserPreferencesDataStoreModule {
     private const val PREFS_NAME = "openptv_user_prefs"
 
     @Provides

@@ -51,6 +51,7 @@ include(":core:testing")
 // feature convention plugin guards those with `findProject` so missing ones are
 // a no-op, not a build break).
 include(":feature:search")
+include(":feature:settings")
 include(":feature:stop-detail")
 
 // `:ui-test-hilt-manifest` — minimal Hilt-aware Activity that feature
