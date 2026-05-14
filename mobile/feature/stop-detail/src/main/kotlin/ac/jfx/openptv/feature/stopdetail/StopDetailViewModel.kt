@@ -169,7 +169,11 @@ class StopDetailViewModel
                     is HeaderState.Loaded -> currentHeader.detail.servingRoutes.associateBy { it.id.value }
                     else -> emptyMap()
                 }
-            return groupBy { GroupKey(it.routeId.value, it.direction.id.value) }
+            // Issue #30 acceptance criterion: departed entries drop off. Use the formatter's
+            // own threshold so a row that would render as "now" is never filtered, and a row
+            // that would render as "departed" is never shown.
+            return filterNot { timeFormatter.isDeparted(it.scheduledDepartureUtc, it.estimatedDepartureUtc) }
+                .groupBy { GroupKey(it.routeId.value, it.direction.id.value) }
                 .map { (key, departures) ->
                     val route = servingRoutes[key.routeId]
                     val routeNumber = route?.number?.ifBlank { route.name }.orEmpty().ifBlank { "#${key.routeId}" }

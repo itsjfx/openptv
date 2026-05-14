@@ -65,6 +65,21 @@ class RelativeTimeFormatter
             }
         }
 
+        /**
+         * True iff the departure has passed by more than the `now` grace window — i.e. iff
+         * [format] would return `"departed"`. Callers use this to drop stale rows from the
+         * stop-detail list. Aligning on the same threshold means a row labelled `"now"` is
+         * never filtered out, and a row labelled `"departed"` is never shown.
+         */
+        fun isDeparted(
+            scheduled: Instant,
+            estimated: Instant? = null,
+        ): Boolean {
+            val target = estimated ?: scheduled
+            val delta = target - clock.now()
+            return delta.isNegative() && !delta.isWithinNowWindow()
+        }
+
         // ±NOW_THRESHOLD of the target counts as "now" rather than "in 0 min" / "departed".
         private fun Duration.isWithinNowWindow(): Boolean = abs(this.inWholeSeconds) <= NOW_THRESHOLD.inWholeSeconds
 

@@ -151,6 +151,28 @@ class RelativeTimeFormatterTest {
     }
 
     @Test
+    fun `isDeparted returns true for an estimate well in the past`() {
+        assertThat(formatter.isDeparted(scheduled = now, estimated = now - 5.minutes)).isTrue()
+    }
+
+    @Test
+    fun `isDeparted returns false within the now grace window`() {
+        // Same window the formatter uses for the "now" label — keep rows the user still sees as "now".
+        assertThat(formatter.isDeparted(scheduled = now, estimated = now - 20.seconds)).isFalse()
+    }
+
+    @Test
+    fun `isDeparted returns false for a future estimate`() {
+        assertThat(formatter.isDeparted(scheduled = now, estimated = now + 2.minutes)).isFalse()
+    }
+
+    @Test
+    fun `isDeparted falls back to scheduled when estimate is null`() {
+        assertThat(formatter.isDeparted(scheduled = now - 5.minutes, estimated = null)).isTrue()
+        assertThat(formatter.isDeparted(scheduled = now + 5.minutes, estimated = null)).isFalse()
+    }
+
+    @Test
     fun `estimated takes precedence over scheduled when both supplied`() {
         // Scheduled is two minutes out, estimated says it's actually four minutes out (delayed).
         // The formatter reports the live prediction.

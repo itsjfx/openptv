@@ -24,6 +24,8 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Unit tests for [StopDetailViewModel]. Uses [StandardTestDispatcher] (so we control when
@@ -311,6 +313,69 @@ class StopDetailViewModelTest {
             val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
             assertThat(loaded.groups.first().key.routeId).isEqualTo(EARLY_ROUTE_ID)
             assertThat(loaded.groups.last().key.routeId).isEqualTo(LATE_ROUTE_ID)
+        }
+
+    @Test
+    fun `already-departed entries are filtered out, upcoming ones remain`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+
+            // Three departures relative to the test clock (`2026-05-14T09:00:00Z`):
+            //  - five minutes ago — filtered.
+            //  - twenty seconds ago — kept (inside the "now" grace window).
+            //  - five minutes out — kept.
+            val past =
+                DepartureMother.aDeparture()
+                    .withRunRef("OPS-PAST")
+                    .withScheduledDepartureUtc(clock.now() - 5.minutes)
+                    .withEstimatedDepartureUtc(clock.now() - 5.minutes)
+                    .build()
+            val nowish =
+                DepartureMother.aDeparture()
+                    .withRunRef("OPS-NOW")
+                    .withScheduledDepartureUtc(clock.now())
+                    .withEstimatedDepartureUtc(clock.now() - 20.seconds)
+                    .build()
+            val upcoming =
+                DepartureMother.aDeparture()
+                    .withRunRef("OPS-FUTURE")
+                    .withScheduledDepartureUtc(clock.now() + 5.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 5.minutes)
+                    .build()
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(past, nowish, upcoming))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            val runRefs = loaded.groups.flatMap { it.departures }.map { it.runRef.value }
+            assertThat(runRefs).containsExactly("OPS-NOW", "OPS-FUTURE")
+        }
+
+    @Test
+    fun `a list of only departed entries becomes DeparturesState Empty`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+
+            val past =
+                DepartureMother.aDeparture()
+                    .withScheduledDepartureUtc(clock.now() - 10.minutes)
+                    .withEstimatedDepartureUtc(clock.now() - 10.minutes)
+                    .build()
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(past))
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Empty)
         }
 
     /** A `Clock` that returns a fixed instant — same shape as the formatter's test-only clock. */
