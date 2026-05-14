@@ -13,4 +13,9 @@ dependencies {
     // `implementation`) so an import of `Instant` resolves transitively wherever
     // `:core:model` is on the classpath.
     api(libs.kotlinx.datetime)
+
+    // `Coordinates.distanceTo` (haversine, issue #37) has a tiny JUnit + Truth test so
+    // the formula isn't smoke-only. Test deps mirror `:core:common`'s shape.
+    testImplementation(libs.junit)
+    testImplementation(libs.truth)
 }
