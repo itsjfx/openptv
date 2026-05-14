@@ -44,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -414,9 +415,16 @@ private fun DepartureRow(
                     fontWeight = FontWeight.SemiBold,
                 )
                 val delayMinutes = departure.delayMinutes()
-                if (delayMinutes != null && delayMinutes >= 1) {
+                if (delayMinutes != null) {
+                    val absMinutes = kotlin.math.abs(delayMinutes).toInt()
+                    val pluralRes =
+                        if (delayMinutes > 0) {
+                            R.plurals.feature_stop_detail_delay_late
+                        } else {
+                            R.plurals.feature_stop_detail_delay_early
+                        }
                     Text(
-                        text = stringResource(R.string.feature_stop_detail_delay_indicator, delayMinutes),
+                        text = pluralStringResource(pluralRes, absMinutes, absMinutes),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )

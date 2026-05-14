@@ -15,7 +15,14 @@
     <string name="feature_stop_detail_scheduled">scheduled %1$s</string>
     <string name="feature_stop_detail_platform">platform %1$s</string>
     <string name="feature_stop_detail_no_platform">no platform info</string>
-    <string name="feature_stop_detail_delay_indicator">+%1$d min</string>
+    <plurals name="feature_stop_detail_delay_late">
+        <item quantity="one">%d min late</item>
+        <item quantity="other">%d mins late</item>
+    </plurals>
+    <plurals name="feature_stop_detail_delay_early">
+        <item quantity="one">%d min early</item>
+        <item quantity="other">%d mins early</item>
+    </plurals>
     <string name="feature_stop_detail_disruption">Disruption affects this route</string>
     <string name="feature_stop_detail_disruption_snackbar">Disruption details land in Phase 10.</string>
     <string name="feature_stop_detail_star_disabled">Favourite (coming in Phase 4)</string>
