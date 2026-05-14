@@ -322,7 +322,7 @@ class StopDetailViewModelTest {
 
             // Three departures relative to the test clock (`2026-05-14T09:00:00Z`):
             //  - five minutes ago — filtered.
-            //  - twenty seconds ago — kept (inside the "now" grace window).
+            //  - twenty seconds ago — kept (well inside the 2 min "now" grace window).
             //  - five minutes out — kept.
             val past =
                 DepartureMother.aDeparture()
@@ -354,6 +354,83 @@ class StopDetailViewModelTest {
             val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
             val runRefs = loaded.groups.flatMap { it.departures }.map { it.runRef.value }
             assertThat(runRefs).containsExactly("OPS-NOW", "OPS-FUTURE")
+        }
+
+    @Test
+    fun `a delayed departure whose live estimate is still in the future is kept`() =
+        runTest(dispatcher) {
+            // Scheduled time has passed, but the live estimate hasn't — i.e. the service
+            // is running late and hasn't actually departed yet. The filter must consult
+            // the live estimate (the only source of truth for "did it leave?"), not the
+            // stale schedule. Otherwise late-running services would vanish from the screen
+            // exactly when riders need them most.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val delayed =
+                DepartureMother.aDeparture()
+                    .withRunRef("OPS-LATE")
+                    .withScheduledDepartureUtc(clock.now() - 5.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 2.minutes)
+                    .build()
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(delayed))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.flatMap { it.departures }.map { it.runRef.value })
+                .containsExactly("OPS-LATE")
+        }
+
+    @Test
+    fun `a delayed departure whose live estimate is within the grace window is kept`() =
+        runTest(dispatcher) {
+            // Live estimate is 90 s in the past — would render as "now" — so it stays.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val barelyPast =
+                DepartureMother.aDeparture()
+                    .withRunRef("OPS-NOWISH")
+                    .withScheduledDepartureUtc(clock.now() - 10.minutes)
+                    .withEstimatedDepartureUtc(clock.now() - 90.seconds)
+                    .build()
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(barelyPast))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.flatMap { it.departures }.map { it.runRef.value })
+                .containsExactly("OPS-NOWISH")
+        }
+
+    @Test
+    fun `a delayed departure whose live estimate is past the grace window is filtered`() =
+        runTest(dispatcher) {
+            // Live estimate is 3 min in the past — beyond the 2 min grace — so the row
+            // would render as "departed". Filter it out.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val stale =
+                DepartureMother.aDeparture()
+                    .withScheduledDepartureUtc(clock.now() - 10.minutes)
+                    .withEstimatedDepartureUtc(clock.now() - 3.minutes)
+                    .build()
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(stale))
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Empty)
         }
 
     @Test

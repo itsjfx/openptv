@@ -8,7 +8,7 @@ import kotlin.math.abs
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
-import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Formats a departure [Instant] as a short relative string for the stop-detail screen and the
@@ -97,9 +97,11 @@ class RelativeTimeFormatter
         }
 
         private companion object {
-            // 30 s matches the polling cadence so a row that ticks past zero only shows
-            // "departed" on the next refresh, not for a single frame mid-cycle.
-            private val NOW_THRESHOLD: Duration = 30.seconds
+            // Window of "the row still says 'now' and stays on screen" around the target
+            // instant. Two minutes accommodates real-world slop — services often depart a
+            // touch late even when the live feed has caught up to zero — without rows
+            // lingering long enough to feel stale.
+            private val NOW_THRESHOLD: Duration = 2.minutes
             private val ONE_HOUR: Duration = 1.hours
             private val ONE_DAY: Duration = 1.days
 
