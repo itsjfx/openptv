@@ -48,8 +48,14 @@ sealed interface DeparturesState {
     /**
      * Departures grouped by `(routeId, directionId)` for the section list. Each [Group] carries
      * the route projection (for the badge / mode icon) so the UI doesn't have to cross-look-up.
+     *
+     * `isLoadingMore` flips true while a paginated fetch (either "show more" or
+     * "scrolled past the bottom") is in flight; the UI uses it to render the tail spinner.
      */
-    data class Loaded(val groups: List<Group>) : DeparturesState
+    data class Loaded(
+        val groups: List<Group>,
+        val isLoadingMore: Boolean = false,
+    ) : DeparturesState
 
     /** A successful fetch returned zero upcoming departures — last service of the day. */
     data object Empty : DeparturesState
@@ -66,6 +72,11 @@ sealed interface DeparturesState {
  * routeId in a departure that isn't in the `StopDetail.servingRoutes` payload (route filtering
  * disagreement between endpoints); rather than drop the row, we render it with a placeholder
  * badge and log the discrepancy later.
+ *
+ * `expanded` tracks the per-group disclosure state (issue #68). Collapsed groups render the
+ * first [COLLAPSED_VISIBLE] entries plus a "show N more" affordance; expanded groups render
+ * every loaded entry. Paging only kicks in once a group is expanded — the user pulled the trigger
+ * by tapping "show more", and now scrolling deeper into that group consumes more pages.
  */
 data class Group(
     val key: GroupKey,
@@ -73,7 +84,22 @@ data class Group(
     val routeType: RouteType,
     val headerLabel: String,
     val departures: List<Departure>,
+    val expanded: Boolean = false,
 )
 
 /** Section key — pair of (routeId, directionId). Stable for `key=` slots in `LazyColumn`. */
 data class GroupKey(val routeId: Int, val directionId: Int)
+
+/**
+ * How many entries a collapsed [Group] shows by default (issue #68). The PTV app uses 3; we
+ * mirror that. Tweakable in one place if the design changes.
+ */
+const val COLLAPSED_VISIBLE: Int = 3
+
+/**
+ * How many entries each paginated [loadMore] call asks PTV for (per route, since the API applies
+ * `max_results` per route once `route_id` is omitted). Sized so a single page reliably crosses
+ * midnight on quieter routes — the V/Line lines run an hourly service after 23:00, so a 10-row
+ * page is good for several hours of headway.
+ */
+const val PAGE_SIZE: Int = 10

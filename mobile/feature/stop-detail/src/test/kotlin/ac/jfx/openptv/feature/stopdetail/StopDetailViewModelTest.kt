@@ -5,6 +5,7 @@ import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.test.FakeDepartureRepository
 import ac.jfx.openptv.core.data.test.FakeStopDetailRepository
 import ac.jfx.openptv.core.domain.GetStopDetailUseCase
+import ac.jfx.openptv.core.domain.LoadMoreDeparturesUseCase
 import ac.jfx.openptv.core.domain.ObserveDeparturesUseCase
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.testing.DepartureMother
@@ -24,6 +25,7 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -67,6 +69,7 @@ class StopDetailViewModelTest {
             routeTypeCode = routeTypeCode,
             getStopDetail = GetStopDetailUseCase(stopDetailRepository),
             observeDepartures = ObserveDeparturesUseCase(departureRepository),
+            loadMoreDepartures = LoadMoreDeparturesUseCase(departureRepository),
             clock = clock,
             timeFormatter = formatter,
         )
@@ -291,12 +294,14 @@ class StopDetailViewModelTest {
             val later =
                 DepartureMother.aDeparture()
                     .withRouteId(LATE_ROUTE_ID)
+                    .withRunRef("RUN-LATE")
                     .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
                     .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
                     .build()
             val earliest =
                 DepartureMother.aDeparture()
                     .withRouteId(EARLY_ROUTE_ID)
+                    .withRunRef("RUN-EARLY")
                     .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
                     .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
                     .build()
@@ -453,6 +458,147 @@ class StopDetailViewModelTest {
             advanceUntilIdle()
 
             assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Empty)
+        }
+
+    // ---------- paging (issues #68 + #69) ----------
+
+    @Test
+    fun `groups are collapsed by default — expanded flag is false`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().build()))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.single().expanded).isFalse()
+        }
+
+    @Test
+    fun `toggleExpand flips the group expanded flag and triggers a loadMore page fetch`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val head = listOf(DepartureMother.aDeparture().withRunRef("HEAD-1").build())
+            departureRepository.emitSuccess(head)
+            advanceUntilIdle()
+
+            val key =
+                (viewModel.uiState.value.departures as DeparturesState.Loaded)
+                    .groups.first().key
+
+            // Enqueue a page so the loadMore lands deterministically.
+            val pageRow =
+                DepartureMother.aDeparture()
+                    .withRunRef("PAGE-1")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T10:00:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T10:00:00Z"))
+                    .build()
+            departureRepository.enqueueLoadMoreSuccess(listOf(pageRow))
+
+            viewModel.toggleExpand(key)
+            advanceUntilIdle()
+
+            val after = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(after.groups.first().expanded).isTrue()
+            assertThat(departureRepository.loadMoreCalls).hasSize(1)
+            val call = departureRepository.loadMoreCalls.single()
+            assertThat(call.maxResults).isEqualTo(PAGE_SIZE)
+            // Anchor is the latest known departure (the head row, since the page hadn't landed
+            // when the call was placed). `effectiveDepartureUtc` prefers the live estimate.
+            val head1 = head.first()
+            val expectedAnchor = head1.estimatedDepartureUtc ?: head1.scheduledDepartureUtc
+            assertThat(call.after).isEqualTo(expectedAnchor)
+            // The page row is now merged into the group.
+            val runRefs = after.groups.flatMap { it.departures }.map { it.runRef.value }
+            assertThat(runRefs).containsAtLeast("HEAD-1", "PAGE-1")
+        }
+
+    @Test
+    fun `loadMore coalesces concurrent triggers — second call while one is active is dropped`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().build()))
+            advanceUntilIdle()
+
+            viewModel.loadMore()
+            // No advance — the first job is still active.
+            viewModel.loadMore()
+            advanceUntilIdle()
+
+            // Only one call landed on the fake — the second invocation coalesced.
+            assertThat(departureRepository.loadMoreCalls).hasSize(1)
+        }
+
+    @Test
+    fun `paged departures are merged into the group preserving sort order`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            // Head poll: one row.
+            val headRow =
+                DepartureMother.aDeparture()
+                    .withRunRef("HEAD-1")
+                    .withScheduledDepartureUtc(clock.now() + 5.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 5.minutes)
+                    .build()
+            departureRepository.emitSuccess(listOf(headRow))
+            advanceUntilIdle()
+
+            // Page: two rows further out — they should sort after the head row.
+            val later1 =
+                DepartureMother.aDeparture()
+                    .withRunRef("PAGE-1")
+                    .withScheduledDepartureUtc(clock.now() + 30.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 30.minutes)
+                    .build()
+            val later2 =
+                DepartureMother.aDeparture()
+                    .withRunRef("PAGE-2")
+                    .withScheduledDepartureUtc(clock.now() + 1.hours)
+                    .withEstimatedDepartureUtc(clock.now() + 1.hours)
+                    .build()
+            departureRepository.enqueueLoadMoreSuccess(listOf(later2, later1))
+            viewModel.loadMore()
+            advanceUntilIdle()
+
+            val merged = viewModel.uiState.value.departures as DeparturesState.Loaded
+            val runRefsInOrder =
+                merged.groups.single().departures.map { it.runRef.value }
+            assertThat(runRefsInOrder).containsExactly("HEAD-1", "PAGE-1", "PAGE-2").inOrder()
+        }
+
+    @Test
+    fun `loadMore is a no-op when there are no current rows to anchor against`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            // No head emission yet — `currentTailAnchor` is null.
+            viewModel.loadMore()
+            advanceUntilIdle()
+
+            assertThat(departureRepository.loadMoreCalls).isEmpty()
         }
 
     /** A `Clock` that returns a fixed instant — same shape as the formatter's test-only clock. */
