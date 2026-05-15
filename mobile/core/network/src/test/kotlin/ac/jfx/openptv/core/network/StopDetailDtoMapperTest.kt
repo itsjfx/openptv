@@ -23,16 +23,17 @@ class StopDetailDtoMapperTest {
                     StopDetailsDtoMother.aStopDetailsDto()
                         .withStopName("Flinders Street Railway Station ")
                         .withStopSuburb("Melbourne City  ")
+                        .withRoutes(
+                            listOf(
+                                RouteDto(
+                                    routeId = 19,
+                                    routeName = "Mernda ",
+                                    routeNumber = "  ",
+                                    routeType = 0,
+                                ),
+                            ),
+                        )
                         .build(),
-                routes =
-                    listOf(
-                        RouteDto(
-                            routeId = 19,
-                            routeName = "Mernda ",
-                            routeNumber = "  ",
-                            routeType = 0,
-                        ),
-                    ),
             )
 
         val detail = response.toDomain()
@@ -48,7 +49,7 @@ class StopDetailDtoMapperTest {
 
     @Test
     fun `response with no stop block returns null`() {
-        val response = StopResponseDto(stop = null, routes = emptyList())
+        val response = StopResponseDto(stop = null)
         assertThat(response.toDomain()).isNull()
     }
 
@@ -66,16 +67,44 @@ class StopDetailDtoMapperTest {
     fun `route mapper translates route_type code to domain enum`() {
         val response =
             StopResponseDto(
-                stop = StopDetailsDtoMother.aStopDetailsDto().withRouteType(1).build(),
-                routes =
-                    listOf(
-                        RouteDto(routeId = 1, routeName = "19", routeNumber = "19", routeType = 1),
-                    ),
+                stop =
+                    StopDetailsDtoMother.aStopDetailsDto()
+                        .withRouteType(1)
+                        .withRoutes(
+                            listOf(
+                                RouteDto(routeId = 1, routeName = "19", routeNumber = "19", routeType = 1),
+                            ),
+                        )
+                        .build(),
             )
 
         val detail = response.toDomain()!!
 
         assertThat(detail.stop.routeType).isEqualTo(RouteType.Tram)
         assertThat(detail.servingRoutes[0].routeType).isEqualTo(RouteType.Tram)
+    }
+
+    @Test
+    fun `routes are nested inside the stop block in PTV responses`() {
+        // Regression coverage for the bug fixed alongside issue #88: the real PTV response
+        // returns the serving routes under `stop.routes`, not at the top level. The mapper
+        // must read them from inside the stop object.
+        val response =
+            StopResponseDto(
+                stop =
+                    StopDetailsDtoMother.aStopDetailsDto()
+                        .withRouteType(1)
+                        .withRoutes(
+                            listOf(
+                                RouteDto(routeId = 958, routeName = "Vermont South", routeNumber = "75", routeType = 1),
+                                RouteDto(routeId = 940, routeName = "Waterfront City", routeNumber = "70", routeType = 1),
+                            ),
+                        )
+                        .build(),
+            )
+
+        val detail = response.toDomain()!!
+
+        assertThat(detail.servingRoutes.map { it.number }).containsExactly("75", "70").inOrder()
     }
 }

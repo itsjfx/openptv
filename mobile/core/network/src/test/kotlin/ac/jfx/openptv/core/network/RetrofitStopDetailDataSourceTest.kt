@@ -59,10 +59,11 @@ class RetrofitStopDetailDataSourceTest {
     @Test
     fun `200 with stop and routes returns mapped StopDetail`() =
         runTest {
+            // PTV nests `routes` inside the `stop` object — see `StopResponseDto` and #88.
             server.enqueue(
                 MockResponse().setResponseCode(200).setBody(
                     """
-                    {"stop":{"stop_id":1071,"stop_name":"Flinders Street ","stop_suburb":"Melbourne City","route_type":0,"stop_latitude":-37.81,"stop_longitude":144.96},"routes":[{"route_id":19,"route_name":"Mernda","route_number":"","route_type":0}]}
+                    {"stop":{"stop_id":1071,"stop_name":"Flinders Street ","stop_suburb":"Melbourne City","route_type":0,"stop_latitude":-37.81,"stop_longitude":144.96,"routes":[{"route_id":19,"route_name":"Mernda","route_number":"","route_type":0}]}}
                     """.trimIndent(),
                 ),
             )
