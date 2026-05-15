@@ -38,6 +38,8 @@ internal class SettingsRepositoryImpl
                 )
             }
 
+        override val defaultBackendBaseUrl: String = BuildConfig.BACKEND_BASE_URL
+
         override suspend fun setBackendBaseUrl(url: String) {
             dataStore.edit { prefs -> prefs[KEY_BACKEND_BASE_URL] = url.normalised() }
         }

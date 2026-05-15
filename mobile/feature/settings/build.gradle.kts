@@ -31,6 +31,13 @@ dependencies {
     // off of `UserPreferencesDataStore` injected into the ViewModel.
     implementation(project(":core:datastore"))
 
+    // `SettingsRepository` interface — used by the Server picker row added in #81
+    // to read and update the current backend base URL. The DataStore-backed impl
+    // still lives in `:app` (alongside the `setup_completed` flag binding); the
+    // feature module only sees the interface.
+    implementation(project(":core:data"))
+    implementation(project(":core:model"))
+
     // DataStore types leak through `UserPreferencesDataStore.dataStore` (the typed
     // DSL's `put(scope, dataStore)` requires the underlying store as an argument).
     // Pulled in directly here rather than `api`-exporting it from `:core:datastore`
@@ -42,6 +49,7 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(project(":core:testing"))
+    testImplementation(project(":core:data-test"))
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
@@ -53,6 +61,7 @@ dependencies {
     // host because AGP only merges debug manifests into androidTest APKs.
     debugImplementation(project(":ui-test-hilt-manifest"))
     androidTestImplementation(project(":core:testing"))
+    androidTestImplementation(project(":core:data-test"))
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.truth)
     androidTestImplementation(libs.kotlinx.coroutines.test)

@@ -1,15 +1,19 @@
 package ac.jfx.openptv.feature.settings
 
+import ac.jfx.openptv.core.data.SettingsRepository
+import ac.jfx.openptv.core.data.test.FakeSettingsRepository
 import ac.jfx.openptv.core.datastore.SettingsProvider
 import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
 import ac.jfx.openptv.core.datastore.preference.DynamicColourPreference
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
+import ac.jfx.openptv.core.model.AppSettings
 import ac.jfx.openptv.uitesthiltmanifest.HiltComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import com.google.common.truth.Truth.assertThat
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
@@ -50,6 +54,9 @@ class SettingsScreenTest {
     @Inject
     lateinit var userPreferences: UserPreferencesDataStore
 
+    @Inject
+    lateinit var settingsRepository: SettingsRepository
+
     @Before
     fun setUp() {
         hiltRule.inject()
@@ -57,6 +64,15 @@ class SettingsScreenTest {
         // a fresh file per test without juggling Hilt component lifecycles, so an explicit
         // write is the simpler seam.
         seedThemeMode(ThemeModePreference.System)
+        // Reset the in-memory `FakeSettingsRepository` to a known state so a previous test's
+        // server-URL write doesn't bleed into the next one. Cast is safe — the test graph
+        // only ever binds the fake.
+        (settingsRepository as FakeSettingsRepository).seed(
+            AppSettings(
+                backendBaseUrl = settingsRepository.defaultBackendBaseUrl,
+                setupCompleted = true,
+            ),
+        )
     }
 
     @Test
@@ -163,8 +179,89 @@ class SettingsScreenTest {
         }
     }
 
+    // ------------------------------------------------------------------------
+    // Server picker — added in #81. Asserts that the row is reachable, the dialog renders
+    // both choices, and a save persists through `SettingsRepository`. The picker dialog
+    // itself doesn't add a new validation surface — `effectiveUrl.isNotBlank()` is covered
+    // by `ServerPickerStateTest` on the JVM side, which is faster than driving Compose.
+    // ------------------------------------------------------------------------
+
+    @Test
+    fun serverRow_showsCurrentBackendUrl() {
+        composeTestRule.setContent {
+            SettingsProvider(userPreferences = userPreferences) {
+                SettingsRoute(onBack = {})
+            }
+        }
+
+        // The seeded URL is `defaultBackendBaseUrl` ("http://test.local/api/v3/" in the fake).
+        composeTestRule.onNodeWithTag(TestTagServerRow).assertIsDisplayed()
+        composeTestRule
+            .onNodeWithText(settingsRepository.defaultBackendBaseUrl)
+            .assertIsDisplayed()
+    }
+
+    @Test
+    fun tappingServerRow_opensDialogWithBothChoices() {
+        composeTestRule.setContent {
+            SettingsProvider(userPreferences = userPreferences) {
+                SettingsRoute(onBack = {})
+            }
+        }
+
+        composeTestRule.onNodeWithTag(TestTagServerRow).performClick()
+
+        composeTestRule.onNodeWithTag(TestTagServerDialog).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TestTagServerDefaultChoice).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(TestTagServerCustomChoice).assertIsDisplayed()
+    }
+
+    @Test
+    fun savingCustomUrl_persistsThroughSettingsRepository() {
+        val customUrl = "http://192.168.1.42:8080/api/v3/"
+
+        composeTestRule.setContent {
+            SettingsProvider(userPreferences = userPreferences) {
+                SettingsRoute(onBack = {})
+            }
+        }
+
+        // Open the dialog, switch to Custom, type the URL, save.
+        composeTestRule.onNodeWithTag(TestTagServerRow).performClick()
+        composeTestRule.onNodeWithTag(TestTagServerCustomChoice).performClick()
+        composeTestRule.onNodeWithTag(TestTagServerCustomUrlField).performTextInput(customUrl)
+        composeTestRule.onNodeWithTag(TestTagServerDialogSave).performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            currentBackendUrl() == customUrl
+        }
+        assertThat(currentBackendUrl()).isEqualTo(customUrl)
+    }
+
+    @Test
+    fun cancellingDialog_doesNotChangeBackendUrl() {
+        val before = currentBackendUrl()
+
+        composeTestRule.setContent {
+            SettingsProvider(userPreferences = userPreferences) {
+                SettingsRoute(onBack = {})
+            }
+        }
+
+        composeTestRule.onNodeWithTag(TestTagServerRow).performClick()
+        composeTestRule.onNodeWithTag(TestTagServerCustomChoice).performClick()
+        composeTestRule.onNodeWithTag(TestTagServerCustomUrlField).performTextInput("http://elsewhere/")
+        composeTestRule.onNodeWithTag(TestTagServerDialogCancel).performClick()
+
+        // The dialog dismisses and the persisted URL is unchanged.
+        assertThat(currentBackendUrl()).isEqualTo(before)
+    }
+
     /** Blocking read off the typed flow — `first()` returns as soon as DataStore emits. */
     private fun currentThemeMode(): ThemeModePreference = runBlocking { userPreferences.themeMode.first() }
+
+    private fun currentBackendUrl(): String =
+        runBlocking { settingsRepository.settings.first().backendBaseUrl }
 
     private fun currentDynamicColour(): DynamicColourPreference = runBlocking { userPreferences.dynamicColour.first() }
 

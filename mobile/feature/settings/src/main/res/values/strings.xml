@@ -19,4 +19,19 @@
     <string name="feature_settings_dynamic_colour_label">Dynamic colour</string>
     <string name="feature_settings_dynamic_colour_supported_subtitle">Use colours derived from your wallpaper.</string>
     <string name="feature_settings_dynamic_colour_unsupported_subtitle">Available on Android 12+</string>
+
+    <!-- Server section. Mirrors the wording used by the first-run setup screen so users see the
+         same vocabulary in both places. -->
+    <string name="feature_settings_server_section">Server</string>
+    <string name="feature_settings_server_label">Backend server</string>
+    <string name="feature_settings_server_dialog_title">Choose your server</string>
+    <string name="feature_settings_server_default_title">Use the default server</string>
+    <string name="feature_settings_server_default_body">Bundled URL, suitable for emulator development and the hosted release.</string>
+    <string name="feature_settings_server_custom_title">Use a custom server</string>
+    <string name="feature_settings_server_custom_body">Run your own proxy and point the app at it. The address is stored on this device only.</string>
+    <string name="feature_settings_server_custom_field_label">Backend URL</string>
+    <string name="feature_settings_server_custom_field_placeholder">http://192.168.1.10:8080/api/v3/</string>
+    <string name="feature_settings_server_custom_field_helper">Include scheme, host, port, and the /api/v3/ path. A trailing slash will be added automatically.</string>
+    <string name="feature_settings_server_dialog_save">Save</string>
+    <string name="feature_settings_server_dialog_cancel">Cancel</string>
 </resources>
