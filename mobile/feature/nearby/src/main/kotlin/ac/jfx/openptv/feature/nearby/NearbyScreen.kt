@@ -686,9 +686,10 @@ private fun RouteChip(route: Route) {
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         shape = MaterialTheme.shapes.small,
     ) {
-        val label = route.number.ifBlank { route.name }.ifBlank { "#${route.id.value}" }
         Text(
-            text = label,
+            // `Route.displayLabel` (issue #88) picks `route_number` for trams/buses and
+            // `route_name` for trains/V-Line, falling back to "#<id>" when both are blank.
+            text = route.displayLabel,
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
         )

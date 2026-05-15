@@ -95,10 +95,11 @@ class BackendApiServiceTest {
     @Test
     fun `getStop success parses StopResponseDto`() =
         runTest {
+            // PTV nests `routes` inside the `stop` object — see `StopResponseDto` and #88.
             server.enqueue(
                 MockResponse().setResponseCode(200).setBody(
                     """
-                    {"stop":{"stop_id":1071,"stop_name":"Flinders Street","stop_suburb":"Melbourne City","route_type":0,"stop_latitude":-37.8,"stop_longitude":144.96},"routes":[{"route_id":19,"route_name":"Mernda","route_number":"","route_type":0}]}
+                    {"stop":{"stop_id":1071,"stop_name":"Flinders Street","stop_suburb":"Melbourne City","route_type":0,"stop_latitude":-37.8,"stop_longitude":144.96,"routes":[{"route_id":19,"route_name":"Mernda","route_number":"","route_type":0}]}}
                     """.trimIndent(),
                 ),
             )
@@ -106,7 +107,7 @@ class BackendApiServiceTest {
             val response = service.getStop("${baseUrl}stops/1071/route_type/0")
 
             assertThat(response.stop?.stopName).isEqualTo("Flinders Street")
-            assertThat(response.routes).hasSize(1)
+            assertThat(response.stop?.routes).hasSize(1)
         }
 
     @Test(expected = HttpException::class)

@@ -27,6 +27,7 @@ internal class StopDetailsDtoMother private constructor() {
         private var routeType: Int = DEFAULT_ROUTE_TYPE
         private var stopLatitude: Double = DEFAULT_LATITUDE
         private var stopLongitude: Double = DEFAULT_LONGITUDE
+        private var routes: List<RouteDto> = emptyList()
 
         fun withStopId(id: Int) = apply { this.stopId = id }
 
@@ -40,6 +41,8 @@ internal class StopDetailsDtoMother private constructor() {
 
         fun withStopLongitude(value: Double) = apply { this.stopLongitude = value }
 
+        fun withRoutes(value: List<RouteDto>) = apply { this.routes = value }
+
         fun build(): StopDetailsDto =
             StopDetailsDto(
                 stopId = stopId,
@@ -48,6 +51,7 @@ internal class StopDetailsDtoMother private constructor() {
                 routeType = routeType,
                 stopLatitude = stopLatitude,
                 stopLongitude = stopLongitude,
+                routes = routes,
             )
     }
 }

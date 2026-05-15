@@ -10,17 +10,16 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /**
- * Wire shape for `GET /api/v3/stops/{stop_id}/route_type/{route_type}`. The PTV body wraps both
- * the stop block and the serving-routes array in a top-level `disruptions` / `status` envelope;
- * only the two fields we need are mirrored here. `Json { ignoreUnknownKeys = true }` in
- * `NetworkModule` means new top-level keys won't break parsing.
+ * Wire shape for `GET /api/v3/stops/{stop_id}/route_type/{route_type}`. PTV wraps the serving
+ * routes array **inside** the `stop` object — not at the top level as an earlier read of the spec
+ * suggested. `Json { ignoreUnknownKeys = true }` in `NetworkModule` means new keys won't break
+ * parsing.
  *
  * Internal because `:core:data` should never see the wire shape — it consumes [toDomain] only.
  */
 @Serializable
 internal data class StopResponseDto(
     @SerialName("stop") val stop: StopDetailsDto? = null,
-    @SerialName("routes") val routes: List<RouteDto> = emptyList(),
 )
 
 @Serializable
@@ -31,6 +30,7 @@ internal data class StopDetailsDto(
     @SerialName("route_type") val routeType: Int,
     @SerialName("stop_latitude") val stopLatitude: Double = 0.0,
     @SerialName("stop_longitude") val stopLongitude: Double = 0.0,
+    @SerialName("routes") val routes: List<RouteDto> = emptyList(),
 )
 
 @Serializable
@@ -58,7 +58,7 @@ internal fun StopResponseDto.toDomain(): StopDetail? {
                 latitude = s.stopLatitude,
                 longitude = s.stopLongitude,
             ),
-        servingRoutes = routes.map { it.toDomain() },
+        servingRoutes = s.routes.map { it.toDomain() },
     )
 }
 
