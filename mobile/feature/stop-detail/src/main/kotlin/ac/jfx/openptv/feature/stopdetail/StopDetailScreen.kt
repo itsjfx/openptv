@@ -354,10 +354,13 @@ private fun LazyListScope.groupSection(
         }
         lastDate = depDate
         val route = routesById[dep.routeId.value]
-        // Per-row badge: use the route's number (preferred), then its name, then a placeholder
-        // built from the route id. The destination block can bundle several routes (issue #87),
-        // so each row's badge comes from the row's own routeId rather than the group header.
-        val routeBadge = route?.number?.ifBlank { route.name }.orEmpty().ifBlank { "#${dep.routeId.value}" }
+        // Per-row badge: the route's user-facing label (number for tram/bus, name for train /
+        // V-Line — issue #88). If the serving-routes lookup misses (PTV's `/stops` and
+        // `/departures` endpoints sometimes disagree on which routes serve a stop) we fall back
+        // to "#<routeId>" so the row still has something to render. The destination block can
+        // bundle several routes (issue #87), so each row's badge comes from the row's own
+        // routeId rather than the group header.
+        val routeBadge = route?.displayLabel ?: "#${dep.routeId.value}"
         item(key = "${group.key.destination}-${dep.runRef.value}") {
             DepartureRow(
                 departure = dep,
@@ -462,7 +465,7 @@ private fun StopHeader(
                 routes.take(MAX_INLINE_ROUTE_CHIPS).forEach { route ->
                     AssistChip(
                         onClick = { /* route detail lands in Phase 06 */ },
-                        label = { Text(route.number.ifBlank { route.name }) },
+                        label = { Text(route.displayLabel) },
                     )
                 }
             }
@@ -480,19 +483,13 @@ private fun GroupHeader(
     // direction tuple — multi-route blocks (Richmond → City) have no single favourite target to
     // toggle. The content description folds the route + destination context in for TalkBack.
     val favouriteTarget = group.favouriteTarget
-    // PTV's train feed sometimes returns blank route numbers + names — fall back to "#id" so the
-    // user can still tell two routes apart in the multi-route header. Mirrors the same fallback
-    // the per-row badge uses below.
-    val routesLabel =
-        group.routes.joinToString(separator = ", ") { route ->
-            route.number.ifBlank { route.name }.ifBlank { "#${route.id.value}" }
-        }
+    // PTV's train feed sometimes returns blank route numbers + names — `Route.displayLabel`
+    // (issue #88) handles the per-`route_type` rule plus the "#id" fallback so the multi-route
+    // header still tells the user which lines feed the destination.
+    val routesLabel = group.routes.joinToString(separator = ", ") { it.displayLabel }
     val favouriteDescription =
         if (favouriteTarget != null) {
-            val routeDescriptor =
-                group.routes.firstOrNull()
-                    ?.let { it.number.ifBlank { it.name }.ifBlank { "#${it.id.value}" } }
-                    .orEmpty()
+            val routeDescriptor = group.routes.firstOrNull()?.displayLabel.orEmpty()
             if (group.isFavourite) {
                 stringResource(R.string.feature_stop_detail_unfavourite_route, routeDescriptor, group.headerLabel)
             } else {

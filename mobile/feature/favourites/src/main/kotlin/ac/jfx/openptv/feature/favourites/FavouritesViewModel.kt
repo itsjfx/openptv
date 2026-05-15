@@ -10,6 +10,7 @@ import ac.jfx.openptv.core.model.DirectionId
 import ac.jfx.openptv.core.model.FavouriteRouteAtStop
 import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.StopId
+import ac.jfx.openptv.core.model.routeDisplayLabel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -372,7 +373,11 @@ class FavouritesViewModel
                 routeType = routeType,
                 stopName = stopName,
                 stopSuburb = stopSuburb,
-                routeNumber = routeNumber.ifBlank { "#${routeId.value}" },
+                // Pre-bake the badge label using `route_type` so trams/buses get the number
+                // and trains/V-Line get the line name (issue #88). The cached row already
+                // carries both fields; the shared helper handles fallback to "#<id>" when
+                // PTV returned both blank.
+                routeNumber = routeDisplayLabel(routeType, routeNumber, routeName, routeId),
                 routeName = routeName,
                 directionName = directionName,
                 nextDeparture = next,
