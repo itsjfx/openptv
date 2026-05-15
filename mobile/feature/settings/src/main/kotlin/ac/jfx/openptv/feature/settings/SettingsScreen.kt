@@ -42,6 +42,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -399,6 +400,12 @@ private fun ServerPickerDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.testTag(TestTagServerDialog),
+        // `dismissOnClickOutside = false` intentionally — Compose 2026.04-alpha's
+        // `AlertDialog` `text` slot fires the outside-click dismissal even when the tap lands
+        // inside the dialog window if there's an interactive composable (`clickable` / `selectable`)
+        // in the slot. The dialog still dismisses on Cancel, Save, or system back. Re-evaluate
+        // when the BOM moves past the regression.
+        properties = DialogProperties(dismissOnClickOutside = false),
         title = { Text(stringResource(R.string.feature_settings_server_dialog_title)) },
         text = {
             Column {
@@ -468,6 +475,9 @@ private fun ServerChoiceRow(
         modifier =
             Modifier
                 .fillMaxWidth()
+                // `selectable` (not `clickable`) so TalkBack announces the row as a radio
+                // option inside the enclosing `Column`. Mirrors the ThemeRow pattern in this
+                // file and the onboarding `ServerChoiceRow` in `:app`.
                 .selectable(
                     selected = selected,
                     onClick = onClick,
