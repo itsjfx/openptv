@@ -16,6 +16,11 @@ import (
 // outside this returns 404.
 const apiPrefix = "/api/v3/"
 
+// maxUpstreamBytes caps how much of PTV's response we'll copy back to the
+// client. PTV responses are JSON and well under this in practice; the cap is
+// a belt-and-braces against a misbehaving or compromised upstream.
+const maxUpstreamBytes = 5 << 20 // 5 MiB
+
 // Handler is the HTTP handler that signs and proxies to PTV.
 type Handler struct {
 	client *ptv.Client
@@ -108,8 +113,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", ct)
 	}
 	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
+	n, err := io.Copy(w, io.LimitReader(resp.Body, maxUpstreamBytes))
+	if err != nil {
 		// At this point the headers and status are flushed; we can only log.
 		h.logger.WarnContext(r.Context(), "response copy interrupted", slog.String("err", err.Error()))
+	}
+	if n == maxUpstreamBytes {
+		h.logger.WarnContext(r.Context(), "upstream response truncated at cap",
+			slog.String("path", upstreamPath),
+			slog.Int64("bytes", n),
+		)
 	}
 }

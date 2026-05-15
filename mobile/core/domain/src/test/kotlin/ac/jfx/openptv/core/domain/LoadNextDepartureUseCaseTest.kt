@@ -1,15 +1,13 @@
 package ac.jfx.openptv.core.domain
 
 import ac.jfx.openptv.core.common.Result
-import ac.jfx.openptv.core.data.DepartureRepository
-import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.data.test.FakeDepartureRepository
 import ac.jfx.openptv.core.model.DirectionId
 import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.testing.DepartureMother
 import com.google.common.truth.Truth.assertThat
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -27,6 +25,11 @@ import kotlin.time.Duration.Companion.minutes
  *
  * `Clock` is fixed to a stable instant for clarity — the use case itself no longer reads the
  * clock, but a stable "now" keeps the test data legible.
+ *
+ * The repository is the hand-written [FakeDepartureRepository] — mocking a repo interface that
+ * already has a fake is a code smell per `CLAUDE.md`. Each case enqueues a one-shot result;
+ * unused methods on the interface stay encapsulated in the fake so adding members to
+ * [ac.jfx.openptv.core.data.DepartureRepository] doesn't ripple into the per-test boilerplate.
  */
 class LoadNextDepartureUseCaseTest {
     private val clock = FixedClock(Instant.parse("2026-05-14T09:00:00Z"))
@@ -56,7 +59,10 @@ class LoadNextDepartureUseCaseTest {
                     .withScheduledDepartureUtc(clock.now() + 25.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 25.minutes)
                     .build()
-            val repo = StubRepository(Result.Success(listOf(later, sooner)))
+            val repo =
+                FakeDepartureRepository().apply {
+                    enqueueSuccess(listOf(later, sooner))
+                }
             val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
@@ -86,7 +92,10 @@ class LoadNextDepartureUseCaseTest {
                     .withScheduledDepartureUtc(clock.now() + 7.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 7.minutes)
                     .build()
-            val repo = StubRepository(Result.Success(listOf(otherRouteSooner, ourRouteNext)))
+            val repo =
+                FakeDepartureRepository().apply {
+                    enqueueSuccess(listOf(otherRouteSooner, ourRouteNext))
+                }
             val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
@@ -112,7 +121,10 @@ class LoadNextDepartureUseCaseTest {
                     .withScheduledDepartureUtc(clock.now() + 6.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 6.minutes)
                     .build()
-            val repo = StubRepository(Result.Success(listOf(wrongDirection, rightDirection)))
+            val repo =
+                FakeDepartureRepository().apply {
+                    enqueueSuccess(listOf(wrongDirection, rightDirection))
+                }
             val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
@@ -130,7 +142,7 @@ class LoadNextDepartureUseCaseTest {
                     .withScheduledDepartureUtc(clock.now() + 5.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 5.minutes)
                     .build()
-            val repo = StubRepository(Result.Success(listOf(differentRoute)))
+            val repo = FakeDepartureRepository().apply { enqueueSuccess(listOf(differentRoute)) }
             val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
@@ -145,7 +157,7 @@ class LoadNextDepartureUseCaseTest {
             // Models the post-#86 contract: PTV/looker_backwards=false returned no upcoming rows
             // for this stop. The use case yields null and the favourites row renders "No upcoming
             // departures" rather than guessing from a stale entry.
-            val repo = StubRepository(Result.Success(emptyList()))
+            val repo = FakeDepartureRepository().apply { enqueueSuccess(emptyList()) }
             val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
@@ -158,7 +170,7 @@ class LoadNextDepartureUseCaseTest {
     fun `forwards Error from the repository`() =
         runTest {
             val boom = java.io.IOException("boom")
-            val repo = StubRepository(Result.Error(boom))
+            val repo = FakeDepartureRepository().apply { enqueueError(boom) }
             val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
@@ -166,32 +178,6 @@ class LoadNextDepartureUseCaseTest {
             assertThat(result).isInstanceOf(Result.Error::class.java)
             assertThat((result as Result.Error).throwable).isSameInstanceAs(boom)
         }
-
-    /**
-     * Minimal stub — only [getDepartures] is exercised by [LoadNextDepartureUseCase]. The polling
-     * Flow / paging surface stay unused. A hand-written stub rather than [`FakeDepartureRepository`]
-     * keeps `:core:domain` from depending on `:core:data-test` for one test class.
-     */
-    private class StubRepository(
-        private val response: Result<List<Departure>>,
-    ) : DepartureRepository {
-        override suspend fun getDepartures(
-            stopId: StopId,
-            routeType: RouteType,
-        ): Result<List<Departure>> = response
-
-        override fun observeDepartures(
-            stopId: StopId,
-            routeType: RouteType,
-        ): Flow<Result<List<Departure>>> = error("not used")
-
-        override suspend fun loadMore(
-            stopId: StopId,
-            routeType: RouteType,
-            after: Instant,
-            maxResults: Int,
-        ): Result<List<Departure>> = error("not used")
-    }
 
     private class FixedClock(private val instant: Instant) : Clock {
         override fun now(): Instant = instant
