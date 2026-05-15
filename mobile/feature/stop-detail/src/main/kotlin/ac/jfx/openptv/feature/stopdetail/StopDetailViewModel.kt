@@ -505,15 +505,25 @@ class StopDetailViewModel
             // Issue #90: the pinned destination is no longer auto-expanded. Tapping a favourite
             // only hoists its block to the top — the visible row count matches the other groups,
             // and the user can still tap the chevron to expand it themselves.
-            return groups
-                // Pin the focus group at the top (issue #78). Default order is by earliest
-                // departure across the group; if a focus key matches, that group sorts to index 0
-                // and everything else keeps the earliest-departure ordering. compareBy
-                // short-circuits cleanly so the sort cost stays O(n log n).
-                .sortedWith(
-                    compareByDescending<Group> { it.isPinned }
-                        .thenBy { it.departures.first().effectiveDepartureUtc() },
-                )
+            //
+            // Issue #100: all favourited groups (`isFavourite == true`) pin above non-favourited
+            // groups. Within the favourite band the focus tuple — the favourite the user tapped to
+            // arrive here (`isPinned`) — sits at index 0 above other favourites; remaining
+            // favourites order deterministically by `(routeId asc, directionId asc)` on the group's
+            // `favouriteTarget` so multi-launch from the same favourites list looks identical every
+            // time. Non-favourited groups keep their existing earliest-departure ordering below.
+            //
+            // The "favourite section" key is the conjunction `isFavourite || isPinned`: `isPinned`
+            // covers the corner case where the user opens the stop via a favourite but the
+            // favourites flow hasn't emitted yet, so `favouriteTuples` is still empty for that
+            // group. The focus group still hoists to position 0 regardless.
+            return groups.sortedWith(
+                compareByDescending<Group> { it.isFavourite || it.isPinned }
+                    .thenByDescending { it.isPinned }
+                    .thenBy { it.favouriteTarget?.routeId?.value ?: Int.MAX_VALUE }
+                    .thenBy { it.favouriteTarget?.direction?.id?.value ?: Int.MAX_VALUE }
+                    .thenBy { it.departures.first().effectiveDepartureUtc() },
+            )
         }
 
         /**
