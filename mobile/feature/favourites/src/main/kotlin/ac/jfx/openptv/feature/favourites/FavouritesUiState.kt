@@ -80,13 +80,16 @@ data class FavouriteKey(
  *  - [Loading] — first fetch hasn't landed yet, or the row was just added.
  *  - [Empty] — the fetch succeeded but no matching `(routeId, directionId)` is upcoming.
  *  - [Loaded] — a real next departure exists; the screen renders the scheduled clock-time
- *    ([scheduledClockTime]) and the live relative label ([relativeLabel]) side by side, plus
- *    the live clock-time when an estimate exists ([estimatedClockTime]).
+ *    (derived from [scheduledUtc]) and the live relative label ([relativeLabel]) side by side,
+ *    plus the live clock-time when an estimate exists (derived from [estimatedUtc]).
  *  - [Error] — the fetch failed and no previous Loaded value is available to fall back to.
  *
  * Issue #78 explicitly asks for both the scheduled time AND the live tracking time alongside
- * each other (instead of always showing "Departed"). The VM precomputes both strings so the
- * Compose layer stays free of formatting logic — same pattern stop-detail's `DepartureRow` uses.
+ * each other (instead of always showing "Departed"). The VM exposes the relative label as a
+ * pre-formatted string (because the relative formatter depends on the injected clock) but
+ * carries the raw [Instant]s for the absolute clock-faces — the Compose layer formats those
+ * against the user's [ac.jfx.openptv.core.datastore.preference.TimeFormatPreference] so a flip
+ * from 24-hour to 12-hour in Settings reflects immediately without a tick round-trip.
  *
  * The VM holds onto the most-recent [Loaded] across a transient [Error] tick so the row's label
  * doesn't flicker on a single dropped poll — the screen only sees [Error] when no stale value is
@@ -99,8 +102,6 @@ sealed interface NextDepartureState {
 
     data class Loaded(
         val relativeLabel: String,
-        val scheduledClockTime: String,
-        val estimatedClockTime: String?,
         val scheduledUtc: Instant,
         val estimatedUtc: Instant?,
     ) : NextDepartureState

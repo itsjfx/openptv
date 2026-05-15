@@ -27,6 +27,10 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:domain"))
     implementation(project(":core:model"))
+    // `LocalTimeFormat` + `rememberUse24Hour` for 12/24-hour clock-face rendering. Added in
+    // #89; the absolute formatter logic itself lives in `:core:common` (already wired by the
+    // `openptv.android.feature` plugin), this dep brings the Compose-bound resolver.
+    implementation(project(":core:datastore"))
 
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

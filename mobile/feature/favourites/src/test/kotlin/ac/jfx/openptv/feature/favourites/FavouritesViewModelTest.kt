@@ -309,10 +309,12 @@ class FavouritesViewModelTest {
 
             val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
             val next = loaded.rows.single().nextDeparture as NextDepartureState.Loaded
-            // Issue #78 part 2: both scheduled and live are exposed.
-            assertThat(next.scheduledClockTime).isNotEmpty()
-            assertThat(next.estimatedClockTime).isNotNull()
-            assertThat(next.estimatedClockTime).isNotEqualTo(next.scheduledClockTime)
+            // Issue #78 part 2: both scheduled and live are exposed. Issue #89 moved the
+            // actual clock-face formatting into the Compose layer (so a 12/24-hour flip
+            // reflects without a tick), so the contract here is the two raw [Instant]s diverge.
+            assertThat(next.scheduledUtc).isNotNull()
+            assertThat(next.estimatedUtc).isNotNull()
+            assertThat(next.estimatedUtc).isNotEqualTo(next.scheduledUtc)
         }
 
     @Test

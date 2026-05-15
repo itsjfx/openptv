@@ -4,6 +4,7 @@ import ac.jfx.openptv.core.data.test.FakeSettingsRepository
 import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
 import ac.jfx.openptv.core.datastore.preference.DynamicColourPreference
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
+import ac.jfx.openptv.core.datastore.preference.TimeFormatPreference
 import ac.jfx.openptv.core.model.AppSettings
 import ac.jfx.openptv.core.testing.util.MainDispatcherRule
 import androidx.datastore.core.DataStore
@@ -144,6 +145,56 @@ class SettingsViewModelTest {
                 awaitItem()
                 viewModel.setDynamicColour(DynamicColourPreference.On)
                 assertThat(awaitItem()).isEqualTo(DynamicColourPreference.On)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    // ------------------------------------------------------------------------
+    // Time format — the surface added in #89.
+    // ------------------------------------------------------------------------
+
+    @Test
+    fun `default timeFormat is System before any write`() =
+        runTest {
+            userPreferences.timeFormat.test {
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.default)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `setTimeFormat TwelveHour writes TwelveHour to datastore`() =
+        runTest {
+            userPreferences.timeFormat.test {
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.default)
+                viewModel.setTimeFormat(TimeFormatPreference.TwelveHour)
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.TwelveHour)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `setTimeFormat TwentyFourHour writes TwentyFourHour to datastore`() =
+        runTest {
+            userPreferences.timeFormat.test {
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.default)
+                viewModel.setTimeFormat(TimeFormatPreference.TwentyFourHour)
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.TwentyFourHour)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `successive timeFormat writes re-emit through the typed flow`() =
+        runTest {
+            userPreferences.timeFormat.test {
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.default)
+                viewModel.setTimeFormat(TimeFormatPreference.TwelveHour)
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.TwelveHour)
+                viewModel.setTimeFormat(TimeFormatPreference.TwentyFourHour)
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.TwentyFourHour)
+                viewModel.setTimeFormat(TimeFormatPreference.System)
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.System)
                 cancelAndIgnoreRemainingEvents()
             }
         }

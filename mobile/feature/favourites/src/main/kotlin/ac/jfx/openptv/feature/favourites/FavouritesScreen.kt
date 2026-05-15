@@ -1,5 +1,7 @@
 package ac.jfx.openptv.feature.favourites
 
+import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
+import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.feature.favourites.R
 import androidx.compose.foundation.background
@@ -446,15 +448,23 @@ private fun NextDepartureSubtext(
     modifier: Modifier = Modifier,
 ) {
     when (state) {
-        is NextDepartureState.Loaded ->
+        is NextDepartureState.Loaded -> {
+            // Issue #89: format absolute clock-faces against the user's 12/24-hour preference
+            // (via `LocalTimeFormat`, falling back to the system 24-hour flag when set to
+            // "Follow system"). The relative label below remains untouched — "in 4 min" has
+            // no clock face to localise.
+            val use24Hour = rememberUse24Hour()
+            val scheduledClock = AbsoluteTimeFormatter.format(state.scheduledUtc, use24Hour)
+            val estimatedClock =
+                state.estimatedUtc?.let { AbsoluteTimeFormatter.format(it, use24Hour) }
             Column(
                 modifier = modifier,
                 horizontalAlignment = Alignment.End,
             ) {
-                val live = state.estimatedClockTime?.takeIf { it != state.scheduledClockTime }
+                val live = estimatedClock?.takeIf { it != scheduledClock }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = state.scheduledClockTime,
+                        text = scheduledClock,
                         style = MaterialTheme.typography.bodyMedium,
                         // Strike through the scheduled time when a live estimate disagrees so the
                         // user can see at a glance which is the source of truth — same shape PTV
@@ -483,6 +493,7 @@ private fun NextDepartureSubtext(
                     fontWeight = FontWeight.SemiBold,
                 )
             }
+        }
         NextDepartureState.Loading ->
             Text(
                 text = stringResource(R.string.feature_favourites_next_loading),

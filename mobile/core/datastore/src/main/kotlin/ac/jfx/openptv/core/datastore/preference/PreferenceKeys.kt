@@ -20,4 +20,5 @@ internal object PreferenceKeys {
     val THEME_MODE = stringPreferencesKey("theme_mode")
     val DYNAMIC_COLOUR = stringPreferencesKey("dynamic_colour")
     val FAVOURITES_SORT = stringPreferencesKey("favourites_sort")
+    val TIME_FORMAT = stringPreferencesKey("time_format")
 }

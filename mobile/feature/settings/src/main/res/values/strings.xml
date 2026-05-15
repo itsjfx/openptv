@@ -20,6 +20,14 @@
     <string name="feature_settings_dynamic_colour_supported_subtitle">Use colours derived from your wallpaper.</string>
     <string name="feature_settings_dynamic_colour_unsupported_subtitle">Available on Android 12+</string>
 
+    <!-- Time format section. Controls how every absolute time the app renders
+         (departure rows, "as of" footer, favourite row clock-times) is shown. Relative
+         strings like "in 4 min" are unaffected. -->
+    <string name="feature_settings_time_format_section">Time format</string>
+    <string name="feature_settings_time_format_system">Follow system</string>
+    <string name="feature_settings_time_format_twelve">12-hour (3:30 PM)</string>
+    <string name="feature_settings_time_format_twenty_four">24-hour (15:30)</string>
+
     <!-- Server section. Mirrors the wording used by the first-run setup screen so users see the
          same vocabulary in both places. -->
     <string name="feature_settings_server_section">Server</string>

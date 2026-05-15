@@ -5,7 +5,9 @@ import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
 import ac.jfx.openptv.core.datastore.preference.LocalDynamicColour
 import ac.jfx.openptv.core.datastore.preference.LocalFavouritesSort
 import ac.jfx.openptv.core.datastore.preference.LocalThemeMode
+import ac.jfx.openptv.core.datastore.preference.LocalTimeFormat
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
+import ac.jfx.openptv.core.datastore.preference.TimeFormatPreference
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -47,11 +49,15 @@ fun SettingsProvider(
     val favouritesSort by userPreferences.favouritesSort.collectAsStateWithLifecycle(
         initialValue = remember { FavouritesSortPreference.default },
     )
+    val timeFormat by userPreferences.timeFormat.collectAsStateWithLifecycle(
+        initialValue = remember { TimeFormatPreference.default },
+    )
 
     CompositionLocalProvider(
         LocalThemeMode provides themeMode,
         LocalDynamicColour provides dynamicColour,
         LocalFavouritesSort provides favouritesSort,
+        LocalTimeFormat provides timeFormat,
         content = content,
     )
 }

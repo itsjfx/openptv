@@ -1,6 +1,8 @@
 package ac.jfx.openptv.feature.stopdetail
 
+import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
+import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
 import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.Direction
 import ac.jfx.openptv.core.model.Route
@@ -650,7 +652,11 @@ private fun DepartureRow(
             scheduled = departure.scheduledDepartureUtc,
             estimated = departure.estimatedDepartureUtc,
         )
-    val scheduled = departure.scheduledDepartureUtc.formatTimeOfDay()
+    // Issue #89: clock-face strings honour the user's 12/24-hour preference (via
+    // `LocalTimeFormat`, falling back to the system 24-hour flag when the user picked
+    // "Follow system"). Relative phrases above are unaffected.
+    val use24Hour = rememberUse24Hour()
+    val scheduled = AbsoluteTimeFormatter.format(departure.scheduledDepartureUtc, use24Hour)
     val platformClause =
         departure.platform?.let { platform ->
             stringResource(R.string.feature_stop_detail_row_platform_clause, platform.value)
@@ -756,8 +762,9 @@ private fun AsOfRow(asOf: Instant?) {
         Spacer(modifier = Modifier.height(8.dp))
         return
     }
+    val use24Hour = rememberUse24Hour()
     Text(
-        text = stringResource(R.string.feature_stop_detail_as_of, asOf.formatTimeOfDay()),
+        text = stringResource(R.string.feature_stop_detail_as_of, AbsoluteTimeFormatter.format(asOf, use24Hour)),
         style = MaterialTheme.typography.labelSmall,
         modifier =
             Modifier
@@ -823,11 +830,6 @@ private fun ErrorState(
             Text(stringResource(R.string.feature_stop_detail_retry))
         }
     }
-}
-
-private fun Instant.formatTimeOfDay(): String {
-    val local = toLocalDateTime(TimeZone.currentSystemDefault())
-    return "%02d:%02d".format(local.hour, local.minute)
 }
 
 private fun Departure.delayMinutes(): Long? {

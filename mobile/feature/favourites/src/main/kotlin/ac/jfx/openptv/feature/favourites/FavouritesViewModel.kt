@@ -30,9 +30,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.datetime.Instant
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.seconds
 
@@ -311,8 +308,6 @@ class FavouritesViewModel
                                     scheduled = dep.scheduledDepartureUtc,
                                     estimated = dep.estimatedDepartureUtc,
                                 ),
-                            scheduledClockTime = dep.scheduledDepartureUtc.formatClockTime(),
-                            estimatedClockTime = dep.estimatedDepartureUtc?.formatClockTime(),
                             scheduledUtc = dep.scheduledDepartureUtc,
                             estimatedUtc = dep.estimatedDepartureUtc,
                         )
@@ -397,13 +392,3 @@ class FavouritesViewModel
             private const val SNAPSHOT_TIMEOUT_MILLIS: Long = 2_000
         }
     }
-
-/**
- * Format an [Instant] as a `HH:mm` device-local clock time. Mirrors the helper in stop-detail's
- * `DepartureRow` so the favourite row's "Scheduled 09:05 · Live 09:08" subtext uses the same
- * shape as the stop-detail screen the user reaches by tapping the row.
- */
-internal fun Instant.formatClockTime(): String {
-    val local = toLocalDateTime(TimeZone.currentSystemDefault())
-    return "%02d:%02d".format(local.hour, local.minute)
-}

@@ -6,6 +6,7 @@ import ac.jfx.openptv.core.datastore.SettingsProvider
 import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
 import ac.jfx.openptv.core.datastore.preference.DynamicColourPreference
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
+import ac.jfx.openptv.core.datastore.preference.TimeFormatPreference
 import ac.jfx.openptv.core.model.AppSettings
 import ac.jfx.openptv.uitesthiltmanifest.HiltComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
@@ -64,6 +65,7 @@ class SettingsScreenTest {
         // a fresh file per test without juggling Hilt component lifecycles, so an explicit
         // write is the simpler seam.
         seedThemeMode(ThemeModePreference.System)
+        seedTimeFormat(TimeFormatPreference.System)
         // Reset the in-memory `FakeSettingsRepository` to a known state so a previous test's
         // server-URL write doesn't bleed into the next one. Cast is safe — the test graph
         // only ever binds the fake.
@@ -238,6 +240,42 @@ class SettingsScreenTest {
         assertThat(currentBackendUrl()).isEqualTo(customUrl)
     }
 
+    // ------------------------------------------------------------------------
+    // Time format — added in #89. Same pattern as the theme-mode rows above.
+    // ------------------------------------------------------------------------
+
+    @Test
+    fun tappingTwentyFourHourRow_writesTwentyFourHourToDataStore() {
+        composeTestRule.setContent {
+            SettingsProvider(userPreferences = userPreferences) {
+                SettingsRoute(onBack = {})
+            }
+        }
+
+        composeTestRule.onNodeWithTag(TestTagTimeFormatTwentyFour).performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            currentTimeFormat() == TimeFormatPreference.TwentyFourHour
+        }
+        assertThat(currentTimeFormat()).isEqualTo(TimeFormatPreference.TwentyFourHour)
+    }
+
+    @Test
+    fun tappingTwelveHourRow_writesTwelveHourToDataStore() {
+        composeTestRule.setContent {
+            SettingsProvider(userPreferences = userPreferences) {
+                SettingsRoute(onBack = {})
+            }
+        }
+
+        composeTestRule.onNodeWithTag(TestTagTimeFormatTwelve).performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            currentTimeFormat() == TimeFormatPreference.TwelveHour
+        }
+        assertThat(currentTimeFormat()).isEqualTo(TimeFormatPreference.TwelveHour)
+    }
+
     @Test
     fun cancellingDialog_doesNotChangeBackendUrl() {
         val before = currentBackendUrl()
@@ -265,6 +303,8 @@ class SettingsScreenTest {
 
     private fun currentDynamicColour(): DynamicColourPreference = runBlocking { userPreferences.dynamicColour.first() }
 
+    private fun currentTimeFormat(): TimeFormatPreference = runBlocking { userPreferences.timeFormat.first() }
+
     @OptIn(DelicateCoroutinesApi::class)
     private fun seedThemeMode(target: ThemeModePreference) {
         // GlobalScope is the intentional seam here — the `put(scope, ...)` write needs to
@@ -273,6 +313,14 @@ class SettingsScreenTest {
         runBlocking {
             target.put(scope = GlobalScope, dataStore = userPreferences.dataStore)
             userPreferences.themeMode.first { it == target }
+        }
+    }
+
+    @OptIn(DelicateCoroutinesApi::class)
+    private fun seedTimeFormat(target: TimeFormatPreference) {
+        runBlocking {
+            target.put(scope = GlobalScope, dataStore = userPreferences.dataStore)
+            userPreferences.timeFormat.first { it == target }
         }
     }
 
