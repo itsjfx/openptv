@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.network
 
 import ac.jfx.openptv.core.model.Coordinates
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.network.model.toDomain
 import javax.inject.Inject
@@ -18,6 +19,10 @@ import javax.inject.Inject
  * of resolution on Earth's surface, which is well past anything coarse location can return; using
  * Kotlin's `toString()` instead can emit values like `-37.81360000000001` which clutter the URL
  * without changing the resolved point.
+ *
+ * `route_types` is repeated once per requested mode in the query string — PTV's documented
+ * convention for "any of these N types". The filter ordering is sorted-by-wire-code so identical
+ * filter sets produce identical URLs (cache-friendly + makes test assertions deterministic).
  */
 internal class RetrofitNearbyStopsDataSource
     @Inject
@@ -28,11 +33,17 @@ internal class RetrofitNearbyStopsDataSource
         override suspend fun stopsNear(
             coordinates: Coordinates,
             radiusMeters: Int,
+            routeTypes: Set<RouteType>,
         ): List<Stop> {
             val base = backendUrl.backendBaseUrl()
             val lat = "%.6f".format(coordinates.lat)
             val lng = "%.6f".format(coordinates.lng)
-            val url = "${base}stops/location/$lat,$lng?max_distance=$radiusMeters"
+            val routeTypeQuery =
+                routeTypes
+                    .map { it.toPtvCode() }
+                    .toSortedSet()
+                    .joinToString(separator = "") { "&route_types=$it" }
+            val url = "${base}stops/location/$lat,$lng?max_distance=$radiusMeters$routeTypeQuery"
             return api.stopsNearLocation(url).toDomain()
         }
     }

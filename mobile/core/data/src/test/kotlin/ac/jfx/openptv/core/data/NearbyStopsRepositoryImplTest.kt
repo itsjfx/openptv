@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.model.Coordinates
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.network.NearbyStopsDataSource
 import ac.jfx.openptv.core.testing.CoordinatesMother
@@ -82,7 +83,43 @@ class NearbyStopsRepositoryImplTest {
 
             repo.stopsNear(point, 1_200)
 
-            assertThat(ds.calls).containsExactly(point to 1_200)
+            assertThat(ds.calls).hasSize(1)
+            assertThat(ds.calls[0].coordinates).isEqualTo(point)
+            assertThat(ds.calls[0].radiusMeters).isEqualTo(1_200)
+            assertThat(ds.calls[0].routeTypes).isEmpty()
+        }
+
+    @Test
+    fun `routeTypes filter is forwarded to the data source`() =
+        runTest {
+            val ds = FakeDataSource(returning = emptyList())
+            val repo = NearbyStopsRepositoryImpl(ds)
+
+            repo.stopsNear(
+                CoordinatesMother.flindersStreet().build(),
+                RADIUS_M,
+                routeTypes = setOf(RouteType.Train, RouteType.Tram),
+            )
+
+            assertThat(ds.calls[0].routeTypes).isEqualTo(setOf(RouteType.Train, RouteType.Tram))
+        }
+
+    @Test
+    fun `Unknown is filtered out before reaching the data source`() =
+        runTest {
+            // The wire mapper falls back to Train for Unknown, so silently dropping it is the
+            // safer contract — a caller that includes Unknown by accident shouldn't end up
+            // re-fetching trains.
+            val ds = FakeDataSource(returning = emptyList())
+            val repo = NearbyStopsRepositoryImpl(ds)
+
+            repo.stopsNear(
+                CoordinatesMother.flindersStreet().build(),
+                RADIUS_M,
+                routeTypes = setOf(RouteType.Bus, RouteType.Unknown),
+            )
+
+            assertThat(ds.calls[0].routeTypes).isEqualTo(setOf(RouteType.Bus))
         }
 
     private companion object {
@@ -93,13 +130,20 @@ class NearbyStopsRepositoryImplTest {
         private val returning: List<Stop> = emptyList(),
         private val throwing: Throwable? = null,
     ) : NearbyStopsDataSource {
-        val calls: MutableList<Pair<Coordinates, Int>> = mutableListOf()
+        data class Call(
+            val coordinates: Coordinates,
+            val radiusMeters: Int,
+            val routeTypes: Set<RouteType>,
+        )
+
+        val calls: MutableList<Call> = mutableListOf()
 
         override suspend fun stopsNear(
             coordinates: Coordinates,
             radiusMeters: Int,
+            routeTypes: Set<RouteType>,
         ): List<Stop> {
-            calls += coordinates to radiusMeters
+            calls += Call(coordinates, radiusMeters, routeTypes)
             throwing?.let { throw it }
             return returning
         }
