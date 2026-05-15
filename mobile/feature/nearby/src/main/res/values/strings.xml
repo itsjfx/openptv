@@ -35,6 +35,11 @@
     <string name="feature_nearby_no_stops">No PTV stops in this area.</string>
     <string name="feature_nearby_no_stops_hint">Pan to a denser part of Victoria to find nearby stops.</string>
 
+    <!-- Nearby list (issue #80) -->
+    <string name="feature_nearby_list_header">Nearby stops</string>
+    <string name="feature_nearby_list_count">%1$d</string>
+    <string name="feature_nearby_list_empty">No stops match the current filter. Pan or toggle a chip to see more.</string>
+
     <!-- Bottom-nav -->
     <string name="feature_nearby_tab_label">Nearby</string>
 </resources>

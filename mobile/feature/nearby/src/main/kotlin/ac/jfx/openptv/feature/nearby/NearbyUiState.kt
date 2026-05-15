@@ -14,29 +14,33 @@ import ac.jfx.openptv.core.model.Stop
  * sees Victoria from frame one. The variants describe the **permission overlay** and the
  * **fetched-pin state**, not the map itself, which always exists.
  *
- * **Filter source-of-truth.** [routeTypeFilter] hangs off both [Loaded] and [PermissionDenied]
- * because both can fetch + display pins. Issue #80 (the bottom-sheet "scrollable list of nearby
- * stops") subscribes to the same `StateFlow<NearbyUiState>` that drives the map, so the filter
- * applies to both surfaces consistently — there's no second filter knob.
+ * **Filter source-of-truth.** [routeTypeFilter] hangs off every variant because the chip strip
+ * lives over the map at all times. Issue #80 (the bottom-sheet "scrollable list of nearby stops")
+ * subscribes to the same `StateFlow<NearbyUiState>` that drives the map, so the filter applies to
+ * both surfaces consistently — there's no second filter knob.
+ *
+ * **Invariant:** [routeTypeFilter] is **always non-empty**. An empty set would show zero stops
+ * everywhere, which is a dead-end UX — the chip toggle in [NearbyViewModel] no-ops a tap on the
+ * last selected chip. The default is [DEFAULT_FILTER] (every visible mode on).
  */
 sealed interface NearbyUiState {
     /**
-     * The set of [RouteType]s the user wants to see. Empty set means "all types" — the same
-     * shape as `NearbyStopsRepository.stopsNear(routeTypes = emptySet())`. The UI treats an
-     * unselected chip the same way: grey out, no API filter.
+     * The set of [RouteType]s the user has selected. Carried verbatim into PTV's `route_types`
+     * query parameter, plus belt-and-braces filtered at the screen render seam. Always non-empty
+     * — see the interface kdoc.
      */
     val routeTypeFilter: Set<RouteType>
 
     /** First entry, permission not yet asked. Shows rationale dialog over the CBD-centred map. */
     data object PermissionUnasked : NearbyUiState {
-        override val routeTypeFilter: Set<RouteType> = emptySet()
+        override val routeTypeFilter: Set<RouteType> = DEFAULT_FILTER
     }
 
     /** User denied permission. Shows a banner with an "Open Settings" CTA + CBD-centred map. */
     data class PermissionDenied(
         val camera: OpenPtvCameraState,
         val pins: List<Stop>,
-        override val routeTypeFilter: Set<RouteType> = emptySet(),
+        override val routeTypeFilter: Set<RouteType> = DEFAULT_FILTER,
     ) : NearbyUiState
 
     /** Permission granted (or denied + dismissed). Normal map operation. */
@@ -47,9 +51,21 @@ sealed interface NearbyUiState {
         val isFollowingUser: Boolean,
         val pendingSheet: SheetState,
         val showEmptyHint: Boolean,
-        override val routeTypeFilter: Set<RouteType> = emptySet(),
+        override val routeTypeFilter: Set<RouteType> = DEFAULT_FILTER,
     ) : NearbyUiState
 }
+
+/**
+ * Initial filter — every visible transport mode is on. The screen's chip strip and
+ * [NearbyViewModel] both honour the "filter is always non-empty" invariant; this is the
+ * canonical "everything selected" set.
+ *
+ * Mirrors the chip strip in `NearbyScreen.kt` (Train / Tram / Bus / V/Line / Night Bus). [RouteType.Unknown]
+ * is intentionally omitted — it's a runtime fallback for unexpected wire codes, not a user-facing
+ * mode.
+ */
+val DEFAULT_FILTER: Set<RouteType> =
+    setOf(RouteType.Train, RouteType.Tram, RouteType.Bus, RouteType.VLine, RouteType.NightBus)
 
 /**
  * Pin-tap → bottom-sheet state. `Closed` means no sheet is shown; `Open` carries the tapped
@@ -64,6 +80,21 @@ sealed interface SheetState {
 
     data class Open(val sheet: StopBottomSheet) : SheetState
 }
+
+/**
+ * One row in the bottom-sheet "nearby stops list" (issue #80). Carries the source [Stop] (kept
+ * whole so a row tap can re-use [NearbyViewModel.onPinClicked]) plus the distance from the user's
+ * current fix at the time the row was projected.
+ *
+ * The projection is screen-local — each row is the same `Stop` the map renders, augmented with a
+ * [distanceMetres]. The screen sorts by [distanceMetres] ascending. When the user has no fix
+ * (denied permission, or `lastKnown()` returned null), [distanceMetres] is `null` and the screen
+ * falls back to repository order.
+ */
+data class NearbyListRow(
+    val stop: Stop,
+    val distanceMetres: Double?,
+)
 
 /**
  * Projection rendered in the bottom sheet for a tapped stop.
