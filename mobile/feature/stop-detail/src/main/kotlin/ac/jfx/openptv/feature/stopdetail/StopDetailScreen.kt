@@ -316,15 +316,16 @@ private fun LazyListScope.groupSection(
     onDepartureClicked: (Departure) -> Unit,
     onDisruptionClicked: () -> Unit,
 ) {
-    item(key = "group-${group.key.routeId}-${group.key.directionId}") {
+    item(key = "group-${group.key.destination}") {
         GroupHeader(
             group = group,
             onToggleExpand = { onToggleExpand(group.key) },
             onToggleFavourite = {
-                // The favourites use case needs the [Direction] (id + name) — the group's first
-                // departure is the source of truth for that on the screen.
-                val first = group.departures.firstOrNull() ?: return@GroupHeader
-                onToggleFavourite(first.routeId, first.direction)
+                // Favourite affordance only fires when the group projects a single (route,
+                // direction) target — multi-route destination blocks (Richmond → City) suppress
+                // the star and never call this callback.
+                val target = group.favouriteTarget ?: return@GroupHeader
+                onToggleFavourite(target.routeId, target.direction)
             },
         )
     }
@@ -334,6 +335,9 @@ private fun LazyListScope.groupSection(
         } else {
             group.departures.take(COLLAPSED_VISIBLE)
         }
+    // Pre-index routes by id so each row can look up its own badge in O(1). The list is small
+    // (one per route serving the stop in this direction) so the map allocation is cheap.
+    val routesById = group.routes.associateBy { it.id.value }
     var lastDate: LocalDate? = null
     visible.forEach { dep ->
         val depDate =
@@ -344,16 +348,21 @@ private fun LazyListScope.groupSection(
         // divider stay free of header chrome — it'd be noise to show "Wed 14 May" before today's
         // first row.
         if (depDate != today && depDate != lastDate) {
-            item(key = "date-${group.key.routeId}-${group.key.directionId}-$depDate") {
+            item(key = "date-${group.key.destination}-$depDate") {
                 DateDivider(date = depDate)
             }
         }
         lastDate = depDate
-        item(key = "${group.key.routeId}-${group.key.directionId}-${dep.runRef.value}") {
+        val route = routesById[dep.routeId.value]
+        // Per-row badge: use the route's number (preferred), then its name, then a placeholder
+        // built from the route id. The destination block can bundle several routes (issue #87),
+        // so each row's badge comes from the row's own routeId rather than the group header.
+        val routeBadge = route?.number?.ifBlank { route.name }.orEmpty().ifBlank { "#${dep.routeId.value}" }
+        item(key = "${group.key.destination}-${dep.runRef.value}") {
             DepartureRow(
                 departure = dep,
                 timeFormatter = timeFormatter,
-                routeBadge = group.headerLabel,
+                routeBadge = routeBadge,
                 onDisruptionClicked = onDisruptionClicked,
                 onClicked = { onDepartureClicked(dep) },
             )
@@ -361,7 +370,7 @@ private fun LazyListScope.groupSection(
         }
     }
     if (!group.expanded && group.departures.size > COLLAPSED_VISIBLE) {
-        item(key = "show-more-${group.key.routeId}-${group.key.directionId}") {
+        item(key = "show-more-${group.key.destination}") {
             ShowMoreRow(
                 hiddenCount = group.departures.size - COLLAPSED_VISIBLE,
                 onClick = { onToggleExpand(group.key) },
@@ -467,16 +476,30 @@ private fun GroupHeader(
     onToggleExpand: () -> Unit,
     onToggleFavourite: () -> Unit,
 ) {
-    // Compute the favourite affordance's content description here so the `IconButton` semantics
-    // include the route + direction context for TalkBack. The route descriptor mirrors what the
-    // departure-row TalkBack copy uses elsewhere on the screen.
-    val routeDescriptor = group.headerLabel.removePrefix("Route ").substringBefore(" ·")
-    val directionName = group.departures.firstOrNull()?.direction?.name.orEmpty()
+    // Favourite affordance only renders when the destination block represents a single route +
+    // direction tuple — multi-route blocks (Richmond → City) have no single favourite target to
+    // toggle. The content description folds the route + destination context in for TalkBack.
+    val favouriteTarget = group.favouriteTarget
+    // PTV's train feed sometimes returns blank route numbers + names — fall back to "#id" so the
+    // user can still tell two routes apart in the multi-route header. Mirrors the same fallback
+    // the per-row badge uses below.
+    val routesLabel =
+        group.routes.joinToString(separator = ", ") { route ->
+            route.number.ifBlank { route.name }.ifBlank { "#${route.id.value}" }
+        }
     val favouriteDescription =
-        if (group.isFavourite) {
-            stringResource(R.string.feature_stop_detail_unfavourite_route, routeDescriptor, directionName)
+        if (favouriteTarget != null) {
+            val routeDescriptor =
+                group.routes.firstOrNull()
+                    ?.let { it.number.ifBlank { it.name }.ifBlank { "#${it.id.value}" } }
+                    .orEmpty()
+            if (group.isFavourite) {
+                stringResource(R.string.feature_stop_detail_unfavourite_route, routeDescriptor, group.headerLabel)
+            } else {
+                stringResource(R.string.feature_stop_detail_favourite_route, routeDescriptor, group.headerLabel)
+            }
         } else {
-            stringResource(R.string.feature_stop_detail_favourite_route, routeDescriptor, directionName)
+            ""
         }
 
     Surface(
@@ -488,7 +511,7 @@ private fun GroupHeader(
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (group.isPinned) {
@@ -503,36 +526,53 @@ private fun GroupHeader(
                     modifier = Modifier.padding(end = 8.dp).testTag(TestTagPinIndicator),
                 )
             }
-            Text(
-                text = group.headerLabel,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.weight(1f),
-            )
-            // Star glyph — filled when favourited, hollow otherwise. `Crossfade` animates between
-            // the two states so the user gets feedback on the tap without flicker. Material
-            // icons aren't pulled into this module to keep the dep surface tight (same trade as
-            // the back arrow and the chevron); plain text glyphs are good enough for a v1.
-            IconButton(
-                onClick = onToggleFavourite,
-                modifier =
-                    Modifier
-                        .testTag(TestTagFavouriteToggle)
-                        .semantics { contentDescription = favouriteDescription },
-            ) {
-                Crossfade(
-                    targetState = group.isFavourite,
-                    label = "favourite-star",
-                ) { favourited ->
+            // Two-line layout for the header: destination is the primary label (issue #87 — the
+            // user is looking for "the next service to City"), and when the block bundles more
+            // than one route, the contributing route badges appear on a smaller second line so
+            // the user can see at a glance which lines feed this destination. Single-route blocks
+            // skip the second line — the per-row badge already shows the route number, no point
+            // duplicating it.
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = group.headerLabel,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (group.routes.size > 1 && routesLabel.isNotBlank()) {
                     Text(
-                        text = if (favourited) "★" else "☆",
-                        style = MaterialTheme.typography.titleLarge,
-                        color =
-                            if (favourited) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                        text = routesLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+            }
+            // Star glyph — filled when favourited, hollow otherwise. `Crossfade` animates between
+            // the two states so the user gets feedback on the tap without flicker. Only renders
+            // when the group has a single favourite target — multi-route blocks suppress the
+            // affordance because there's no single tuple to toggle.
+            if (favouriteTarget != null) {
+                IconButton(
+                    onClick = onToggleFavourite,
+                    modifier =
+                        Modifier
+                            .testTag(TestTagFavouriteToggle)
+                            .semantics { contentDescription = favouriteDescription },
+                ) {
+                    Crossfade(
+                        targetState = group.isFavourite,
+                        label = "favourite-star",
+                    ) { favourited ->
+                        Text(
+                            text = if (favourited) "★" else "☆",
+                            style = MaterialTheme.typography.titleLarge,
+                            color =
+                                if (favourited) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                        )
+                    }
                 }
             }
             // Chevron glyph: closed when collapsed, open when expanded.
@@ -619,11 +659,12 @@ private fun DepartureRow(
             stringResource(R.string.feature_stop_detail_row_platform_clause, platform.value)
         }.orEmpty()
 
-    val routeDescriptor = routeBadge.removePrefix("Route ").substringBefore(" ·")
+    // `routeBadge` is now the route's short code directly (issue #87 simplified the call-site —
+    // the parent groupSection builds the badge per row from the matching `Route` projection).
     val talkback =
         stringResource(
             R.string.feature_stop_detail_row_content_description,
-            routeDescriptor,
+            routeBadge,
             departure.direction.name,
             relative.toSpokenForm(),
             platformClause,
@@ -650,7 +691,7 @@ private fun DepartureRow(
                 shape = RoundedCornerShape(4.dp),
             ) {
                 Text(
-                    text = routeBadge.routeShortCode(),
+                    text = routeBadge,
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                 )
@@ -797,13 +838,6 @@ private fun Departure.delayMinutes(): Long? {
     val delta = estimated - scheduledDepartureUtc
     return delta.inWholeMinutes.takeIf { it != 0L }
 }
-
-/**
- * "Route 19 · North Coburg" → "19". Cheap split — keeps the badge composable free of route
- * lookup gymnastics now that the [Group] has the formatted header label baked in.
- */
-private fun String.routeShortCode(): String =
-    removePrefix("Route ").substringBefore(" ·")
 
 /**
  * Tighten the relative-time copy slightly for TalkBack: "in 3 min" → "in 3 minutes" sounds more
