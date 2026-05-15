@@ -1,6 +1,5 @@
 package ac.jfx.openptv.feature.favourites
 
-import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.feature.favourites.R
 import androidx.compose.foundation.background
@@ -23,8 +22,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -32,15 +31,14 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +46,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -84,7 +83,6 @@ fun FavouritesRoute(
 
     FavouritesScreen(
         uiState = uiState,
-        onSortSelected = viewModel::onSortSelected,
         onRowClicked = { row ->
             onOpenStopDetail(row.key.stopId, row.routeType.toCode(), row.key.routeId, row.key.directionId)
         },
@@ -93,32 +91,37 @@ fun FavouritesRoute(
         onUndoDelete = viewModel::onUndoDelete,
         onClearUndo = viewModel::clearPendingUndo,
         onOpenSearch = onOpenSearch,
+        onToggleEditMode = viewModel::toggleEditMode,
+        onRefresh = viewModel::refresh,
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Suppress("LongMethod") // Scaffold + sort chips + list + empty / loading branches — kept inline so the screen reads top-to-bottom
+@Suppress("LongMethod") // Scaffold + list + empty / loading branches — kept inline so the screen reads top-to-bottom
 internal fun FavouritesScreen(
     uiState: FavouritesUiState,
-    onSortSelected: (FavouritesSortPreference) -> Unit,
     onRowClicked: (FavouriteRow) -> Unit,
     onReorder: (List<FavouriteKey>) -> Unit,
     onSwipeDelete: (FavouriteKey) -> Unit,
     onUndoDelete: () -> Unit,
     onClearUndo: () -> Unit,
     onOpenSearch: () -> Unit,
+    onToggleEditMode: () -> Unit,
+    onRefresh: () -> Unit,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
     val removedCopy = stringResource(R.string.feature_favourites_removed)
     val undoCopy = stringResource(R.string.feature_favourites_undo)
+    val loaded = uiState as? FavouritesUiState.Loaded
+    val pendingUndo = loaded?.pendingUndo
+    val editMode = loaded?.editMode ?: false
+    val isRefreshing = loaded?.isRefreshing ?: false
 
     // Wire the pending-undo state to the snackbar host. When the VM stashes a pending undo we
     // show the snackbar; the snackbar's dismissal/action result feeds back into the VM through
     // either `onUndoDelete` or `onClearUndo`. Done as a LaunchedEffect so a fresh undo from
     // a different row replaces a still-visible snackbar.
-    val pendingUndo = (uiState as? FavouritesUiState.Loaded)?.pendingUndo
     LaunchedEffect(pendingUndo) {
         if (pendingUndo != null) {
             val result =
@@ -138,23 +141,44 @@ internal fun FavouritesScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.feature_favourites_title)) },
+                actions = {
+                    // Edit toggle (issue #78). A glyph stand-in keeps the dep surface tight —
+                    // no Material Icons artifact pull, same trade as elsewhere in the app.
+                    if (loaded != null && loaded.rows.isNotEmpty()) {
+                        IconButton(
+                            onClick = onToggleEditMode,
+                            modifier = Modifier.testTag(TestTagEditToggle),
+                        ) {
+                            Text(
+                                text = if (editMode) "✓" else "✎",
+                                style = MaterialTheme.typography.titleLarge,
+                                color =
+                                    if (editMode) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = Modifier.testTag(TestTagRoot),
     ) { padding ->
-        Column(
+        // PullToRefreshBox wraps the list so the user can drag down anywhere on the favourites
+        // surface to trigger a manual fan-out (issue #78). Mirrors stop-detail's pattern.
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh = onRefresh,
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    .padding(padding)
+                    .testTag(TestTagPullToRefresh),
         ) {
-            SortChipsRow(
-                selected = (uiState as? FavouritesUiState.Loaded)?.sort ?: FavouritesSortPreference.Manual,
-                onSortSelected = onSortSelected,
-            )
-            HorizontalDivider()
             when (uiState) {
                 FavouritesUiState.Loading ->
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -168,7 +192,7 @@ internal fun FavouritesScreen(
                     } else {
                         RowList(
                             rows = uiState.rows,
-                            manualSort = uiState.sort == FavouritesSortPreference.Manual,
+                            editMode = uiState.editMode,
                             onRowClicked = onRowClicked,
                             onReorder = onReorder,
                             onSwipeDelete = onSwipeDelete,
@@ -176,47 +200,6 @@ internal fun FavouritesScreen(
                     }
             }
         }
-    }
-
-    // `scope` isn't used directly today; the snackbar coroutine runs inside `LaunchedEffect`.
-    // Keep the handle around for follow-up work (e.g. inline disruption snackbars on the row).
-    @Suppress("UNUSED_EXPRESSION")
-    scope
-}
-
-@Composable
-private fun SortChipsRow(
-    selected: FavouritesSortPreference,
-    onSortSelected: (FavouritesSortPreference) -> Unit,
-) {
-    Row(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
-                .testTag(TestTagSortChips),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        FilterChip(
-            selected = selected == FavouritesSortPreference.Manual,
-            onClick = { onSortSelected(FavouritesSortPreference.Manual) },
-            label = { Text(stringResource(R.string.feature_favourites_sort_manual)) },
-            modifier = Modifier.testTag(TestTagSortManual),
-        )
-        FilterChip(
-            selected = selected == FavouritesSortPreference.Alphabetical,
-            onClick = { onSortSelected(FavouritesSortPreference.Alphabetical) },
-            label = { Text(stringResource(R.string.feature_favourites_sort_alphabetical)) },
-            modifier = Modifier.testTag(TestTagSortAlphabetical),
-        )
-        // Phase 05 — Nearest is enabled. The sort degrades to Manual when LocationProvider has
-        // no fix (e.g. user denied coarse location, or device hasn't returned one yet).
-        FilterChip(
-            selected = selected == FavouritesSortPreference.Nearest,
-            onClick = { onSortSelected(FavouritesSortPreference.Nearest) },
-            label = { Text(stringResource(R.string.feature_favourites_sort_nearest)) },
-            modifier = Modifier.testTag(TestTagSortNearest),
-        )
     }
 }
 
@@ -244,16 +227,15 @@ private fun EmptyState(onOpenSearch: () -> Unit) {
 }
 
 /**
- * Stateful list with optional drag-to-reorder. The reorder uses a hand-rolled
- * `Modifier.pointerInput { detectDragGesturesAfterLongPress }` + an index-offset map so we don't
- * pull in a third-party library — see PR body for the trade-off. The drag handle is only visible
- * (and only wired to a `pointerInput`) when [manualSort] is true; alphabetical / nearest modes
- * render rows without the handle because reordering wouldn't survive the next sort tick.
+ * Stateful list with optional drag-to-reorder. The drag handle and delete button are only
+ * visible (and only wired to a `pointerInput`) when [editMode] is true (issue #78). The
+ * reorder uses a hand-rolled `Modifier.pointerInput { detectDragGesturesAfterLongPress }` + an
+ * index-offset map so we don't pull in a third-party library.
  */
 @Composable
 private fun RowList(
     rows: List<FavouriteRow>,
-    manualSort: Boolean,
+    editMode: Boolean,
     onRowClicked: (FavouriteRow) -> Unit,
     onReorder: (List<FavouriteKey>) -> Unit,
     onSwipeDelete: (FavouriteKey) -> Unit,
@@ -288,11 +270,11 @@ private fun RowList(
                     )
             FavouriteRowContent(
                 row = row,
-                manualSort = manualSort,
+                editMode = editMode,
                 onRowClicked = onRowClicked,
                 onSwipeDelete = onSwipeDelete,
                 dragModifier =
-                    if (manualSort) {
+                    if (editMode) {
                         Modifier.pointerInput(row.key) {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = {
@@ -346,69 +328,74 @@ private fun RowList(
 }
 
 @Composable
+@Suppress("LongMethod") // top section + bottom subtext + edit-mode affordances; pulling helpers out fragments the layout reading
 private fun FavouriteRowContent(
     row: FavouriteRow,
-    manualSort: Boolean,
+    editMode: Boolean,
     onRowClicked: (FavouriteRow) -> Unit,
     onSwipeDelete: (FavouriteKey) -> Unit,
     dragModifier: Modifier,
     modifier: Modifier = Modifier,
 ) {
-    val nextLabel =
-        when (val next = row.nextDeparture) {
-            NextDepartureState.Loading -> stringResource(R.string.feature_favourites_next_loading)
-            NextDepartureState.Empty -> stringResource(R.string.feature_favourites_next_none)
-            is NextDepartureState.Loaded -> next.relativeLabel
-            NextDepartureState.Error -> stringResource(R.string.feature_favourites_next_error)
-        }
     Row(
         modifier =
             modifier
-                .clickable { onRowClicked(row) }
+                .clickable(enabled = !editMode) { onRowClicked(row) }
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .testTag(testTagForRow(row.key)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Route badge — same `primaryContainer` + rounded-corner badge as stop-detail's
-        // `DepartureRow` so the visual language is consistent across the two screens.
-        Surface(
-            color = MaterialTheme.colorScheme.primaryContainer,
-            shape = RoundedCornerShape(4.dp),
-        ) {
-            Text(
-                text = row.routeNumber,
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = row.directionName.ifBlank { row.routeName },
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-            )
-            val secondLine = "${row.stopName} · ${row.stopSuburb}".trimEnd(' ', '·').trim()
-            Text(
-                text = secondLine,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
+            // Issue #78 part 3: stop name on the top line, route + direction below. The mode
+            // glyph stays on this row for an at-a-glance type cue.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = row.routeType.glyph(),
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(end = 8.dp),
+                )
+                Text(
+                    text =
+                        if (row.stopSuburb.isBlank()) {
+                            row.stopName
+                        } else {
+                            "${row.stopName} · ${row.stopSuburb}"
+                        },
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Route badge — same `primaryContainer` + rounded-corner badge as stop-detail's
+                // `DepartureRow` so the visual language is consistent across the two screens.
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(4.dp),
+                ) {
+                    Text(
+                        text = row.routeNumber,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = row.directionName.ifBlank { row.routeName },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
         }
-        // Mode glyph — tight stand-in until designsystem ships icons.
-        Text(
-            text = row.routeType.glyph(),
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.padding(horizontal = 8.dp),
+        // Times column — issue #78 part 2: scheduled and live alongside each other.
+        NextDepartureSubtext(
+            state = row.nextDeparture,
+            modifier = Modifier.padding(start = 8.dp).testTag(testTagForNext(row.key)),
         )
-        Text(
-            text = nextLabel,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-        )
-        if (manualSort) {
+        if (editMode) {
             Spacer(modifier = Modifier.width(8.dp))
             // Drag handle — long-press anywhere on the handle to grab the row.
             Box(
@@ -424,21 +411,99 @@ private fun FavouriteRowContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            // Delete button — only present in edit mode (issue #78 part 1). Test tag uses the
+            // row's composite key so the test can address a specific row.
+            IconButton(
+                onClick = { onSwipeDelete(row.key) },
+                modifier = Modifier.testTag(testTagForDelete(row.key)),
+            ) {
+                Text(
+                    text = "✕",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
         }
-        Spacer(modifier = Modifier.width(8.dp))
-        // Swipe-to-delete is implemented as a tap-to-delete affordance for v1 — the issue calls
-        // out a real swipe gesture but Compose-foundation's `SwipeToDismissBox` interacts poorly
-        // with the long-press drag-to-reorder gesture on the same row (the swipe consumes the
-        // pointer before the long-press registers). Trading the gesture for an explicit
-        // "✕" button keeps both affordances reachable; reviving the swipe is a follow-up if the
-        // designsystem wants it. See PR body. Test tag uses the row's composite key so the test
-        // can address a specific row.
-        TextButton(
-            onClick = { onSwipeDelete(row.key) },
-            modifier = Modifier.testTag(testTagForDelete(row.key)),
-        ) {
-            Text("✕")
-        }
+    }
+}
+
+/**
+ * Per-row "next departure" subtext. Renders the scheduled time and the live tracking time side
+ * by side so the user sees both — issue #78 part 2 explicitly asks for this rather than the
+ * single relative label the previous version showed (which collapsed to "Departed" once the
+ * scheduled time slipped past).
+ *
+ * Layout:
+ *  - Loaded with no estimate: scheduled time + relative label.
+ *  - Loaded with estimate equal to scheduled: scheduled time + relative label.
+ *  - Loaded with estimate different from scheduled: scheduled time (struck through) + estimated
+ *    time (in primary colour) + relative label.
+ *  - Loading / Empty / Error: a plain placeholder so the row layout stays stable.
+ */
+@Composable
+private fun NextDepartureSubtext(
+    state: NextDepartureState,
+    modifier: Modifier = Modifier,
+) {
+    when (state) {
+        is NextDepartureState.Loaded ->
+            Column(
+                modifier = modifier,
+                horizontalAlignment = Alignment.End,
+            ) {
+                val live = state.estimatedClockTime?.takeIf { it != state.scheduledClockTime }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = state.scheduledClockTime,
+                        style = MaterialTheme.typography.bodyMedium,
+                        // Strike through the scheduled time when a live estimate disagrees so the
+                        // user can see at a glance which is the source of truth — same shape PTV
+                        // and Citymapper use for tracked services.
+                        textDecoration = if (live != null) TextDecoration.LineThrough else TextDecoration.None,
+                        color =
+                            if (live != null) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                    )
+                    if (live != null) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = live,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                Text(
+                    text = state.relativeLabel,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        NextDepartureState.Loading ->
+            Text(
+                text = stringResource(R.string.feature_favourites_next_loading),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = modifier,
+            )
+        NextDepartureState.Empty ->
+            Text(
+                text = stringResource(R.string.feature_favourites_next_none),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = modifier,
+            )
+        NextDepartureState.Error ->
+            Text(
+                text = stringResource(R.string.feature_favourites_next_error),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = modifier,
+            )
     }
 }
 
@@ -458,6 +523,9 @@ internal fun testTagForRow(key: FavouriteKey): String =
 internal fun testTagForDelete(key: FavouriteKey): String =
     "favourites-delete-${key.stopId}-${key.routeId}-${key.directionId}"
 
+internal fun testTagForNext(key: FavouriteKey): String =
+    "favourites-next-${key.stopId}-${key.routeId}-${key.directionId}"
+
 /**
  * Bundle-safe string projection of [FavouriteKey] for `LazyColumn`'s `key =` slot.
  *
@@ -476,11 +544,9 @@ internal fun FavouriteKey.asLazyListKey(): String = "$stopId.$routeId.$direction
 private const val REORDER_THRESHOLD_PX: Float = 80f
 
 internal const val TestTagRoot: String = "favourites-root"
-internal const val TestTagSortChips: String = "favourites-sort-chips"
-internal const val TestTagSortManual: String = "favourites-sort-manual"
-internal const val TestTagSortAlphabetical: String = "favourites-sort-alphabetical"
-internal const val TestTagSortNearest: String = "favourites-sort-nearest"
 internal const val TestTagEmpty: String = "favourites-empty"
 internal const val TestTagEmptyCta: String = "favourites-empty-cta"
 internal const val TestTagRowList: String = "favourites-row-list"
 internal const val TestTagDragHandle: String = "favourites-drag-handle"
+internal const val TestTagEditToggle: String = "favourites-edit-toggle"
+internal const val TestTagPullToRefresh: String = "favourites-pull-to-refresh"

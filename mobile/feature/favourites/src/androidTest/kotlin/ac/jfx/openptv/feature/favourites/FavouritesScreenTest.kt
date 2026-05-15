@@ -25,8 +25,7 @@ import kotlin.time.Duration.Companion.minutes
 /**
  * Hilt-instrumented Compose UI test for [FavouritesRoute]. Mirrors `:feature:stop-detail`'s
  * `StopDetailScreenTest`: real ViewModel resolved through Hilt, fakes from `:core:data-test`
- * swapped in via `FakeDataModule`'s `@TestInstallIn`, real preference DataStore in a test file
- * (via [FakeUserPreferencesModule]). No MockK.
+ * swapped in via `FakeDataModule`'s `@TestInstallIn`. No MockK.
  */
 @HiltAndroidTest
 class FavouritesScreenTest {
@@ -136,7 +135,7 @@ class FavouritesScreenTest {
     }
 
     @Test
-    fun tappingDeleteShowsSnackbarAndUndoRestoresFavourite() {
+    fun deleteButton_onlyVisibleInEditMode() {
         favouritesRepository.seed(
             listOf(
                 FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
@@ -145,7 +144,6 @@ class FavouritesScreenTest {
                     .build(),
             ),
         )
-        // The 60 s tick needs one response per favourite.
         departureRepository.enqueueSuccess(emptyList())
 
         composeTestRule.setContent {
@@ -156,6 +154,50 @@ class FavouritesScreenTest {
         }
 
         val deleteTag = testTagForDelete(FavouriteKey(1, 11, 111))
+        // Wait for the row to render.
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(testTagForRow(FavouriteKey(1, 11, 111)))
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // Delete is hidden until edit mode toggles on.
+        composeTestRule.onAllNodesWithTag(deleteTag).fetchSemanticsNodes().let { nodes ->
+            assertThat(nodes).isEmpty()
+        }
+        // Toggle edit mode on.
+        composeTestRule.onNodeWithTag(TestTagEditToggle).performClick()
+        // Now the delete button is visible.
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(deleteTag).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeTestRule.onNodeWithTag(deleteTag).assertIsDisplayed()
+    }
+
+    @Test
+    fun tappingDeleteShowsSnackbarAndUndoRestoresFavourite() {
+        favouritesRepository.seed(
+            listOf(
+                FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                    .withStopId(1).withRouteId(11).withDirectionId(111)
+                    .withStopName("Brunswick").withPosition(0)
+                    .build(),
+            ),
+        )
+        departureRepository.enqueueSuccess(emptyList())
+
+        composeTestRule.setContent {
+            FavouritesRoute(
+                onOpenStopDetail = { _, _, _, _ -> },
+                onOpenSearch = { },
+            )
+        }
+
+        val deleteTag = testTagForDelete(FavouriteKey(1, 11, 111))
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(testTagForRow(FavouriteKey(1, 11, 111)))
+                .fetchSemanticsNodes().isNotEmpty()
+        }
+        // Enter edit mode so the delete affordance becomes available.
+        composeTestRule.onNodeWithTag(TestTagEditToggle).performClick()
         composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
             composeTestRule.onAllNodesWithTag(deleteTag).fetchSemanticsNodes().isNotEmpty()
         }
@@ -178,47 +220,6 @@ class FavouritesScreenTest {
             favouritesRepository.current.isNotEmpty()
         }
         assertThat(favouritesRepository.current).hasSize(1)
-    }
-
-    @Test
-    fun tappingAlphabeticalChipPersistsSelection() {
-        favouritesRepository.seed(
-            listOf(
-                FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                    .withStopId(1).withRouteId(11).withDirectionId(111)
-                    .withStopName("Brunswick").withRouteNumber("19").withPosition(0)
-                    .build(),
-                FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                    .withStopId(2).withRouteId(22).withDirectionId(222)
-                    .withStopName("Aberfeldie").withRouteNumber("57").withPosition(1)
-                    .build(),
-            ),
-        )
-        repeat(2) { departureRepository.enqueueSuccess(emptyList()) }
-
-        composeTestRule.setContent {
-            FavouritesRoute(
-                onOpenStopDetail = { _, _, _, _ -> },
-                onOpenSearch = { },
-            )
-        }
-
-        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
-            composeTestRule.onAllNodesWithTag(TestTagSortChips).fetchSemanticsNodes().isNotEmpty()
-        }
-        composeTestRule.onNodeWithTag(TestTagSortAlphabetical).performClick()
-
-        // After sort change, Aberfeldie's row tag should be visible — i.e. it still renders;
-        // the assertion that matters is that the rows are still on screen and clickable. The
-        // persisted-preference assertion is covered in the unit test.
-        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
-            composeTestRule
-                .onAllNodesWithTag(testTagForRow(FavouriteKey(2, 22, 222)))
-                .fetchSemanticsNodes()
-                .isNotEmpty()
-        }
-        composeTestRule.onNodeWithTag(testTagForRow(FavouriteKey(2, 22, 222)))
-            .assertIsDisplayed()
     }
 
     private companion object {
