@@ -146,19 +146,11 @@ class StopDetailViewModel
          * Which group keys the user has expanded. Persists across head emissions. Indexed by
          * destination (issue #87) — the same key shape the visible [Group] uses.
          *
-         * Auto-expansion of the pinned destination happens lazily inside [rebuildGroups]: we don't
-         * know the destination string for the focus `(routeId, directionId)` at construction time
-         * (we'd need a departure to read it off), so the first projection that has a matching row
-         * seeds the expanded entry.
+         * Issue #90: the pinned destination is *not* auto-expanded any more. Tapping a favourite
+         * just hoists its destination block to the top — the visible departure count stays the
+         * same as every other group until the user taps to expand it themselves.
          */
         private val expandedGroups: MutableSet<GroupKey> = mutableSetOf()
-
-        /**
-         * Tracks whether the pinned destination has already been seeded into [expandedGroups].
-         * Once the user toggles the chevron we don't want a later head poll to silently re-expand
-         * a group they collapsed — the seed runs once.
-         */
-        private var pinnedSeeded: Boolean = focusTuple == null
 
         /**
          * Snapshot of every `(routeId, directionId)` triple at the current stop the user has
@@ -510,17 +502,10 @@ class StopDetailViewModel
                         favouriteTarget = target,
                     )
                 }
-            // Seed the pinned destination's auto-expand exactly once — we couldn't do it at init
-            // time because we didn't know the destination string for the focus tuple yet. After
-            // this runs the user is free to collapse the group and we won't re-seed.
-            if (!pinnedSeeded) {
-                groups.firstOrNull { it.isPinned }?.let { pinned ->
-                    expandedGroups += pinned.key
-                    pinnedSeeded = true
-                }
-            }
+            // Issue #90: the pinned destination is no longer auto-expanded. Tapping a favourite
+            // only hoists its block to the top — the visible row count matches the other groups,
+            // and the user can still tap the chevron to expand it themselves.
             return groups
-                .map { if (expandedGroups.contains(it.key)) it.copy(expanded = true) else it }
                 // Pin the focus group at the top (issue #78). Default order is by earliest
                 // departure across the group; if a focus key matches, that group sorts to index 0
                 // and everything else keeps the earliest-departure ordering. compareBy
