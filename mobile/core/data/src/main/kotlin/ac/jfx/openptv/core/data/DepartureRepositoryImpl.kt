@@ -68,6 +68,13 @@ internal class DepartureRepositoryImpl
                         stopId = stopId,
                         routeType = routeType,
                         dateUtc = clock.now() - NOW_GRACE,
+                        // PTV quirk discovered while testing issue #86: `look_backwards=false`
+                        // only excludes already-departed entries when `max_results` is also set.
+                        // Without it, the response is still anchored at start-of-day. The
+                        // favourites screen used to surface that bug as "departed 00:01" rows.
+                        // Send the same per-route page size as the head poll so the contract is
+                        // identical across the one-shot and streamed paths.
+                        maxResults = INITIAL_PAGE_SIZE_PER_ROUTE,
                         lookBackwards = false,
                     ),
                 )

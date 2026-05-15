@@ -249,16 +249,24 @@ class DepartureRepositoryImplTest {
         }
 
     @Test
-    fun `getDepartures one-shot passes date_utc and look_backwards=false`() =
+    fun `getDepartures one-shot passes date_utc, max_results and look_backwards=false`() =
         runTest {
-            // Mirrors the head poll: the one-shot read used by pull-to-refresh and the Glance
-            // widget needs the same upcoming-only contract as the polling Flow.
+            // Mirrors the head poll: the one-shot read (used by pull-to-refresh and the Glance
+            // widget) needs the same upcoming-only contract as the polling Flow.
+            //
+            // `max_results` matters: PTV quirk discovered during smoke testing — the API only
+            // honours `look_backwards=false` when `max_results` is also set. Without it the
+            // response is anchored at start-of-day and `LoadNextDepartureUseCase` ends up
+            // returning a yesterday-morning row as "next departure". The favourites screen used
+            // to surface this as a "departed 00:01" label.
             val ds = FakeDataSource(returning = listOf(DepartureMother.aDeparture().build()))
             val repo = DepartureRepositoryImpl(ds, clock)
 
             repo.getDepartures(StopId(1071), RouteType.Train)
 
             assertThat(ds.lastDateUtc.get()).isEqualTo(fixedNow - 2.minutes)
+            assertThat(ds.lastMaxResults.get())
+                .isEqualTo(DepartureRepository.INITIAL_PAGE_SIZE_PER_ROUTE)
             assertThat(ds.lastLookBackwards.get()).isEqualTo(false)
         }
 
