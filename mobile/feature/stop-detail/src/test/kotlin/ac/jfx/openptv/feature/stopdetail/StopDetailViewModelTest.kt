@@ -766,10 +766,57 @@ class StopDetailViewModelTest {
             assertThat(otherGroup.isFavourite).isFalse()
         }
 
-    // ---------- focus filter (issue #35) ----------
+    // ---------- pinned route (issue #78, refining #35) ----------
 
     @Test
-    fun `focusRouteId and focusDirectionId filter the Loaded groups to a single matching group`() =
+    fun `focusRouteId and focusDirectionId pin the matching group to the top of the Loaded list`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel =
+                newViewModel(
+                    focusRouteId = FAVE_ROUTE_ID,
+                    focusDirectionId = FAVE_DIRECTION_ID,
+                )
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            // Other group has the *earliest* departure time, so under the default
+            // earliest-first sort it'd come first. The pin must hoist the favourite anyway.
+            val other =
+                DepartureMother.aDeparture()
+                    .withRouteId(OTHER_ROUTE_ID)
+                    .withDirectionId(OTHER_DIRECTION_ID)
+                    .withRunRef("OTHER-1")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:01:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:01:00Z"))
+                    .build()
+            val matching =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID)
+                    .withDirectionId(FAVE_DIRECTION_ID)
+                    .withRunRef("MATCH-1")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
+                    .build()
+            departureRepository.emitSuccess(listOf(other, matching))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            // Both groups still render — full stop info is preserved per #78.
+            assertThat(loaded.groups).hasSize(2)
+            // Pinned group is at the top despite the later departure time.
+            val first = loaded.groups.first()
+            assertThat(first.key.routeId).isEqualTo(FAVE_ROUTE_ID)
+            assertThat(first.key.directionId).isEqualTo(FAVE_DIRECTION_ID)
+            assertThat(first.isPinned).isTrue()
+            // Non-pinned group is unmarked and visible underneath.
+            assertThat(loaded.groups[1].key.routeId).isEqualTo(OTHER_ROUTE_ID)
+            assertThat(loaded.groups[1].isPinned).isFalse()
+        }
+
+    @Test
+    fun `pinned group starts expanded`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel =
@@ -787,23 +834,17 @@ class StopDetailViewModelTest {
                     .withDirectionId(FAVE_DIRECTION_ID)
                     .withRunRef("MATCH-1")
                     .build()
-            val other =
-                DepartureMother.aDeparture()
-                    .withRouteId(OTHER_ROUTE_ID)
-                    .withDirectionId(OTHER_DIRECTION_ID)
-                    .withRunRef("OTHER-1")
-                    .build()
-            departureRepository.emitSuccess(listOf(matching, other))
+            departureRepository.emitSuccess(listOf(matching))
             advanceUntilIdle()
 
             val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
-            assertThat(loaded.groups).hasSize(1)
-            assertThat(loaded.groups.single().key.routeId).isEqualTo(FAVE_ROUTE_ID)
-            assertThat(loaded.groups.single().key.directionId).isEqualTo(FAVE_DIRECTION_ID)
+            // The pinned group should be auto-expanded so the favourite-tap-through user lands
+            // straight on the route's expanded timetable.
+            assertThat(loaded.groups.single().expanded).isTrue()
         }
 
     @Test
-    fun `focus filter with no matching group surfaces Empty rather than Loaded`() =
+    fun `pin with no matching group still surfaces every other group as Loaded`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel =
@@ -815,7 +856,8 @@ class StopDetailViewModelTest {
             viewModel.startObserving()
             advanceUntilIdle()
 
-            // Only a non-matching departure — the focus filter drops it, so the screen is Empty.
+            // No matching departure — the screen still shows the other route (full stop info per
+            // #78), with no pinned group visible.
             val other =
                 DepartureMother.aDeparture()
                     .withRouteId(OTHER_ROUTE_ID)
@@ -825,7 +867,9 @@ class StopDetailViewModelTest {
             departureRepository.emitSuccess(listOf(other))
             advanceUntilIdle()
 
-            assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Empty)
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups).hasSize(1)
+            assertThat(loaded.groups.single().isPinned).isFalse()
         }
 
     @Test

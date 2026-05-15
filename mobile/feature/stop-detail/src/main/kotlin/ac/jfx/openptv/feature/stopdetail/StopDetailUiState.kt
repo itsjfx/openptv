@@ -93,6 +93,12 @@ data class Group(
      * frame).
      */
     val isFavourite: Boolean = false,
+    /**
+     * True when this group is the favourite-tap-through pinned route (issue #78). Pinned groups
+     * sort to the top of the list and start expanded, so the user lands on the route they
+     * actually came in for, with the rest of the stop's services still visible underneath.
+     */
+    val isPinned: Boolean = false,
 )
 
 /** Section key — pair of (routeId, directionId). Stable for `key=` slots in `LazyColumn`. */

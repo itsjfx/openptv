@@ -491,6 +491,18 @@ private fun GroupHeader(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (group.isPinned) {
+                // Pin glyph — issue #78 calls for the favourite-tap-through to keep the rest of
+                // the stop's services visible while the favourited route stays anchored. The pin
+                // makes the anchored row visually distinct so the user knows which route was
+                // hoisted. Material icons aren't pulled into this module to keep the dep surface
+                // tight (same trade as the back arrow / chevron / star elsewhere).
+                Text(
+                    text = "📌",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(end = 8.dp).testTag(TestTagPinIndicator),
+                )
+            }
             Text(
                 text = group.headerLabel,
                 style = MaterialTheme.typography.labelLarge,
@@ -846,3 +858,4 @@ internal const val TestTagDeparturesRetry: String = "stop-detail-departures-retr
 internal const val TestTagShowMore: String = "stop-detail-show-more"
 internal const val TestTagDateDivider: String = "stop-detail-date-divider"
 internal const val TestTagLoadMoreSpinner: String = "stop-detail-load-more-spinner"
+internal const val TestTagPinIndicator: String = "stop-detail-pin-indicator"
