@@ -66,6 +66,21 @@ sealed interface SheetState {
 }
 
 /**
+ * One row in the bottom-sheet "nearby stops list" (issue #80). Carries the source [Stop] (kept
+ * whole so a row tap can re-use [NearbyViewModel.onPinClicked]) plus the distance from the user's
+ * current fix at the time the row was projected.
+ *
+ * The projection is screen-local — each row is the same `Stop` the map renders, augmented with a
+ * [distanceMetres]. The screen sorts by [distanceMetres] ascending. When the user has no fix
+ * (denied permission, or `lastKnown()` returned null), [distanceMetres] is `null` and the screen
+ * falls back to repository order.
+ */
+data class NearbyListRow(
+    val stop: Stop,
+    val distanceMetres: Double?,
+)
+
+/**
  * Projection rendered in the bottom sheet for a tapped stop.
  *
  * - [routes] is `null` while the routes fetch is in flight, then the resolved list (empty list

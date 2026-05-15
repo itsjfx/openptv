@@ -1,7 +1,9 @@
 package ac.jfx.openptv.feature.nearby
 
+import ac.jfx.openptv.core.common.DistanceFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.designsystem.LocationPermissionRationale
+import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteType
@@ -13,6 +15,7 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,21 +25,29 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -73,6 +84,7 @@ fun NearbyRoute(
     map: OpenPtvMap = hiltViewModel<NearbyMapHolder>().map,
     initialiser: OpenPtvMapInitialiser = hiltViewModel<NearbyMapHolder>().initialiser,
     timeFormatter: RelativeTimeFormatter = hiltViewModel<NearbyMapHolder>().timeFormatter,
+    distanceFormatter: DistanceFormatter = hiltViewModel<NearbyMapHolder>().distanceFormatter,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -110,6 +122,7 @@ fun NearbyRoute(
         uiState = uiState,
         map = map,
         timeFormatter = timeFormatter,
+        distanceFormatter = distanceFormatter,
         onCameraIdle = viewModel::onCameraIdle,
         onPinClicked = viewModel::onPinClicked,
         onSheetDismissed = viewModel::onSheetDismissed,
@@ -154,6 +167,7 @@ internal fun NearbyScreen(
     uiState: NearbyUiState,
     map: OpenPtvMap,
     timeFormatter: RelativeTimeFormatter,
+    distanceFormatter: DistanceFormatter,
     onCameraIdle: (OpenPtvCameraState) -> Unit,
     onPinClicked: (Stop) -> Unit,
     onSheetDismissed: () -> Unit,
@@ -167,6 +181,27 @@ internal fun NearbyScreen(
 ) {
     val isDark = MaterialTheme.colorScheme.surface.luminance() < DARK_LUMINANCE_THRESHOLD
 
+    // Project the visible pins, filter, and (optional) user location into the row list. The
+    // projection is computed in the screen — the ViewModel doesn't need to hold a `nearbyRows`
+    // field because the list is purely a rendering of the same `pins` + `routeTypeFilter` the map
+    // already reads. Keeping the projection here avoids forking state-of-truth.
+    val rawPins = uiState.pinsOrEmpty()
+    val filteredPins = rawPins.filteredBy(uiState.routeTypeFilter)
+    val userLocation = (uiState as? NearbyUiState.Loaded)?.userLocation
+    val nearbyRows = filteredPins.toRows(from = userLocation)
+
+    // Persistent peek-and-expand sheet. `BottomSheetScaffold` (M3) is the right shape for a
+    // map + drawer co-existence — `ModalBottomSheet` would steal focus from the map. The peek
+    // height shows just the drag handle + a section header so the map stays mostly visible.
+    val scaffoldState =
+        rememberBottomSheetScaffoldState(
+            bottomSheetState =
+                rememberStandardBottomSheetState(
+                    initialValue = SheetValue.PartiallyExpanded,
+                    skipHiddenState = true,
+                ),
+        )
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -176,74 +211,94 @@ internal fun NearbyScreen(
         },
         modifier = Modifier.testTag(TestTagRoot),
     ) { padding ->
-        Box(
+        BottomSheetScaffold(
+            scaffoldState = scaffoldState,
+            sheetPeekHeight = SheetPeekHeight,
+            sheetContent = {
+                NearbyStopsList(
+                    rows = nearbyRows,
+                    distanceFormatter = distanceFormatter,
+                    onRowClicked = onPinClicked,
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = SheetMaxHeight)
+                            .testTag(TestTagNearbyList),
+                )
+            },
             modifier =
                 Modifier
                     .fillMaxSize()
                     .padding(padding),
-        ) {
-            // Underlying map — always present. The variant decides whether overlays show.
-            val camera = uiState.cameraOrCbd()
-            val rawPins = uiState.pinsOrEmpty()
-            val pins = rawPins.filteredBy(uiState.routeTypeFilter)
-            val userLocation = (uiState as? NearbyUiState.Loaded)?.userLocation
-            map.Render(
-                camera = camera,
-                userLocation = userLocation,
-                pins = pins,
-                isDark = isDark,
-                onCameraIdle = onCameraIdle,
-                onPinClicked = onPinClicked,
-                modifier = Modifier.fillMaxSize().testTag(TestTagMap),
-            )
-
-            // Filter chip row pinned to the top of the map content.
-            RouteTypeFilterRow(
-                selected = uiState.routeTypeFilter,
-                onToggle = onRouteTypeFilterToggled,
+        ) { innerPadding ->
+            Box(
                 modifier =
                     Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp)
-                        .testTag(TestTagFilterRow),
-            )
+                        .fillMaxSize()
+                        .padding(innerPadding),
+            ) {
+                // Underlying map — always present. The variant decides whether overlays show.
+                val camera = uiState.cameraOrCbd()
+                map.Render(
+                    camera = camera,
+                    userLocation = userLocation,
+                    pins = filteredPins,
+                    isDark = isDark,
+                    onCameraIdle = onCameraIdle,
+                    onPinClicked = onPinClicked,
+                    modifier = Modifier.fillMaxSize().testTag(TestTagMap),
+                )
 
-            // Permission banner (denied state) — sits below the chip row so both are visible.
-            if (uiState is NearbyUiState.PermissionDenied) {
-                PermissionDeniedBanner(
-                    onOpenSettings = onOpenAppSettings,
+                // Filter chip row pinned to the top of the map content.
+                RouteTypeFilterRow(
+                    selected = uiState.routeTypeFilter,
+                    onToggle = onRouteTypeFilterToggled,
                     modifier =
                         Modifier
                             .align(Alignment.TopCenter)
                             .fillMaxWidth()
-                            .padding(top = 64.dp, start = 16.dp, end = 16.dp)
-                            .testTag(TestTagPermissionDeniedBanner),
+                            .padding(horizontal = 8.dp, vertical = 8.dp)
+                            .testTag(TestTagFilterRow),
                 )
-            }
 
-            // Empty-state hint over the map when a fetch returned no pins for the region
-            if (uiState is NearbyUiState.Loaded && uiState.showEmptyHint) {
-                EmptyStateHint(
-                    modifier =
-                        Modifier
-                            .align(Alignment.Center)
-                            .padding(32.dp)
-                            .testTag(TestTagEmptyHint),
-                )
-            }
+                // Permission banner (denied state) — sits below the chip row so both are visible.
+                if (uiState is NearbyUiState.PermissionDenied) {
+                    PermissionDeniedBanner(
+                        onOpenSettings = onOpenAppSettings,
+                        modifier =
+                            Modifier
+                                .align(Alignment.TopCenter)
+                                .fillMaxWidth()
+                                .padding(top = 64.dp, start = 16.dp, end = 16.dp)
+                                .testTag(TestTagPermissionDeniedBanner),
+                    )
+                }
 
-            // Follow-me FAB — only useful when there's a user location to centre on
-            if (uiState is NearbyUiState.Loaded && uiState.userLocation != null) {
-                FloatingActionButton(
-                    onClick = onFollowMeClicked,
-                    modifier =
-                        Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(16.dp)
-                            .testTag(TestTagFollowMeFab),
-                ) {
-                    Text("⌖", style = MaterialTheme.typography.titleLarge)
+                // Empty-state hint over the map when a fetch returned no pins for the region
+                if (uiState is NearbyUiState.Loaded && uiState.showEmptyHint) {
+                    EmptyStateHint(
+                        modifier =
+                            Modifier
+                                .align(Alignment.Center)
+                                .padding(32.dp)
+                                .testTag(TestTagEmptyHint),
+                    )
+                }
+
+                // Follow-me FAB — only useful when there's a user location to centre on. Sits
+                // above the bottom sheet's peek surface so it doesn't disappear behind the
+                // sheet header.
+                if (uiState is NearbyUiState.Loaded && uiState.userLocation != null) {
+                    FloatingActionButton(
+                        onClick = onFollowMeClicked,
+                        modifier =
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(16.dp)
+                                .testTag(TestTagFollowMeFab),
+                    ) {
+                        Text("⌖", style = MaterialTheme.typography.titleLarge)
+                    }
                 }
             }
         }
@@ -371,6 +426,120 @@ private fun EmptyStateHint(modifier: Modifier = Modifier) {
                 text = stringResource(R.string.feature_nearby_no_stops_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Sheet content for the nearby-stops list (issue #80). A persistent peek-and-expand sheet — the
+ * peek shows a header + first row, drag-up reveals the full sortable list. Each row's tap fans
+ * out through [onRowClicked] which is wired to the same `onPinClicked` the map pins use, so a
+ * row tap and a pin tap end up at the same `StopBottomSheet` projection.
+ *
+ * The list is keyed on `stop.id.value` so a re-sort (e.g. after a fresh user fix) animates rows
+ * in place instead of recomposing every row from scratch.
+ */
+@Composable
+private fun NearbyStopsList(
+    rows: List<NearbyListRow>,
+    distanceFormatter: DistanceFormatter,
+    onRowClicked: (Stop) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        // Sheet header — sits in the peek surface so a glance at the collapsed sheet conveys
+        // "drag up for the list".
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .testTag(TestTagNearbyListHeader),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.feature_nearby_list_header),
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = stringResource(R.string.feature_nearby_list_count, rows.size),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        HorizontalDivider()
+
+        if (rows.isEmpty()) {
+            Text(
+                text = stringResource(R.string.feature_nearby_list_empty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp)
+                        .testTag(TestTagNearbyListEmpty),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().testTag(TestTagNearbyListItems),
+            ) {
+                items(items = rows, key = { it.stop.id.value }) { row ->
+                    NearbyStopRow(
+                        row = row,
+                        distanceFormatter = distanceFormatter,
+                        onClick = { onRowClicked(row.stop) },
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One row in the nearby-stops list. Renders mode glyph + name + suburb + distance subtext. The
+ * row is clickable; tapping it calls [onClick] which the parent wires to `onPinClicked` so the
+ * row-tap UX is identical to a map-pin tap (same bottom-sheet projection).
+ */
+@Composable
+private fun NearbyStopRow(
+    row: NearbyListRow,
+    distanceFormatter: DistanceFormatter,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .testTag(nearbyListRowTestTag(row.stop.id.value)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = row.stop.routeType.glyph(),
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(end = 12.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = row.stop.name,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = row.stop.suburb,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (row.distanceMetres != null) {
+            Text(
+                text = distanceFormatter.format(row.distanceMetres),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
             )
         }
     }
@@ -557,6 +726,7 @@ class NearbyMapHolder
         val map: OpenPtvMap,
         val initialiser: OpenPtvMapInitialiser,
         val timeFormatter: RelativeTimeFormatter,
+        val distanceFormatter: DistanceFormatter,
     ) : androidx.lifecycle.ViewModel()
 
 // ----------- helpers -----------
@@ -604,6 +774,24 @@ private fun NearbyUiState.pinsOrEmpty(): List<Stop> =
 private fun List<Stop>.filteredBy(filter: Set<RouteType>): List<Stop> =
     if (filter.isEmpty()) this else filter { it.routeType in filter }
 
+/**
+ * Project a list of [Stop]s into a sorted [NearbyListRow] list. When [from] is `null` (no
+ * permission, or the location provider hasn't returned a fix yet) the rows preserve repository
+ * order with `distanceMetres = null` — the screen renders without a distance subtext rather
+ * than an awkward "??". When [from] is set, rows sort ascending by haversine distance.
+ *
+ * Internal so the unit test can call it directly without booting Compose.
+ */
+internal fun List<Stop>.toRows(from: Coordinates?): List<NearbyListRow> {
+    if (from == null) return map { NearbyListRow(it, distanceMetres = null) }
+    return map { stop ->
+        NearbyListRow(
+            stop = stop,
+            distanceMetres = from.distanceTo(Coordinates(stop.latitude, stop.longitude)),
+        )
+    }.sortedBy { it.distanceMetres ?: Double.MAX_VALUE }
+}
+
 private fun RouteType.glyph(): String =
     when (this) {
         RouteType.Train -> "🚆"
@@ -644,5 +832,26 @@ internal const val TestTagSheetRoutes: String = "nearby-sheet-routes"
 internal const val TestTagSheetDepartures: String = "nearby-sheet-departures"
 internal const val TestTagViewStop: String = "nearby-view-stop"
 internal const val TestTagFilterRow: String = "nearby-filter-row"
+internal const val TestTagNearbyList: String = "nearby-list"
+internal const val TestTagNearbyListHeader: String = "nearby-list-header"
+internal const val TestTagNearbyListItems: String = "nearby-list-items"
+internal const val TestTagNearbyListEmpty: String = "nearby-list-empty"
 
 internal fun filterChipTestTag(routeType: RouteType): String = "nearby-filter-chip-${routeType.name.lowercase()}"
+
+internal fun nearbyListRowTestTag(stopId: Int): String = "nearby-list-row-$stopId"
+
+/**
+ * Peek height — small enough that the user sees the map and the chip row, but tall enough that
+ * the sheet header + drag handle land above the bottom-nav (~80 dp). The sheet's content uses
+ * the standard M3 drag handle (added by `BottomSheetScaffold`), so the visible "peek" is the
+ * handle + a single header row.
+ */
+private val SheetPeekHeight = 96.dp
+
+/**
+ * Sheet content cap so the list can scroll inside the sheet rather than push the sheet to
+ * full-screen. Generous enough that ~5 rows are visible on a typical phone — the user can
+ * scroll inside or drag the sheet up further (M3 expands to fill).
+ */
+private val SheetMaxHeight = 480.dp
