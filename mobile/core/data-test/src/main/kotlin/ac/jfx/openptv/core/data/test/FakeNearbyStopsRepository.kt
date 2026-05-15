@@ -3,6 +3,7 @@ package ac.jfx.openptv.core.data.test
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.NearbyStopsRepository
 import ac.jfx.openptv.core.model.Coordinates
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -13,7 +14,7 @@ import javax.inject.Singleton
  * dequeues the next one. An empty queue returns an empty Success — never throws, never blocks.
  *
  * [requestedCalls] records every call so feature tests can assert on the camera-idle fetch
- * sequence (it's the load-bearing surface for the debounce assertions in
+ * sequence (it's the load-bearing surface for the debounce + filter-change assertions in
  * `NearbyViewModelTest`).
  *
  * `@Singleton` so the same instance backs every consumer in a single test — otherwise an
@@ -32,6 +33,7 @@ class FakeNearbyStopsRepository
         data class Request(
             val coordinates: Coordinates,
             val radiusMeters: Int,
+            val routeTypes: Set<RouteType>,
         )
 
         fun enqueueResult(result: Result<List<Stop>>) {
@@ -49,8 +51,9 @@ class FakeNearbyStopsRepository
         override suspend fun stopsNear(
             coordinates: Coordinates,
             radiusMeters: Int,
+            routeTypes: Set<RouteType>,
         ): Result<List<Stop>> {
-            requestedCalls += Request(coordinates, radiusMeters)
+            requestedCalls += Request(coordinates, radiusMeters, routeTypes)
             return queue.removeFirstOrNull() ?: Result.Success(emptyList())
         }
     }

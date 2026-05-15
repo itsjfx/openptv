@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.network
 
 import ac.jfx.openptv.core.model.Coordinates
+import ac.jfx.openptv.core.model.RouteType
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
@@ -113,5 +114,37 @@ class RetrofitNearbyStopsDataSourceTest {
             val recorded = server.takeRequest()
             assertThat(recorded.path)
                 .isEqualTo("/api/v3/stops/location/-37.818300,144.967100?max_distance=750")
+        }
+
+    @Test
+    fun `route_types is repeated once per requested mode in sorted wire-code order`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
+
+            dataSource.stopsNear(
+                FLINDERS,
+                RADIUS_M,
+                routeTypes = setOf(RouteType.Bus, RouteType.Train, RouteType.Tram),
+            )
+
+            val recorded = server.takeRequest()
+            // Train=0, Tram=1, Bus=2. Sorted-by-wire-code keeps the URL deterministic so the
+            // edge / proxy LRU cache hits the same key regardless of `Set` iteration order.
+            assertThat(recorded.path)
+                .isEqualTo(
+                    "/api/v3/stops/location/-37.818300,144.967100?max_distance=$RADIUS_M" +
+                        "&route_types=0&route_types=1&route_types=2",
+                )
+        }
+
+    @Test
+    fun `empty routeTypes set omits the parameter entirely`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
+
+            dataSource.stopsNear(FLINDERS, RADIUS_M, routeTypes = emptySet())
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).doesNotContain("route_types")
         }
 }
