@@ -1,13 +1,12 @@
 // `:feature:favourites` — list of starred route-at-stop entries with next-departure subtext,
-// drag-to-reorder, swipe-to-delete with undo, and a Manual / Alphabetical / Nearest sort
-// selector. Implements issue #35.
+// edit-mode drag-to-reorder + delete, undo snackbar, and pull-to-refresh. Implements issues
+// #35 + #78.
 //
 // `openptv.android.feature` wires the four standard core deps via `findProject(...)?.let { ... }`,
 // so the plugin picks up `:core:common`, `:core:designsystem`, and `:core:navigation` for us. We
 // add `:core:data` (interfaces — for `DepartureRepository` via the use case), `:core:domain` (for
-// `ObserveFavouritesUseCase`, `ReorderFavouritesUseCase`, `LoadNextDepartureUseCase`),
-// `:core:model`, and `:core:datastore` (writes to `FavouritesSortPreference`, reads
-// `LocalFavouritesSort`).
+// `ObserveFavouritesUseCase`, `ReorderFavouritesUseCase`, `LoadNextDepartureUseCase`), and
+// `:core:model`. The `:core:datastore` dep was dropped along with the sort UI in #78.
 plugins {
     id("openptv.android.feature")
 }
@@ -36,12 +35,6 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:domain"))
     implementation(project(":core:model"))
-    implementation(project(":core:datastore"))
-
-    // DataStore leaks through `UserPreferencesDataStore.dataStore` (typed DSL's
-    // `put(scope, dataStore)` requires the underlying store as an argument). Same pattern as
-    // `:feature:settings`.
-    implementation(libs.androidx.datastore.preferences)
 
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

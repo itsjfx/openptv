@@ -1,15 +1,11 @@
 package ac.jfx.openptv.feature.favourites
 
-import ac.jfx.openptv.core.common.LocationProvider
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.FavouritesRepository
-import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
-import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
 import ac.jfx.openptv.core.domain.LoadNextDepartureUseCase
 import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ReorderFavouritesUseCase
-import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.DirectionId
 import ac.jfx.openptv.core.model.FavouriteRouteAtStop
 import ac.jfx.openptv.core.model.RouteId
@@ -33,34 +29,37 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * ViewModel for the favourites screen (issue #35). Owns three pieces of state:
+ * ViewModel for the favourites screen. Owns four pieces of state:
  *
- *  1. The favourites flow + sort preference, combined and projected into a sorted list of
- *     [FavouriteRow]s for the screen.
+ *  1. The favourites flow projected into a sorted-by-position list of [FavouriteRow]s for the
+ *     screen.
  *  2. A per-favourite "next departure" cache — keyed by `(stopId, routeId, directionId)` — driven
  *     by a 60 s tick while RESUMED (mirrors stop-detail). Each tick fans out N parallel reads
  *     bounded by `Semaphore(4)` per the phase-04 spec.
- *  3. The transient [PendingUndo] bookkeeping for swipe-to-delete-with-undo.
+ *  3. The transient [PendingUndo] bookkeeping for delete-with-undo.
+ *  4. UI affordances: edit-mode toggle (issue #78), pull-to-refresh `isRefreshing` flag (issue
+ *     #78).
  *
  * **Polling lifetime**: [startObserving] / [stopObserving] follow the same shape as
  * `:feature:stop-detail`'s `StopDetailViewModel` so the screen can wrap them in
  * `repeatOnLifecycle(RESUMED)`. The tick runs on `Dispatchers.IO` because each fan-out cycle does
  * up to `N` HTTP reads.
  *
- * **Sort impls**:
- *  - `Manual` — repository order (`position ASC`). The favourites flow already arrives sorted.
- *  - `Alphabetical` — by `stopName`, then `routeNumber`.
- *  - `Nearest` — disabled in the UI until Phase 05 lands location; we fall back to `Manual` if it
- *    somehow gets selected so the screen never renders an undefined ordering.
+ * **Sort**: rows always render in `position ASC` (manual / repository order). The persisted
+ * `FavouritesSortPreference` is no longer surfaced (#78 removed the sort buttons); sort logic
+ * was deleted with it. The preference key still exists in datastore for backward compatibility
+ * but the screen ignores it.
  *
- * **Undo**: on swipe-delete the VM stashes the row + its position in [PendingUndo] and calls
+ * **Undo**: on delete the VM stashes the row + its position in [PendingUndo] and calls
  * `repository.remove`. Tap-undo re-`add`s the favourite — at the tail of the list, because the
- * repository doesn't support insert-at-index today. Once it does, the VM will trail with a
- * `reorder(...)` to restore the original position (see PR body).
+ * repository doesn't support insert-at-index today.
  */
 @HiltViewModel
 @Suppress("LongParameterList") // composes several use cases / formatters — split adds no clarity
@@ -71,27 +70,8 @@ class FavouritesViewModel
         private val reorderFavourites: ReorderFavouritesUseCase,
         private val loadNextDeparture: LoadNextDepartureUseCase,
         private val favouritesRepository: FavouritesRepository,
-        private val userPreferences: UserPreferencesDataStore,
         private val timeFormatter: RelativeTimeFormatter,
-        private val locationProvider: LocationProvider,
     ) : ViewModel() {
-        /**
-         * Latest snapshot of `LocationProvider.lastKnown()`. Read once on entry (Phase 05
-         * acceptance criterion is "Nearest sort orders by distance from last-known fix"); a
-         * fresher fix from the active observer is plumbed in via [refreshLocationSnapshot]. Null
-         * means the user hasn't granted location yet — the Nearest sort degrades to Manual.
-         */
-        private val locationSnapshot: MutableStateFlow<Coordinates?> = MutableStateFlow(null)
-
-        init {
-            // Kick off a one-shot lastKnown() snapshot. Doesn't subscribe to `observe()` — the
-            // favourites screen only needs an ordering hint, not a live stream. A user who wants
-            // a freshness guarantee can tap a row's stop-detail.
-            viewModelScope.launch {
-                locationSnapshot.value = locationProvider.lastKnown()
-            }
-        }
-
         /**
          * Cache of next-departure state per favourite. Mutated by the tick coroutine; the screen
          * reads it indirectly via the projection that merges this with the favourites list.
@@ -102,15 +82,22 @@ class FavouritesViewModel
         /** Transient pending-undo state. Cleared when the user taps undo or the snackbar times out. */
         private val pendingUndo: MutableStateFlow<PendingUndo?> = MutableStateFlow(null)
 
+        /** Toggle for the edit-mode UI affordance (#78). True means drag handles + delete buttons appear. */
+        private val editMode: MutableStateFlow<Boolean> = MutableStateFlow(false)
+
+        /** Pull-to-refresh indicator (#78). Flips while [refresh] is in flight. */
+        private val isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
+
         /** Tracks the active 60 s polling job so `startObserving` is idempotent. */
         private var tickJob: Job? = null
 
         /**
          * Projected screen state. Combines:
          *   - favourites flow (the SSOT for the list),
-         *   - persisted sort preference,
          *   - current next-departure cache,
-         *   - pending undo state.
+         *   - pending undo state,
+         *   - edit-mode toggle,
+         *   - refreshing flag.
          *
          * `stateIn` with `Eagerly` so the UI sees [FavouritesUiState.Loading] on first frame and a
          * real list as soon as the repository emits, even if the screen subscribed late.
@@ -124,21 +111,17 @@ class FavouritesViewModel
                 // upstream has fired. Production sees the real list a frame later when the
                 // repository's Room-backed flow emits.
                 observeFavourites().onStart { emit(emptyList()) },
-                // Same shape — `userPreferences.favouritesSort` is a `map`-derived flow off
-                // DataStore; it emits as soon as DataStore reads the file, which on a cold
-                // launch can take a few milliseconds. Seed with the typed default so the
-                // combined flow doesn't gate on it.
-                userPreferences.favouritesSort.onStart { emit(FavouritesSortPreference.default) },
                 nextDepartures,
                 pendingUndo,
-                locationSnapshot,
-            ) { favourites, sort, nexts, undo, location ->
+                editMode,
+                isRefreshing,
+            ) { favourites, nexts, undo, edit, refreshing ->
                 projectState(
                     favourites = favourites,
-                    sort = sort,
                     nexts = nexts,
                     undo = undo,
-                    location = location,
+                    editMode = edit,
+                    isRefreshing = refreshing,
                 )
             }.stateIn(
                 scope = viewModelScope,
@@ -170,12 +153,30 @@ class FavouritesViewModel
             tickJob = null
         }
 
-        /** Persist a new sort selection through the typed DSL. Re-emits via the combined flow. */
-        fun onSortSelected(sort: FavouritesSortPreference) {
-            // Nearest stays disabled in the UI until Phase 05, but if a future code path somehow
-            // routes through here we want the persisted value to be honest. The screen's
-            // projection still degrades Nearest → Manual at render time.
-            sort.put(scope = viewModelScope, dataStore = userPreferences.dataStore)
+        /**
+         * Pull-to-refresh handler (#78). Flips [isRefreshing] true, kicks off a single fan-out
+         * cycle, then flips back. Doesn't disturb the running tick — the tick keeps its own
+         * cadence and a manual refresh just runs an extra cycle in parallel.
+         */
+        fun refresh() {
+            viewModelScope.launch {
+                isRefreshing.value = true
+                try {
+                    refreshNextDepartures()
+                } finally {
+                    isRefreshing.value = false
+                }
+            }
+        }
+
+        /** Toggle the edit-mode affordance (#78). Idempotent on [value] equal to current. */
+        fun setEditMode(value: Boolean) {
+            editMode.value = value
+        }
+
+        /** Convenience for the toolbar button. */
+        fun toggleEditMode() {
+            editMode.value = !editMode.value
         }
 
         /**
@@ -192,7 +193,7 @@ class FavouritesViewModel
         }
 
         /**
-         * Swipe a row away — remove from the repository, stash the pending undo so the snackbar
+         * Delete a row — remove from the repository, stash the pending undo so the snackbar
          * can show. The screen calls [onUndoDelete] if the user taps undo, or [clearPendingUndo]
          * once the snackbar times out.
          */
@@ -210,11 +211,11 @@ class FavouritesViewModel
         }
 
         /**
-         * Restore a swiped-away favourite. Re-`add`s through the repository — the favourite lands
+         * Restore a deleted favourite. Re-`add`s through the repository — the favourite lands
          * at the tail of the list (the repository assigns `max(position) + 1`). Restoring at the
-         * original index requires the repository to support insert-at-index, which is a follow-up
-         * (see PR body); for now the simpler tail-insert is good enough for the user's "I tapped
-         * delete by mistake" flow.
+         * original index requires the repository to support insert-at-index, which is a follow-up;
+         * for now the simpler tail-insert is good enough for the user's "I tapped delete by
+         * mistake" flow.
          */
         fun onUndoDelete() {
             val undo = pendingUndo.value ?: return
@@ -231,13 +232,8 @@ class FavouritesViewModel
                     routeNumber = row.routeNumber,
                     routeName = row.routeName,
                     directionName = row.directionName,
-                    // `lat` / `lng` aren't on the row projection — the favourites entity persists
-                    // them but the screen doesn't render them, so we pass zeros and accept the
-                    // restored row's geo will be stale until the next stop-detail visit
-                    // re-favourites it. Acceptable for v1 because the only consumer of `lat/lng`
-                    // is Phase 05's Nearest sort, which is disabled.
-                    lat = 0.0,
-                    lng = 0.0,
+                    lat = row.lat,
+                    lng = row.lng,
                 )
             }
         }
@@ -314,6 +310,8 @@ class FavouritesViewModel
                                     scheduled = dep.scheduledDepartureUtc,
                                     estimated = dep.estimatedDepartureUtc,
                                 ),
+                            scheduledClockTime = dep.scheduledDepartureUtc.formatClockTime(),
+                            estimatedClockTime = dep.estimatedDepartureUtc?.formatClockTime(),
                             scheduledUtc = dep.scheduledDepartureUtc,
                             estimatedUtc = dep.estimatedDepartureUtc,
                         )
@@ -329,47 +327,37 @@ class FavouritesViewModel
 
         private fun projectState(
             favourites: List<FavouriteRouteAtStop>,
-            sort: FavouritesSortPreference,
             nexts: Map<FavouriteKey, NextDepartureState>,
             undo: PendingUndo?,
-            location: Coordinates?,
+            editMode: Boolean,
+            isRefreshing: Boolean,
         ): FavouritesUiState {
             if (favourites.isEmpty()) {
-                // An active undo means the user just swiped — keep the screen in Loaded so the
-                // snackbar can still render with a meaningful row count of zero. Empty otherwise.
+                // An active undo means the user just deleted the last row — keep the screen in
+                // Loaded so the snackbar can still render with a meaningful row count of zero.
+                // Empty otherwise.
                 return if (undo != null) {
-                    FavouritesUiState.Loaded(rows = emptyList(), sort = sort, pendingUndo = undo)
+                    FavouritesUiState.Loaded(
+                        rows = emptyList(),
+                        pendingUndo = undo,
+                        editMode = editMode,
+                        isRefreshing = isRefreshing,
+                    )
                 } else {
                     FavouritesUiState.Empty
                 }
             }
-            val rows = favourites.map { it.toRow(nexts[it.toKey()] ?: NextDepartureState.Loading) }
-            val sorted = applySort(rows = rows, sort = sort, location = location)
-            return FavouritesUiState.Loaded(rows = sorted, sort = sort, pendingUndo = undo)
+            val rows =
+                favourites
+                    .map { it.toRow(nexts[it.toKey()] ?: NextDepartureState.Loading) }
+                    .sortedBy { it.position }
+            return FavouritesUiState.Loaded(
+                rows = rows,
+                pendingUndo = undo,
+                editMode = editMode,
+                isRefreshing = isRefreshing,
+            )
         }
-
-        private fun applySort(
-            rows: List<FavouriteRow>,
-            sort: FavouritesSortPreference,
-            location: Coordinates?,
-        ): List<FavouriteRow> =
-            when (sort) {
-                FavouritesSortPreference.Manual -> rows.sortedBy { it.position }
-                FavouritesSortPreference.Alphabetical ->
-                    rows.sortedWith(
-                        compareBy({ it.stopName.lowercase() }, { it.routeNumber }),
-                    )
-                FavouritesSortPreference.Nearest ->
-                    // Phase 05: sort by haversine distance from the last-known fix. If we have no
-                    // fix yet (user hasn't granted location, or the provider hasn't returned one),
-                    // degrade to Manual rather than render an undefined order — flagged in PR body.
-                    // `cc @itsjfx`
-                    if (location == null) {
-                        rows.sortedBy { it.position }
-                    } else {
-                        rows.sortedBy { row -> location.distanceTo(Coordinates(row.lat, row.lng)) }
-                    }
-            }
 
         private fun FavouriteRouteAtStop.toKey(): FavouriteKey =
             FavouriteKey(
@@ -404,3 +392,13 @@ class FavouritesViewModel
             private const val SNAPSHOT_TIMEOUT_MILLIS: Long = 2_000
         }
     }
+
+/**
+ * Format an [Instant] as a `HH:mm` device-local clock time. Mirrors the helper in stop-detail's
+ * `DepartureRow` so the favourite row's "Scheduled 09:05 · Live 09:08" subtext uses the same
+ * shape as the stop-detail screen the user reaches by tapping the row.
+ */
+internal fun Instant.formatClockTime(): String {
+    val local = toLocalDateTime(TimeZone.currentSystemDefault())
+    return "%02d:%02d".format(local.hour, local.minute)
+}

@@ -1,6 +1,5 @@
 package ac.jfx.openptv.feature.favourites
 
-import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
 import ac.jfx.openptv.core.model.RouteType
 import kotlinx.datetime.Instant
 
@@ -12,10 +11,15 @@ import kotlinx.datetime.Instant
  *    it" copy and the search CTA.
  *  - [Loaded] — at least one favourite exists; render the row list.
  *
- * The sort preference travels with [Loaded.sort] so the screen knows which `FilterChip` to
- * highlight without reading the composition local again at the row level. `pendingUndo` is set
- * when the user swipes a row away and clears either when they tap "Undo" or when the snackbar
- * times out (the VM handles both).
+ * `pendingUndo` is set when the user swipes a row away and clears either when they tap "Undo" or
+ * when the snackbar times out (the VM handles both). `editMode` toggles the "drag handle + delete
+ * affordance per row" UX (issue #78); when false the row is a plain tappable surface that opens
+ * stop-detail. `isRefreshing` flips while a pull-to-refresh fan-out is in flight so the screen
+ * can show the indicator (also #78).
+ *
+ * Sort UI was removed in #78 — the rows always render in manual / repository order. The
+ * persisted [`FavouritesSortPreference`] still exists in datastore for backward compatibility but
+ * is no longer surfaced or honoured by the screen.
  */
 sealed interface FavouritesUiState {
     data object Loading : FavouritesUiState
@@ -24,8 +28,9 @@ sealed interface FavouritesUiState {
 
     data class Loaded(
         val rows: List<FavouriteRow>,
-        val sort: FavouritesSortPreference,
         val pendingUndo: PendingUndo? = null,
+        val editMode: Boolean = false,
+        val isRefreshing: Boolean = false,
     ) : FavouritesUiState
 }
 
@@ -74,9 +79,14 @@ data class FavouriteKey(
  *
  *  - [Loading] — first fetch hasn't landed yet, or the row was just added.
  *  - [Empty] — the fetch succeeded but no matching `(routeId, directionId)` is upcoming.
- *  - [Loaded] — a real next departure exists; the screen renders [relativeLabel] (already-formatted
- *    by `RelativeTimeFormatter`) on the right of the row.
+ *  - [Loaded] — a real next departure exists; the screen renders the scheduled clock-time
+ *    ([scheduledClockTime]) and the live relative label ([relativeLabel]) side by side, plus
+ *    the live clock-time when an estimate exists ([estimatedClockTime]).
  *  - [Error] — the fetch failed and no previous Loaded value is available to fall back to.
+ *
+ * Issue #78 explicitly asks for both the scheduled time AND the live tracking time alongside
+ * each other (instead of always showing "Departed"). The VM precomputes both strings so the
+ * Compose layer stays free of formatting logic — same pattern stop-detail's `DepartureRow` uses.
  *
  * The VM holds onto the most-recent [Loaded] across a transient [Error] tick so the row's label
  * doesn't flicker on a single dropped poll — the screen only sees [Error] when no stale value is
@@ -89,6 +99,8 @@ sealed interface NextDepartureState {
 
     data class Loaded(
         val relativeLabel: String,
+        val scheduledClockTime: String,
+        val estimatedClockTime: String?,
         val scheduledUtc: Instant,
         val estimatedUtc: Instant?,
     ) : NextDepartureState

@@ -60,10 +60,11 @@ class StopDetailViewModel
         @Assisted("stopId") private val stopIdValue: Int,
         @Assisted("routeTypeCode") private val routeTypeCode: Int,
         /**
-         * Optional filter — when both `focusRouteId` and `focusDirectionId` are non-null the
-         * `Loaded` departures state surfaces only the matching `(routeId, directionId)` group.
-         * Wired in by the favourites tap-through (issue #35) so the user lands on a single-group
-         * filtered view instead of the full grouped list. Negative sentinel `-1` stands in for
+         * Optional pinned route — when both `focusRouteId` and `focusDirectionId` are non-null the
+         * matching `(routeId, directionId)` group is hoisted to the top of the `Loaded` departures
+         * list, with every other route still rendered underneath. Wired in by the favourites
+         * tap-through (issue #78, refining #35): the issue calls for showing the full stop with
+         * the favourite's route pinned, not a filtered view. Negative sentinel `-1` stands in for
          * `null` over the assisted boundary because Dagger assisted-inject doesn't generate
          * nullable primitive bindings cleanly — the ViewModel lifts back to a real `Int?` here.
          */
@@ -135,7 +136,13 @@ class StopDetailViewModel
         private var lastHeadPoll: List<Departure> = emptyList()
 
         /** Which group keys the user has expanded. Persists across head emissions. */
-        private val expandedGroups: MutableSet<GroupKey> = mutableSetOf()
+        private val expandedGroups: MutableSet<GroupKey> =
+            mutableSetOf<GroupKey>().apply {
+                // Auto-expand the pinned group on first composition so the favourite-tap-through
+                // user sees their route's full timetable without an extra tap. The user can still
+                // collapse it via the chevron — we only seed the initial state once.
+                focusKey?.let { add(it) }
+            }
 
         /**
          * Snapshot of every `(routeId, directionId)` triple at the current stop the user has
@@ -419,13 +426,6 @@ class StopDetailViewModel
             pagedByRunRef.keys.retainAll(keptRefs)
             return filtered
                 .groupBy { GroupKey(it.routeId.value, it.direction.id.value) }
-                // Single-group filtered view — when the screen was entered with `focusRouteId` +
-                // `focusDirectionId` set (favourites tap-through, issue #35), drop every other
-                // group so the user sees only the route+direction they tapped. The filter sits
-                // here rather than in the UI layer because the grouping is the source of truth
-                // for the screen's `Empty` state (an emission with no matching group becomes
-                // Empty, not Loaded with zero groups).
-                .let { groups -> if (focusKey != null) groups.filterKeys { it == focusKey } else groups }
                 .map { (key, departures) ->
                     val route = servingRoutes[key.routeId]
                     val routeNumber = route?.number?.ifBlank { route.name }.orEmpty().ifBlank { "#${key.routeId}" }
@@ -437,9 +437,17 @@ class StopDetailViewModel
                         departures = departures.sortedBy { it.effectiveDepartureUtc() },
                         expanded = expandedGroups.contains(key),
                         isFavourite = favouriteKeys.contains(key),
+                        isPinned = focusKey == key,
                     )
                 }
-                .sortedBy { it.departures.first().effectiveDepartureUtc() }
+                // Pin the focus group at the top (issue #78). Default order is by earliest
+                // departure across the group; if a focus key matches, that group sorts to index 0
+                // and everything else keeps the earliest-departure ordering. compareBy
+                // short-circuits cleanly so the sort cost stays O(n log n).
+                .sortedWith(
+                    compareByDescending<Group> { it.isPinned }
+                        .thenBy { it.departures.first().effectiveDepartureUtc() },
+                )
         }
 
         private fun Throwable.toUserFacingReason(): String =

@@ -9,17 +9,13 @@
     <string name="feature_favourites_empty">Star a route at a stop to favourite it.</string>
     <string name="feature_favourites_empty_cta">Search for a stop</string>
 
-    <!-- Sort selector -->
-    <string name="feature_favourites_sort_manual">Manual</string>
-    <string name="feature_favourites_sort_alphabetical">Alphabetical</string>
-    <string name="feature_favourites_sort_nearest">Nearest</string>
-    <!-- Phase 05: Nearest no longer requires a separate subtitle — the chip is enabled now. The
-         old "Available with location (Phase 05)" string has been removed; if a stale layout still
-         references it, the build will fail clearly. -->
-    <string name="feature_favourites_sort_nearest_no_location">Location not available — sorted by manual order</string>
+    <!-- Edit mode (issue #78) -->
+    <string name="feature_favourites_edit_enter">Edit favourites</string>
+    <string name="feature_favourites_edit_done">Done editing</string>
 
     <!-- Row -->
     <string name="feature_favourites_row_drag_handle">Drag to reorder</string>
+    <string name="feature_favourites_row_delete">Delete favourite</string>
     <string name="feature_favourites_next_loading">Loading…</string>
     <string name="feature_favourites_next_none">No upcoming departures</string>
     <string name="feature_favourites_next_error">No data</string>
