@@ -136,12 +136,13 @@ class StopDetailViewModel
         private var lastHeadPoll: List<Departure> = emptyList()
 
         /** Which group keys the user has expanded. Persists across head emissions. */
-        private val expandedGroups: MutableSet<GroupKey> = mutableSetOf<GroupKey>().apply {
-            // Auto-expand the pinned group on first composition so the favourite-tap-through
-            // user sees their route's full timetable without an extra tap. The user can still
-            // collapse it via the chevron — we only seed the initial state once.
-            focusKey?.let { add(it) }
-        }
+        private val expandedGroups: MutableSet<GroupKey> =
+            mutableSetOf<GroupKey>().apply {
+                // Auto-expand the pinned group on first composition so the favourite-tap-through
+                // user sees their route's full timetable without an extra tap. The user can still
+                // collapse it via the chevron — we only seed the initial state once.
+                focusKey?.let { add(it) }
+            }
 
         /**
          * Snapshot of every `(routeId, directionId)` triple at the current stop the user has
