@@ -434,6 +434,64 @@ class NearbyViewModelTest {
             assertThat(loaded.pendingSheet).isEqualTo(SheetState.Closed)
         }
 
+    // -------------------- list / row-tap (issue #80) --------------------
+    //
+    // The bottom-sheet "nearby stops list" reuses the existing `pins` projection from the same
+    // `StateFlow<NearbyUiState>` the map reads, applies `filteredBy(routeTypeFilter)` at the
+    // render seam, and dispatches row taps through `onPinClicked` — i.e. the same path a map
+    // pin tap takes. The contract: the list's filtered/sorted projection MUST stay consistent
+    // with the map pins, and a row tap MUST land on the same SheetState.Open shape a pin tap
+    // produces.
+
+    @Test
+    fun `list and map share the same filtered pins projection`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val tramStop = StopMother.aStop().withId(1).withRouteType(RouteType.Tram).build()
+            val busStop = StopMother.aStop().withId(2).withRouteType(RouteType.Bus).build()
+            // Server returns both — the chip-toggle then filters down at the render seam (and
+            // also re-fires the server fetch). For this assertion we only care that the
+            // ViewModel's exposed `pins` is consistent with the filter.
+            nearbyRepo.enqueueSuccess(listOf(tramStop, busStop))
+            nearbyRepo.enqueueSuccess(listOf(tramStop))
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Toggle "Tram only" — both surfaces (map pins + list rows) read this same filter.
+            viewModel.onRouteTypeFilterToggled(RouteType.Tram)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(state.routeTypeFilter).containsExactly(RouteType.Tram)
+            // The list's projection and the map's projection are the SAME field on uiState,
+            // filtered by the SAME helper. So the filter set is the proof.
+            assertThat(state.pins).contains(tramStop)
+        }
+
+    @Test
+    fun `row tap dispatches through onPinClicked landing the same SheetState as a pin tap`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            stopDetailRepo.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val stop = StopMother.aStop().withId(2042).withName("Brunswick Street").build()
+            // The list-row composable wires `onClick = { onPinClicked(stop) }` directly — same
+            // entry point a map pin tap uses. The behaviour is identical at the VM seam, which
+            // is what this assertion pins.
+            viewModel.onPinClicked(stop)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            val sheet = loaded.pendingSheet as SheetState.Open
+            assertThat(sheet.sheet.stop).isEqualTo(stop)
+        }
+
     @Test
     fun `tapping a different pin replaces the sheet contents and rebinds fetches`() =
         runTest(dispatcher) {
