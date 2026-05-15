@@ -403,7 +403,6 @@ private fun ServerPickerDialog(
         text = {
             Column {
                 ServerChoiceRow(
-                    choice = ServerChoice.Default,
                     selected = state.choice == ServerChoice.Default,
                     titleRes = R.string.feature_settings_server_default_title,
                     bodyRes = R.string.feature_settings_server_default_body,
@@ -412,7 +411,6 @@ private fun ServerPickerDialog(
                     testTag = TestTagServerDefaultChoice,
                 )
                 ServerChoiceRow(
-                    choice = ServerChoice.Custom,
                     selected = state.choice == ServerChoice.Custom,
                     titleRes = R.string.feature_settings_server_custom_title,
                     bodyRes = R.string.feature_settings_server_custom_body,
@@ -459,7 +457,6 @@ private fun ServerPickerDialog(
 
 @Composable
 private fun ServerChoiceRow(
-    choice: ServerChoice,
     selected: Boolean,
     titleRes: Int,
     bodyRes: Int,
