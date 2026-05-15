@@ -22,11 +22,12 @@ import javax.inject.Singleton
  * Google Play Services. The whole project's GrapheneOS constraint means GMS is off the table; a
  * detekt rule (`ForbidPlayServices`) in `:lint:detekt` keeps that boundary enforceable in CI.
  *
- * **Coarse only.** PTV stops aren't block-precise — the nearby map screen (issue #37) doesn't
- * need anything tighter than ~100 m. The Compose-side rationale dialog only requests
- * `ACCESS_COARSE_LOCATION`; we never ask for fine. The permission check below is an OR with
- * `ACCESS_FINE_LOCATION` so that a user who chose to grant fine in system settings still gets
- * served updates.
+ * **Coarse-or-fine.** PTV stops aren't block-precise — the nearby map screen (issue #37) doesn't
+ * need anything tighter than ~100 m. Since issue #91 the screen requests COARSE + FINE together
+ * so Android 12+ shows the user the Precise/Approximate toggle; this provider treats either grant
+ * as sufficient (the `hasLocationPermission` check below is an OR). We don't tighten the
+ * `LocationManager` provider choice or callback cadence based on the grant — coarse-resolution
+ * fixes match the visible-state-change resolution of the map either way.
  *
  * **Behaviour on permission missing / providers disabled.** Both methods absorb the failure
  * locally instead of bubbling a `SecurityException` up to the caller:
@@ -123,8 +124,8 @@ internal class LocationManagerLocationProvider
                 awaitClose { manager.removeUpdates(listener) }
             }
 
-        // OR with ACCESS_FINE_LOCATION because a user who explicitly granted fine in system
-        // settings should still receive updates even though we only ever request coarse.
+        // OR with ACCESS_FINE_LOCATION because the screen now requests both together (issue #91)
+        // and a user who picked "Precise" only has FINE granted, while "Approximate" gets COARSE.
         private fun hasLocationPermission(): Boolean =
             ContextCompat.checkSelfPermission(
                 context,

@@ -93,10 +93,17 @@ fun NearbyRoute(
         initialiser.init()
     }
 
+    // Request both COARSE and FINE together so Android 12+ shows the Precise/Approximate toggle
+    // (issue #91). The user picks; we treat either grant as "we have location" because the
+    // nearby map doesn't need fine-tighter accuracy than coarse. We use the multi-permission
+    // contract for that reason — single `RequestPermission` would only let us pick one.
     val permissionLauncher =
         rememberLauncherForActivityResult(
-            contract = ActivityResultContracts.RequestPermission(),
-        ) { granted ->
+            contract = ActivityResultContracts.RequestMultiplePermissions(),
+        ) { grants ->
+            val granted =
+                grants[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                    grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
             viewModel.onPermissionResult(granted)
         }
 
@@ -104,14 +111,19 @@ fun NearbyRoute(
     // doesn't re-show the rationale dialog forever. Saved through config change.
     var rationaleDismissed by rememberSaveable { mutableStateOf(false) }
 
-    // Pre-grant check: a user who already granted on a previous launch should land in `Loaded`
-    // immediately. Fired once on entry.
+    // Pre-grant check: a user who already granted on a previous launch (either coarse OR fine —
+    // a user who picked "Precise" in the system dialog has fine; "Approximate" gets coarse) should
+    // land in `Loaded` immediately. Fired once on entry.
     LaunchedEffect(Unit) {
         val granted =
             ContextCompat.checkSelfPermission(
                 context,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-            ) == PackageManager.PERMISSION_GRANTED
+                Manifest.permission.ACCESS_FINE_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ) == PackageManager.PERMISSION_GRANTED
         if (granted) {
             viewModel.onPermissionResult(true)
             rationaleDismissed = true
@@ -147,7 +159,12 @@ fun NearbyRoute(
         },
         onRationaleConfirm = {
             rationaleDismissed = true
-            permissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ),
+            )
         },
     )
 }

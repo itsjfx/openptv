@@ -2,13 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <!--
-        Coarse-only — PTV stops have walking-distance granularity, so fine location adds nothing
-        for the nearby map. Matches the Compose-side rationale in `:core:designsystem`'s
-        `LocationPermissionRationale` and the permission check in `LocationManagerLocationProvider`.
+        Both COARSE and FINE are declared so Android 12+ renders the system "Precise / Approximate"
+        toggle on the runtime prompt (issue #91). The user picks; either grant is enough for the
+        nearby map to function. See the rationale on `LocationManagerLocationProvider` and the
+        runtime request in `NearbyScreen`.
 
         Background location is intentionally NOT declared: the screen only needs a fix while the
         user is looking at it. See `docs/mobile/phase-05-nearby-map.md` for the rationale.
     -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
 </manifest>
