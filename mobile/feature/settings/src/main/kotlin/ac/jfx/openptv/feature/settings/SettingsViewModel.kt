@@ -4,6 +4,7 @@ import ac.jfx.openptv.core.data.SettingsRepository
 import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
 import ac.jfx.openptv.core.datastore.preference.DynamicColourPreference
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
+import ac.jfx.openptv.core.datastore.preference.TimeFormatPreference
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -74,6 +75,16 @@ class SettingsViewModel
 
         fun setDynamicColour(dynamicColour: DynamicColourPreference) {
             dynamicColour.put(viewModelScope, userPreferences.dataStore)
+        }
+
+        /**
+         * Persist the user's 12 / 24-hour clock preference. Write-only here for the same reason
+         * `setThemeMode` is — the screen reads the current value through `LocalTimeFormat.current`
+         * (seeded by `SettingsProvider`), so duplicating the flow on this ViewModel would create
+         * a one-frame flicker between the local's value and the StateFlow's emission.
+         */
+        fun setTimeFormat(timeFormat: TimeFormatPreference) {
+            timeFormat.put(viewModelScope, userPreferences.dataStore)
         }
 
         /**

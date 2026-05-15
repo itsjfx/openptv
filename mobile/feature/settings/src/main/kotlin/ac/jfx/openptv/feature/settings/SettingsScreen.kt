@@ -3,7 +3,9 @@ package ac.jfx.openptv.feature.settings
 import ac.jfx.openptv.core.datastore.preference.DynamicColourPreference
 import ac.jfx.openptv.core.datastore.preference.LocalDynamicColour
 import ac.jfx.openptv.core.datastore.preference.LocalThemeMode
+import ac.jfx.openptv.core.datastore.preference.LocalTimeFormat
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
+import ac.jfx.openptv.core.datastore.preference.TimeFormatPreference
 import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -67,10 +69,12 @@ fun SettingsRoute(
         themeMode = LocalThemeMode.current,
         dynamicColour = LocalDynamicColour.current,
         dynamicColourSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
+        timeFormat = LocalTimeFormat.current,
         currentBackendUrl = currentBackendUrl,
         defaultBackendUrl = viewModel.defaultBackendUrl,
         onThemeMode = viewModel::setThemeMode,
         onDynamicColour = viewModel::setDynamicColour,
+        onTimeFormat = viewModel::setTimeFormat,
         onBackendUrl = viewModel::setBackendBaseUrl,
         onBack = onBack,
     )
@@ -101,10 +105,12 @@ fun SettingsScreen(
     themeMode: ThemeModePreference,
     dynamicColour: DynamicColourPreference,
     dynamicColourSupported: Boolean,
+    timeFormat: TimeFormatPreference,
     currentBackendUrl: String,
     defaultBackendUrl: String,
     onThemeMode: (ThemeModePreference) -> Unit,
     onDynamicColour: (DynamicColourPreference) -> Unit,
+    onTimeFormat: (TimeFormatPreference) -> Unit,
     onBackendUrl: (String) -> Unit,
     onBack: () -> Unit,
 ) {
@@ -145,6 +151,12 @@ fun SettingsScreen(
                 value = dynamicColour,
                 supported = dynamicColourSupported,
                 onToggle = onDynamicColour,
+            )
+
+            SectionHeader(text = stringResource(R.string.feature_settings_time_format_section))
+            TimeFormatSection(
+                selected = timeFormat,
+                onSelect = onTimeFormat,
             )
 
             SectionHeader(text = stringResource(R.string.feature_settings_server_section))
@@ -245,6 +257,71 @@ private fun ThemeModeRow(
             // via TalkBack's per-control activation.
             onClick = null,
         )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(start = 16.dp),
+        )
+    }
+}
+
+@Composable
+private fun TimeFormatSection(
+    selected: TimeFormatPreference,
+    onSelect: (TimeFormatPreference) -> Unit,
+) {
+    Column(
+        modifier = Modifier.selectableGroup().testTag(TestTagTimeFormatGroup),
+    ) {
+        TimeFormatRow(
+            label = stringResource(R.string.feature_settings_time_format_system),
+            preference = TimeFormatPreference.System,
+            selected = selected,
+            onSelect = onSelect,
+            testTag = TestTagTimeFormatSystem,
+        )
+        TimeFormatRow(
+            label = stringResource(R.string.feature_settings_time_format_twelve),
+            preference = TimeFormatPreference.TwelveHour,
+            selected = selected,
+            onSelect = onSelect,
+            testTag = TestTagTimeFormatTwelve,
+        )
+        TimeFormatRow(
+            label = stringResource(R.string.feature_settings_time_format_twenty_four),
+            preference = TimeFormatPreference.TwentyFourHour,
+            selected = selected,
+            onSelect = onSelect,
+            testTag = TestTagTimeFormatTwentyFour,
+        )
+    }
+}
+
+@Composable
+private fun TimeFormatRow(
+    label: String,
+    preference: TimeFormatPreference,
+    selected: TimeFormatPreference,
+    onSelect: (TimeFormatPreference) -> Unit,
+    testTag: String,
+) {
+    val isSelected = preference == selected
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                // `selectable` so TalkBack announces this as a radio option inside the
+                // enclosing `selectableGroup`. Same shape as `ThemeModeRow` above.
+                .selectable(
+                    selected = isSelected,
+                    role = Role.RadioButton,
+                    onClick = { onSelect(preference) },
+                )
+                .padding(horizontal = 24.dp, vertical = 12.dp)
+                .testTag(testTag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = isSelected, onClick = null)
         Text(
             text = label,
             style = MaterialTheme.typography.bodyLarge,
@@ -510,6 +587,10 @@ internal const val TestTagThemeLight: String = "settings-theme-light"
 internal const val TestTagThemeDark: String = "settings-theme-dark"
 internal const val TestTagDynamicColourRow: String = "settings-dynamic-colour-row"
 internal const val TestTagDynamicColourSwitch: String = "settings-dynamic-colour-switch"
+internal const val TestTagTimeFormatGroup: String = "settings-time-format-group"
+internal const val TestTagTimeFormatSystem: String = "settings-time-format-system"
+internal const val TestTagTimeFormatTwelve: String = "settings-time-format-twelve"
+internal const val TestTagTimeFormatTwentyFour: String = "settings-time-format-twenty-four"
 internal const val TestTagServerRow: String = "settings-server-row"
 internal const val TestTagServerDialog: String = "settings-server-dialog"
 internal const val TestTagServerDefaultChoice: String = "settings-server-default-choice"

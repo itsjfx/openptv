@@ -4,6 +4,7 @@ import ac.jfx.openptv.core.datastore.preference.DynamicColourPreference
 import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
 import ac.jfx.openptv.core.datastore.preference.PreferenceKeys
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
+import ac.jfx.openptv.core.datastore.preference.TimeFormatPreference
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import kotlinx.coroutines.flow.Flow
@@ -53,5 +54,11 @@ class UserPreferencesDataStore(
     val favouritesSort: Flow<FavouritesSortPreference> =
         dataStore.data.map { prefs ->
             FavouritesSortPreference.fromValue(prefs[PreferenceKeys.FAVOURITES_SORT])
+        }
+
+    /** Current [TimeFormatPreference], re-emitted on every write. */
+    val timeFormat: Flow<TimeFormatPreference> =
+        dataStore.data.map { prefs ->
+            TimeFormatPreference.fromValue(prefs[PreferenceKeys.TIME_FORMAT])
         }
 }

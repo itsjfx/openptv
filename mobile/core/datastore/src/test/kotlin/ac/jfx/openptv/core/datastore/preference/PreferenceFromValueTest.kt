@@ -84,4 +84,31 @@ class PreferenceFromValueTest {
     fun `themeMode default is System`() {
         assertThat(ThemeModePreference.default).isEqualTo(ThemeModePreference.System)
     }
+
+    @Test
+    fun `timeFormat fromValue round-trips every known case`() {
+        assertThat(TimeFormatPreference.fromValue("System")).isEqualTo(TimeFormatPreference.System)
+        assertThat(TimeFormatPreference.fromValue("TwelveHour"))
+            .isEqualTo(TimeFormatPreference.TwelveHour)
+        assertThat(TimeFormatPreference.fromValue("TwentyFourHour"))
+            .isEqualTo(TimeFormatPreference.TwentyFourHour)
+    }
+
+    @Test
+    fun `timeFormat fromValue null falls back to default`() {
+        assertThat(TimeFormatPreference.fromValue(null)).isEqualTo(TimeFormatPreference.default)
+    }
+
+    @Test
+    fun `timeFormat fromValue unknown falls back to default`() {
+        // Forward-compat: a newer build that adds a `LocaleAware` case must not crash older
+        // installs that don't know the string.
+        assertThat(TimeFormatPreference.fromValue("LocaleAware"))
+            .isEqualTo(TimeFormatPreference.default)
+    }
+
+    @Test
+    fun `timeFormat default is System`() {
+        assertThat(TimeFormatPreference.default).isEqualTo(TimeFormatPreference.System)
+    }
 }

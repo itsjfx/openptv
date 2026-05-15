@@ -3,6 +3,7 @@ package ac.jfx.openptv.core.datastore
 import ac.jfx.openptv.core.datastore.preference.DynamicColourPreference
 import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
+import ac.jfx.openptv.core.datastore.preference.TimeFormatPreference
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
@@ -116,6 +117,24 @@ class UserPreferencesDataStoreTest {
         }
 
     @Test
+    fun timeFormat_persists_across_datastore_reopen() =
+        runTest {
+            val firstScope = newScope()
+            val firstStore = openDataStore(firstScope)
+            TimeFormatPreference.TwentyFourHour.put(firstScope, firstStore)
+            firstStore.data.first()
+            firstScope.cancel()
+
+            val secondScope = newScope()
+            val reopened = UserPreferencesDataStore(openDataStore(secondScope))
+            reopened.timeFormat.test {
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.TwentyFourHour)
+                cancelAndIgnoreRemainingEvents()
+            }
+            secondScope.cancel()
+        }
+
+    @Test
     fun empty_datastore_emits_default_for_every_preference() =
         runTest {
             val scope = newScope()
@@ -131,6 +150,10 @@ class UserPreferencesDataStoreTest {
             }
             facade.favouritesSort.test {
                 assertThat(awaitItem()).isEqualTo(FavouritesSortPreference.default)
+                cancelAndIgnoreRemainingEvents()
+            }
+            facade.timeFormat.test {
+                assertThat(awaitItem()).isEqualTo(TimeFormatPreference.default)
                 cancelAndIgnoreRemainingEvents()
             }
             scope.cancel()
