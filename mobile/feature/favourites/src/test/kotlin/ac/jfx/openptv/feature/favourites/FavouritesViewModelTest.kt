@@ -65,7 +65,7 @@ class FavouritesViewModelTest {
         FavouritesViewModel(
             observeFavourites = ObserveFavouritesUseCase(favouritesRepository),
             reorderFavourites = ReorderFavouritesUseCase(favouritesRepository),
-            loadNextDeparture = LoadNextDepartureUseCase(departureRepository),
+            loadNextDeparture = LoadNextDepartureUseCase(departureRepository, formatter),
             favouritesRepository = favouritesRepository,
             timeFormatter = formatter,
         ).also { activeViewModel = it }
