@@ -480,10 +480,19 @@ private fun GroupHeader(
     // direction tuple — multi-route blocks (Richmond → City) have no single favourite target to
     // toggle. The content description folds the route + destination context in for TalkBack.
     val favouriteTarget = group.favouriteTarget
-    val routesLabel = group.routes.joinToString(separator = ", ") { it.number.ifBlank { it.name } }
+    // PTV's train feed sometimes returns blank route numbers + names — fall back to "#id" so the
+    // user can still tell two routes apart in the multi-route header. Mirrors the same fallback
+    // the per-row badge uses below.
+    val routesLabel =
+        group.routes.joinToString(separator = ", ") { route ->
+            route.number.ifBlank { route.name }.ifBlank { "#${route.id.value}" }
+        }
     val favouriteDescription =
         if (favouriteTarget != null) {
-            val routeDescriptor = group.routes.firstOrNull()?.let { it.number.ifBlank { it.name } }.orEmpty()
+            val routeDescriptor =
+                group.routes.firstOrNull()
+                    ?.let { it.number.ifBlank { it.name }.ifBlank { "#${it.id.value}" } }
+                    .orEmpty()
             if (group.isFavourite) {
                 stringResource(R.string.feature_stop_detail_unfavourite_route, routeDescriptor, group.headerLabel)
             } else {
@@ -518,17 +527,18 @@ private fun GroupHeader(
                 )
             }
             // Two-line layout for the header: destination is the primary label (issue #87 — the
-            // user is looking for "the next service to City"), with the route badges that feed
-            // this destination on a smaller second line. Single-route blocks (e.g. Hurstbridge →
-            // Hurstbridge) effectively look the same as before, just with the destination as the
-            // headline and one route number underneath.
+            // user is looking for "the next service to City"), and when the block bundles more
+            // than one route, the contributing route badges appear on a smaller second line so
+            // the user can see at a glance which lines feed this destination. Single-route blocks
+            // skip the second line — the per-row badge already shows the route number, no point
+            // duplicating it.
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = group.headerLabel,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                if (routesLabel.isNotBlank()) {
+                if (group.routes.size > 1 && routesLabel.isNotBlank()) {
                     Text(
                         text = routesLabel,
                         style = MaterialTheme.typography.labelSmall,

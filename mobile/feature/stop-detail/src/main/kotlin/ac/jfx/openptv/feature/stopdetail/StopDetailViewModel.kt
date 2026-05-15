@@ -466,11 +466,25 @@ class StopDetailViewModel
                     val containsFocus = focusTuple != null && departures.any { it.matches(focusTuple) }
                     // Distinct routes in this destination block, ordered by their earliest
                     // upcoming departure so the "next train to City" line is the first badge.
+                    // Synthesise a placeholder `Route` when the departure references a routeId the
+                    // header response didn't include (PTV's `/stops` and `/departures` endpoints
+                    // sometimes disagree on which routes serve a stop — most visible on trains,
+                    // where the `routes` block is often returned empty). The placeholder uses the
+                    // routeId as the visible code so the multi-route header still tells the user
+                    // which lines feed the destination.
                     val groupRoutes =
                         sortedDepartures
                             .map { it.routeId.value }
                             .distinct()
-                            .mapNotNull { servingRoutes[it] }
+                            .map { routeIdValue ->
+                                servingRoutes[routeIdValue]
+                                    ?: Route(
+                                        id = RouteId(routeIdValue),
+                                        number = "",
+                                        name = "",
+                                        routeType = routeType,
+                                    )
+                            }
                     // Favourite affordance only applies when the block represents a single route
                     // + single direction tuple. Multi-route blocks (Richmond "City") have no
                     // single tuple to toggle and the star is suppressed in the UI.
