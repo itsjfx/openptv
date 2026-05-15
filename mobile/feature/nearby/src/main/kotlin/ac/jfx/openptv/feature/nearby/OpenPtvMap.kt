@@ -24,6 +24,9 @@ interface OpenPtvMap {
      * @param camera latest desired camera position; the impl recentres when this changes
      *   (the View deduplicates if the camera is already there).
      * @param userLocation current user fix; pass `null` to hide the location dot.
+     * @param userBearing device heading in degrees clockwise from north, normalised to
+     *   `[0, 360)`. `null` means "no compass / haven't fired yet" — the dot still renders, but
+     *   without a heading cone. Issue #99.
      * @param pins stop markers to render; the impl decides clustering based on [camera.zoom].
      * @param isDark whether the host theme is in dark mode; used to pick the OpenFreeMap style
      *   variant. Passed from outside the `AndroidView` scope because composition locals don't
@@ -34,10 +37,11 @@ interface OpenPtvMap {
      *   from this.
      */
     @Composable
-    @Suppress("LongParameterList") // 7 params, all distinct concerns; collapsing would lose clarity
+    @Suppress("LongParameterList") // 8 params, all distinct concerns; collapsing would lose clarity
     fun Render(
         camera: OpenPtvCameraState,
         userLocation: Coordinates?,
+        userBearing: Float?,
         pins: List<Stop>,
         isDark: Boolean,
         onCameraIdle: (OpenPtvCameraState) -> Unit,

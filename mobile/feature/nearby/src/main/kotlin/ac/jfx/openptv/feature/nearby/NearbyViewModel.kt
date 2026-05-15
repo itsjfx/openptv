@@ -1,5 +1,6 @@
 package ac.jfx.openptv.feature.nearby
 
+import ac.jfx.openptv.core.common.DeviceHeadingProvider
 import ac.jfx.openptv.core.common.LocationProvider
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.DepartureRepository
@@ -62,6 +63,7 @@ class NearbyViewModel
     @Inject
     constructor(
         private val locationProvider: LocationProvider,
+        private val deviceHeadingProvider: DeviceHeadingProvider,
         private val nearbyStopsRepository: NearbyStopsRepository,
         private val stopDetailRepository: StopDetailRepository,
         private val departureRepository: DepartureRepository,
@@ -89,6 +91,21 @@ class NearbyViewModel
          */
         private var sheetJob: Job? = null
 
+        /**
+         * Job for the continuous user-location subscription (issue #99). Started on permission
+         * grant — feeds `userLocation` updates as the user moves so the blue dot follows them.
+         * Cancelled / restarted if permission flips. Separate Job from [sheetJob] so a bottom-
+         * sheet dismissal doesn't tear down the dot tracking.
+         */
+        private var userLocationJob: Job? = null
+
+        /**
+         * Job for the continuous compass / heading subscription (issue #99). Same pattern as
+         * [userLocationJob] — starts on permission grant, completes cleanly if the device has no
+         * rotation sensor (the screen then just renders the dot with no cone).
+         */
+        private var userBearingJob: Job? = null
+
         init {
             wireCameraDebounce()
         }
@@ -112,6 +129,7 @@ class NearbyViewModel
                             camera = initialCamera,
                             pins = emptyList(),
                             userLocation = fix,
+                            userBearing = null,
                             isFollowingUser = fix != null,
                             pendingSheet = SheetState.Closed,
                             showEmptyHint = false,
@@ -119,6 +137,13 @@ class NearbyViewModel
                         )
                     // Seed the debounce so the initial fetch lands without a manual pan.
                     pinFetchTriggers.tryEmit(PinFetchTrigger(initialCamera, currentFilter()))
+                    // Start tracking the user's location + heading for the blue-dot indicator
+                    // (issue #99). Both subscriptions are best-effort: a permission revocation or
+                    // missing sensor completes the flow cleanly, leaving `userLocation`/
+                    // `userBearing` at their last value (the dot freezes rather than vanishing,
+                    // which matches what every other map app does when GPS drops momentarily).
+                    startUserLocationTracking()
+                    startUserBearingTracking()
                 } else {
                     _uiState.value =
                         NearbyUiState.PermissionDenied(
@@ -132,8 +157,58 @@ class NearbyViewModel
                             currentFilter(),
                         ),
                     )
+                    // Permission denied — make sure neither tracker is still running from a prior
+                    // grant within the same VM lifetime.
+                    userLocationJob?.cancel()
+                    userLocationJob = null
+                    userBearingJob?.cancel()
+                    userBearingJob = null
                 }
             }
+        }
+
+        /**
+         * Subscribe to [LocationProvider.observe] and push every new fix into the [Loaded] state's
+         * `userLocation` field. Auto-cancels the previous subscription if called twice — used by
+         * [onPermissionResult] to restart cleanly after a permission flip.
+         *
+         * Follow-me is preserved when the user is currently following: the camera also re-centres
+         * on the new fix so the dot stays under the crosshair. A user who has panned away
+         * (`isFollowingUser = false`) just sees the dot move; the camera doesn't chase them.
+         */
+        private fun startUserLocationTracking() {
+            userLocationJob?.cancel()
+            userLocationJob =
+                viewModelScope.launch {
+                    locationProvider.observe().collect { fix ->
+                        val current = _uiState.value as? NearbyUiState.Loaded ?: return@collect
+                        val nextCamera =
+                            if (current.isFollowingUser) {
+                                current.camera.copy(centre = fix)
+                            } else {
+                                current.camera
+                            }
+                        _uiState.value =
+                            current.copy(userLocation = fix, camera = nextCamera)
+                    }
+                }
+        }
+
+        /**
+         * Subscribe to [DeviceHeadingProvider.observe] and push every new bearing into the
+         * [Loaded] state's `userBearing` field. Same lifecycle / restart pattern as
+         * [startUserLocationTracking]. Completion (no rotation sensor) leaves `userBearing` at
+         * `null`, which the map renders as "no cone" — issue #99's compass-less device path.
+         */
+        private fun startUserBearingTracking() {
+            userBearingJob?.cancel()
+            userBearingJob =
+                viewModelScope.launch {
+                    deviceHeadingProvider.observe().collect { bearing ->
+                        val current = _uiState.value as? NearbyUiState.Loaded ?: return@collect
+                        _uiState.value = current.copy(userBearing = bearing)
+                    }
+                }
         }
 
         /** Called from MapLibre's camera-idle listener through the [OpenPtvMap] callback. */

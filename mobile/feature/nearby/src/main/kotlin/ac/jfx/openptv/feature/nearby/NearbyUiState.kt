@@ -43,11 +43,19 @@ sealed interface NearbyUiState {
         override val routeTypeFilter: Set<RouteType> = DEFAULT_FILTER,
     ) : NearbyUiState
 
-    /** Permission granted (or denied + dismissed). Normal map operation. */
+    /**
+     * Permission granted (or denied + dismissed). Normal map operation.
+     *
+     * [userBearing] is the device heading in degrees clockwise from north, normalised to
+     * `[0, 360)`. `null` means "no compass / sensor hasn't fired yet" — the screen renders the
+     * blue dot without a heading cone in that case (issue #99 acceptance: "device-doesn't-have-
+     * compass case — no cone, just dot"). Same null-means-absent convention as [userLocation].
+     */
     data class Loaded(
         val camera: OpenPtvCameraState,
         val pins: List<Stop>,
         val userLocation: Coordinates?,
+        val userBearing: Float? = null,
         val isFollowingUser: Boolean,
         val pendingSheet: SheetState,
         val showEmptyHint: Boolean,
