@@ -15,9 +15,12 @@ import javax.inject.Inject
  * mapper to resolve direction names client-side without dragging the full PTV response shape
  * through the wire.
  *
- * `date_utc` and `max_results` are forwarded verbatim when callers supply them. PTV expects
- * `date_utc` as ISO-8601 without a trailing fractional second; `Instant.toString()` already emits
- * the right shape (e.g. `2026-05-14T09:00:00Z`).
+ * `date_utc`, `max_results`, and `look_backwards` are forwarded verbatim when callers supply them.
+ * PTV expects `date_utc` as ISO-8601 without a trailing fractional second; `Instant.toString()`
+ * already emits the right shape (e.g. `2026-05-14T09:00:00Z`). `look_backwards=false` paired with
+ * `date_utc=<now>` is how the data layer asks PTV to do the "only upcoming departures" filter
+ * server-side (issue #86) instead of returning the full from-midnight window and filtering on the
+ * client.
  */
 internal class RetrofitDepartureDataSource
     @Inject
@@ -30,6 +33,7 @@ internal class RetrofitDepartureDataSource
             routeType: RouteType,
             dateUtc: Instant?,
             maxResults: Int?,
+            lookBackwards: Boolean?,
         ): List<Departure> {
             val base = backendUrl.backendBaseUrl()
             val typeCode = routeType.toPtvCode()
@@ -38,6 +42,7 @@ internal class RetrofitDepartureDataSource
                     "?expand=Run&expand=Direction&expand=Route&expand=Disruption"
             val dateParam = dateUtc?.let { "&date_utc=$it" }.orEmpty()
             val maxParam = maxResults?.let { "&max_results=$it" }.orEmpty()
-            return api.getDepartures("$baseUrl$dateParam$maxParam").toDomain()
+            val lookBackwardsParam = lookBackwards?.let { "&look_backwards=$it" }.orEmpty()
+            return api.getDepartures("$baseUrl$dateParam$maxParam$lookBackwardsParam").toDomain()
         }
     }

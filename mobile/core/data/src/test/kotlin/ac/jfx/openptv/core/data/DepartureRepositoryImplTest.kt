@@ -15,12 +15,14 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import org.junit.Test
 import java.io.IOException
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Repository-end coverage for [DepartureRepositoryImpl]. Two test surfaces:
@@ -33,13 +35,20 @@ import java.util.concurrent.atomic.AtomicReference
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class DepartureRepositoryImplTest {
+    /**
+     * Fixed clock for every test. The head poll passes `clock.now() - 2 min` as `date_utc`
+     * (issue #86), so a deterministic instant makes the assertions on `lastDateUtc` legible.
+     */
+    private val fixedNow: Instant = Instant.parse("2026-05-14T09:00:00Z")
+    private val clock: Clock = FixedClock(fixedNow)
+
     // ---------- getDepartures one-shot ----------
 
     @Test
     fun `getDepartures success wraps mapped list`() =
         runTest {
             val expected = listOf(DepartureMother.aDeparture().build())
-            val repo = DepartureRepositoryImpl(FakeDataSource(returning = expected))
+            val repo = DepartureRepositoryImpl(FakeDataSource(returning = expected), clock)
 
             val result = repo.getDepartures(StopId(1071), RouteType.Train)
 
@@ -51,7 +60,7 @@ class DepartureRepositoryImplTest {
     fun `getDepartures non-cancellation throwable becomes Result Error`() =
         runTest {
             val boom = IOException("offline")
-            val repo = DepartureRepositoryImpl(FakeDataSource(throwing = boom))
+            val repo = DepartureRepositoryImpl(FakeDataSource(throwing = boom), clock)
 
             val result = repo.getDepartures(StopId(1071), RouteType.Train)
 
@@ -65,6 +74,7 @@ class DepartureRepositoryImplTest {
             val repo =
                 DepartureRepositoryImpl(
                     FakeDataSource(throwing = CancellationException("scope died")),
+                    clock,
                 )
             repo.getDepartures(StopId(1071), RouteType.Train)
         }
@@ -75,7 +85,7 @@ class DepartureRepositoryImplTest {
     fun `observe emits Loading then Success on first tick`() =
         runTest {
             val expected = listOf(DepartureMother.aDeparture().build())
-            val repo = DepartureRepositoryImpl(FakeDataSource(returning = expected))
+            val repo = DepartureRepositoryImpl(FakeDataSource(returning = expected), clock)
 
             repo.observeDepartures(StopId(1071), RouteType.Train).test {
                 assertThat(awaitItem()).isEqualTo(Result.Loading)
@@ -91,7 +101,7 @@ class DepartureRepositoryImplTest {
         runTest {
             // Three different snapshots so each tick can be distinguished.
             val ds = FakeDataSource(returningSeries = SnapshotSeries.threeSnapshots())
-            val repo = DepartureRepositoryImpl(ds)
+            val repo = DepartureRepositoryImpl(ds, clock)
 
             repo.observeDepartures(StopId(1071), RouteType.Train).test {
                 // First cycle.
@@ -122,7 +132,7 @@ class DepartureRepositoryImplTest {
     fun `observe stops polling when collector cancels`() =
         runTest {
             val ds = FakeDataSource(returning = listOf(DepartureMother.aDeparture().build()))
-            val repo = DepartureRepositoryImpl(ds)
+            val repo = DepartureRepositoryImpl(ds, clock)
 
             val job: Job =
                 repo.observeDepartures(StopId(1071), RouteType.Train)
@@ -160,7 +170,7 @@ class DepartureRepositoryImplTest {
                             ),
                         ),
                 )
-            val repo = DepartureRepositoryImpl(ds)
+            val repo = DepartureRepositoryImpl(ds, clock)
 
             repo.observeDepartures(StopId(1071), RouteType.Train).test {
                 // First cycle — success.
@@ -192,7 +202,7 @@ class DepartureRepositoryImplTest {
         runTest {
             val expected = listOf(DepartureMother.aDeparture().withRunRef("LM-1").build())
             val ds = FakeDataSource(returning = expected)
-            val repo = DepartureRepositoryImpl(ds)
+            val repo = DepartureRepositoryImpl(ds, clock)
 
             val anchor = Instant.parse("2026-05-14T09:30:00Z")
             val result = repo.loadMore(StopId(1071), RouteType.Train, anchor, maxResults = 10)
@@ -207,7 +217,7 @@ class DepartureRepositoryImplTest {
     fun `loadMore non-cancellation throwable becomes Result Error`() =
         runTest {
             val boom = IOException("offline")
-            val repo = DepartureRepositoryImpl(FakeDataSource(throwing = boom))
+            val repo = DepartureRepositoryImpl(FakeDataSource(throwing = boom), clock)
             val anchor = Instant.parse("2026-05-14T09:30:00Z")
 
             val result = repo.loadMore(StopId(1071), RouteType.Train, anchor, maxResults = 5)
@@ -217,10 +227,13 @@ class DepartureRepositoryImplTest {
         }
 
     @Test
-    fun `observe head poll passes INITIAL_PAGE_SIZE_PER_ROUTE to data source`() =
+    fun `observe head poll passes INITIAL_PAGE_SIZE_PER_ROUTE, date_utc and look_backwards=false`() =
         runTest {
+            // Issue #86: every head poll asks PTV for departures from `now - 2 min` onward, with
+            // `look_backwards=false`. The 2-minute grace matches the formatter's "now" window so a
+            // row whose scheduled time slips a few seconds into the past doesn't disappear.
             val ds = FakeDataSource(returning = listOf(DepartureMother.aDeparture().build()))
-            val repo = DepartureRepositoryImpl(ds)
+            val repo = DepartureRepositoryImpl(ds, clock)
 
             repo.observeDepartures(StopId(1071), RouteType.Train).test {
                 // Loading + first success
@@ -231,7 +244,47 @@ class DepartureRepositoryImplTest {
 
             assertThat(ds.lastMaxResults.get())
                 .isEqualTo(DepartureRepository.INITIAL_PAGE_SIZE_PER_ROUTE)
-            assertThat(ds.lastDateUtc.get()).isNull()
+            assertThat(ds.lastDateUtc.get()).isEqualTo(fixedNow - 2.minutes)
+            assertThat(ds.lastLookBackwards.get()).isEqualTo(false)
+        }
+
+    @Test
+    fun `getDepartures one-shot passes date_utc, max_results and look_backwards=false`() =
+        runTest {
+            // Mirrors the head poll: the one-shot read (used by pull-to-refresh and the Glance
+            // widget) needs the same upcoming-only contract as the polling Flow.
+            //
+            // `max_results` matters: PTV quirk discovered during smoke testing — the API only
+            // honours `look_backwards=false` when `max_results` is also set. Without it the
+            // response is anchored at start-of-day and `LoadNextDepartureUseCase` ends up
+            // returning a yesterday-morning row as "next departure". The favourites screen used
+            // to surface this as a "departed 00:01" label.
+            val ds = FakeDataSource(returning = listOf(DepartureMother.aDeparture().build()))
+            val repo = DepartureRepositoryImpl(ds, clock)
+
+            repo.getDepartures(StopId(1071), RouteType.Train)
+
+            assertThat(ds.lastDateUtc.get()).isEqualTo(fixedNow - 2.minutes)
+            assertThat(ds.lastMaxResults.get())
+                .isEqualTo(DepartureRepository.INITIAL_PAGE_SIZE_PER_ROUTE)
+            assertThat(ds.lastLookBackwards.get()).isEqualTo(false)
+        }
+
+    @Test
+    fun `loadMore passes look_backwards=false alongside the supplied anchor`() =
+        runTest {
+            // Paging past the head window still wants upcoming-only relative to the anchor — the
+            // user has scrolled forward in time and never needs to see entries earlier than the
+            // anchor instant.
+            val ds = FakeDataSource(returning = listOf(DepartureMother.aDeparture().build()))
+            val repo = DepartureRepositoryImpl(ds, clock)
+
+            val anchor = Instant.parse("2026-05-14T10:00:00Z")
+            repo.loadMore(StopId(1071), RouteType.Train, anchor, maxResults = 5)
+
+            assertThat(ds.lastDateUtc.get()).isEqualTo(anchor)
+            assertThat(ds.lastMaxResults.get()).isEqualTo(5)
+            assertThat(ds.lastLookBackwards.get()).isEqualTo(false)
         }
 
     // ---------- Inline fakes ----------
@@ -284,16 +337,19 @@ class DepartureRepositoryImplTest {
         val callCount: AtomicInteger = AtomicInteger(0)
         val lastDateUtc: AtomicReference<Instant?> = AtomicReference(null)
         val lastMaxResults: AtomicReference<Int?> = AtomicReference(null)
+        val lastLookBackwards: AtomicReference<Boolean?> = AtomicReference(null)
 
         override suspend fun getDepartures(
             stopId: StopId,
             routeType: RouteType,
             dateUtc: Instant?,
             maxResults: Int?,
+            lookBackwards: Boolean?,
         ): List<Departure> {
             val index = callCount.getAndIncrement()
             lastDateUtc.set(dateUtc)
             lastMaxResults.set(maxResults)
+            lastLookBackwards.set(lookBackwards)
             throwing?.let { throw it }
             if (returningSeries != null) {
                 return when (val outcome = returningSeries.outcomeAt(index)) {
@@ -303,5 +359,9 @@ class DepartureRepositoryImplTest {
             }
             return returning ?: emptyList()
         }
+    }
+
+    private class FixedClock(private val instant: Instant) : Clock {
+        override fun now(): Instant = instant
     }
 }

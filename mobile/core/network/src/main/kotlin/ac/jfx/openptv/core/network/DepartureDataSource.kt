@@ -10,9 +10,13 @@ import kotlinx.datetime.Instant
  * `:core:data` — this interface is one-shot. If the proxy ever exposes a server-push channel
  * (SSE / WebSocket), a second implementation slots in without touching the data layer.
  *
- * Both [dateUtc] and [maxResults] are optional pass-throughs to the PTV API:
- *  - `date_utc` shifts the window forward in time so we can page past midnight without locking
- *    to the current calendar day.
+ * [dateUtc], [maxResults], and [lookBackwards] are optional pass-throughs to the PTV API:
+ *  - `date_utc` shifts the window forward in time so we can ask for "departures from this instant
+ *    onward". Without it PTV anchors the response at the **start of the current calendar day**,
+ *    which is why the original implementation needed a client-side `isDeparted` filter.
+ *  - `look_backwards` is honoured by PTV alongside `date_utc`: setting it to `false` makes the
+ *    response exclude entries scheduled before `date_utc`. Server-side filtering replaces the
+ *    client-side filter — see issue #86.
  *  - `max_results` is per-route (PTV applies it once `route_id` is omitted), so a stop with three
  *    routes serving it returns up to `3 * max_results` departures.
  */
@@ -22,5 +26,6 @@ interface DepartureDataSource {
         routeType: RouteType,
         dateUtc: Instant? = null,
         maxResults: Int? = null,
+        lookBackwards: Boolean? = null,
     ): List<Departure>
 }

@@ -417,14 +417,17 @@ class StopDetailViewModel
                     is HeaderState.Loaded -> currentHeader.detail.servingRoutes.associateBy { it.id.value }
                     else -> emptyMap()
                 }
-            // Issue #30 acceptance criterion: departed entries drop off. Use the formatter's
-            // own threshold so a row that would render as "now" is never filtered, and a row
-            // that would render as "departed" is never shown. Also garbage-collects departed
-            // rows from `pagedByRunRef` so it doesn't grow without bound over a long session.
-            val filtered = filterNot { timeFormatter.isDeparted(it.scheduledDepartureUtc, it.estimatedDepartureUtc) }
-            val keptRefs = filtered.map { it.runRef.value }.toHashSet()
+            // Issue #86: PTV now does the "drop already-departed" filter server-side via
+            // `date_utc` + `look_backwards=false`, so the previously-applied `isDeparted` filter
+            // here is redundant for fresh head polls. We still trim `pagedByRunRef` so accumulated
+            // page rows whose `estimated` slipped into the past between fetches don't linger — the
+            // `RelativeTimeFormatter` threshold is the source of truth for "no longer interesting".
+            val keptRefs = map { it.runRef.value }.toHashSet()
             pagedByRunRef.keys.retainAll(keptRefs)
-            return filtered
+            pagedByRunRef.entries.removeAll { (_, dep) ->
+                timeFormatter.isDeparted(dep.scheduledDepartureUtc, dep.estimatedDepartureUtc)
+            }
+            return this
                 .groupBy { GroupKey(it.routeId.value, it.direction.id.value) }
                 .map { (key, departures) ->
                     val route = servingRoutes[key.routeId]

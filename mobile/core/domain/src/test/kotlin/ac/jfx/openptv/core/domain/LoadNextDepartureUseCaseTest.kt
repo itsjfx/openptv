@@ -1,6 +1,5 @@
 package ac.jfx.openptv.core.domain
 
-import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.test.FakeDepartureRepository
 import ac.jfx.openptv.core.model.DirectionId
@@ -18,15 +17,14 @@ import kotlin.time.Duration.Companion.minutes
 /**
  * Tests for [LoadNextDepartureUseCase].
  *
- * The interesting case (issue #82): PTV's `/v3/departures` response is anchored at the start of
- * the current calendar day, not "now", so the response can include entries that have already
- * departed. Without an in-memory "is departed" filter the use case would return one of those
- * stale rows — which is exactly what the favourites screen used to show on the route subtext.
- * The fix mirrors stop-detail's `toGroupedList`: drop entries where
- * [RelativeTimeFormatter.isDeparted] is true before picking the earliest match.
+ * Since issue #86 the repository asks PTV for `date_utc=now` + `look_backwards=false`, so the
+ * response is already pre-filtered to upcoming-only. The use case's job collapses to:
+ *   1. Keep only entries matching the favourited `(routeId, directionId)`.
+ *   2. Return the earliest of those by `effectiveDepartureUtc` (`estimated` first, falling back
+ *      to `scheduled`).
  *
- * `Clock` is fixed to a stable instant. `RelativeTimeFormatter` is real (constructed against the
- * fake clock) — pure type, no need to mock per the testing priority order in `CLAUDE.md`.
+ * `Clock` is fixed to a stable instant for clarity — the use case itself no longer reads the
+ * clock, but a stable "now" keeps the test data legible.
  *
  * The repository is the hand-written [FakeDepartureRepository] — mocking a repo interface that
  * already has a fake is a code smell per `CLAUDE.md`. Each case enqueues a one-shot result;
@@ -35,7 +33,6 @@ import kotlin.time.Duration.Companion.minutes
  */
 class LoadNextDepartureUseCaseTest {
     private val clock = FixedClock(Instant.parse("2026-05-14T09:00:00Z"))
-    private val formatter = RelativeTimeFormatter(clock)
 
     private val stopId = StopId(STOP_ID)
     private val routeType = RouteType.Tram
@@ -43,51 +40,37 @@ class LoadNextDepartureUseCaseTest {
     private val directionId = DirectionId(DIRECTION_ID)
 
     @Test
-    fun `picks the first future departure on the favourited route, skipping departed entries`() =
+    fun `picks the earliest upcoming departure on the favourited route`() =
         runTest {
-            // PTV often returns the earlier-in-the-day departures because the request is anchored
-            // at start-of-day, not "now". The earliest two on the favourited route are already in
-            // the past; the use case must return the third.
-            val pastA =
+            // PTV (via the repository) only returns upcoming entries since issue #86. The use
+            // case picks the earliest by effective departure time — `estimated` wins over
+            // `scheduled` when present.
+            val sooner =
                 DepartureMother.aDeparture()
                     .withRouteId(ROUTE_ID).withDirectionId(DIRECTION_ID)
-                    .withRunRef("PAST-A")
-                    .withScheduledDepartureUtc(clock.now() - 30.minutes)
-                    .withEstimatedDepartureUtc(clock.now() - 28.minutes)
-                    .build()
-            val pastB =
-                DepartureMother.aDeparture()
-                    .withRouteId(ROUTE_ID).withDirectionId(DIRECTION_ID)
-                    .withRunRef("PAST-B")
-                    .withScheduledDepartureUtc(clock.now() - 10.minutes)
-                    .withEstimatedDepartureUtc(clock.now() - 9.minutes)
-                    .build()
-            val futureNext =
-                DepartureMother.aDeparture()
-                    .withRouteId(ROUTE_ID).withDirectionId(DIRECTION_ID)
-                    .withRunRef("FUTURE-NEXT")
+                    .withRunRef("SOONER")
                     .withScheduledDepartureUtc(clock.now() + 5.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 6.minutes)
                     .build()
-            val futureLater =
+            val later =
                 DepartureMother.aDeparture()
                     .withRouteId(ROUTE_ID).withDirectionId(DIRECTION_ID)
-                    .withRunRef("FUTURE-LATER")
+                    .withRunRef("LATER")
                     .withScheduledDepartureUtc(clock.now() + 25.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 25.minutes)
                     .build()
             val repo =
                 FakeDepartureRepository().apply {
-                    enqueueSuccess(listOf(pastA, pastB, futureNext, futureLater))
+                    enqueueSuccess(listOf(later, sooner))
                 }
-            val useCase = LoadNextDepartureUseCase(repo, formatter)
+            val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
 
             assertThat(result).isInstanceOf(Result.Success::class.java)
             val picked = (result as Result.Success).data
             assertThat(picked).isNotNull()
-            assertThat(picked!!.runRef.value).isEqualTo("FUTURE-NEXT")
+            assertThat(picked!!.runRef.value).isEqualTo("SOONER")
         }
 
     @Test
@@ -113,7 +96,7 @@ class LoadNextDepartureUseCaseTest {
                 FakeDepartureRepository().apply {
                     enqueueSuccess(listOf(otherRouteSooner, ourRouteNext))
                 }
-            val useCase = LoadNextDepartureUseCase(repo, formatter)
+            val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
 
@@ -142,7 +125,7 @@ class LoadNextDepartureUseCaseTest {
                 FakeDepartureRepository().apply {
                     enqueueSuccess(listOf(wrongDirection, rightDirection))
                 }
-            val useCase = LoadNextDepartureUseCase(repo, formatter)
+            val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
 
@@ -151,16 +134,31 @@ class LoadNextDepartureUseCaseTest {
         }
 
     @Test
-    fun `returns Success(null) when every match has departed`() =
+    fun `returns Success(null) when no entries match the favourited route or direction`() =
         runTest {
-            val onlyDeparted =
+            val differentRoute =
                 DepartureMother.aDeparture()
-                    .withRouteId(ROUTE_ID).withDirectionId(DIRECTION_ID)
-                    .withScheduledDepartureUtc(clock.now() - 20.minutes)
-                    .withEstimatedDepartureUtc(clock.now() - 19.minutes)
+                    .withRouteId(OTHER_ROUTE_ID).withDirectionId(DIRECTION_ID)
+                    .withScheduledDepartureUtc(clock.now() + 5.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 5.minutes)
                     .build()
-            val repo = FakeDepartureRepository().apply { enqueueSuccess(listOf(onlyDeparted)) }
-            val useCase = LoadNextDepartureUseCase(repo, formatter)
+            val repo = FakeDepartureRepository().apply { enqueueSuccess(listOf(differentRoute)) }
+            val useCase = LoadNextDepartureUseCase(repo)
+
+            val result = useCase(stopId, routeType, routeId, directionId)
+
+            assertThat(result).isInstanceOf(Result.Success::class.java)
+            assertThat((result as Result.Success).data).isNull()
+        }
+
+    @Test
+    fun `returns Success(null) when the repository returns an empty list`() =
+        runTest {
+            // Models the post-#86 contract: PTV/looker_backwards=false returned no upcoming rows
+            // for this stop. The use case yields null and the favourites row renders "No upcoming
+            // departures" rather than guessing from a stale entry.
+            val repo = FakeDepartureRepository().apply { enqueueSuccess(emptyList()) }
+            val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
 
@@ -173,7 +171,7 @@ class LoadNextDepartureUseCaseTest {
         runTest {
             val boom = java.io.IOException("boom")
             val repo = FakeDepartureRepository().apply { enqueueError(boom) }
-            val useCase = LoadNextDepartureUseCase(repo, formatter)
+            val useCase = LoadNextDepartureUseCase(repo)
 
             val result = useCase(stopId, routeType, routeId, directionId)
 

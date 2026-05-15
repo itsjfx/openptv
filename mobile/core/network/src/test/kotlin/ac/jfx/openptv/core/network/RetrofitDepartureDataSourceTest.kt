@@ -166,4 +166,56 @@ class RetrofitDepartureDataSourceTest {
             assertThat(recorded.path).contains("date_utc=2026-05-14T12:30:00Z")
             assertThat(recorded.path).contains("max_results=5")
         }
+
+    @Test
+    fun `request URL appends look_backwards when supplied`() =
+        runTest {
+            // Issue #86: `look_backwards=false` paired with `date_utc=<now>` is how the data layer
+            // tells PTV to omit already-departed entries server-side. The flag must round-trip
+            // through the URL verbatim.
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"departures":[],"directions":{}}"""),
+            )
+
+            dataSource.getDepartures(StopId(1071), RouteType.Train, lookBackwards = false)
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).contains("look_backwards=false")
+        }
+
+    @Test
+    fun `request URL omits look_backwards when not supplied`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"departures":[],"directions":{}}"""),
+            )
+
+            dataSource.getDepartures(StopId(1071), RouteType.Train)
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).doesNotContain("look_backwards")
+        }
+
+    @Test
+    fun `request URL composes date_utc max_results and look_backwards together`() =
+        runTest {
+            // The repository's head poll passes all three on every tick (issue #86). Pin the
+            // composition so a future refactor doesn't silently drop one of them.
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"departures":[],"directions":{}}"""),
+            )
+
+            dataSource.getDepartures(
+                StopId(1071),
+                RouteType.Train,
+                dateUtc = Instant.parse("2026-05-14T12:30:00Z"),
+                maxResults = 5,
+                lookBackwards = false,
+            )
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).contains("date_utc=2026-05-14T12:30:00Z")
+            assertThat(recorded.path).contains("max_results=5")
+            assertThat(recorded.path).contains("look_backwards=false")
+        }
 }

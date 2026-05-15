@@ -339,20 +339,15 @@ class StopDetailViewModelTest {
         }
 
     @Test
-    fun `already-departed entries are filtered out, upcoming ones remain`() =
+    fun `the head poll's upcoming entries are passed through verbatim`() =
         runTest(dispatcher) {
+            // Issue #86: PTV now does the "drop already-departed" filter server-side via
+            // `date_utc` + `look_backwards=false` (see `DepartureRepositoryImplTest`). The
+            // ViewModel's job is to project whatever the repository hands it; this test pins
+            // that contract by emitting a clean upcoming-only list and asserting the order is
+            // preserved with both rows visible.
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
 
-            // Three departures relative to the test clock (`2026-05-14T09:00:00Z`):
-            //  - five minutes ago — filtered.
-            //  - twenty seconds ago — kept (well inside the 2 min "now" grace window).
-            //  - five minutes out — kept.
-            val past =
-                DepartureMother.aDeparture()
-                    .withRunRef("OPS-PAST")
-                    .withScheduledDepartureUtc(clock.now() - 5.minutes)
-                    .withEstimatedDepartureUtc(clock.now() - 5.minutes)
-                    .build()
             val nowish =
                 DepartureMother.aDeparture()
                     .withRunRef("OPS-NOW")
@@ -371,7 +366,7 @@ class StopDetailViewModelTest {
             viewModel.startObserving()
             advanceUntilIdle()
 
-            departureRepository.emitSuccess(listOf(past, nowish, upcoming))
+            departureRepository.emitSuccess(listOf(nowish, upcoming))
             advanceUntilIdle()
 
             val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
@@ -380,68 +375,45 @@ class StopDetailViewModelTest {
         }
 
     @Test
-    fun `a delayed departure whose live estimate is still in the future is kept`() =
+    fun `an empty head poll resolves to DeparturesState Empty`() =
         runTest(dispatcher) {
-            // Scheduled time has passed, but the live estimate hasn't — i.e. the service
-            // is running late and hasn't actually departed yet. The filter must consult
-            // the live estimate (the only source of truth for "did it leave?"), not the
-            // stale schedule. Otherwise late-running services would vanish from the screen
-            // exactly when riders need them most.
+            // Issue #86 contract: when PTV's upcoming-only window is genuinely empty the
+            // repository hands the VM an empty list, which renders as the dedicated Empty state
+            // rather than a stale "still loading" row.
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
-            val delayed =
-                DepartureMother.aDeparture()
-                    .withRunRef("OPS-LATE")
-                    .withScheduledDepartureUtc(clock.now() - 5.minutes)
-                    .withEstimatedDepartureUtc(clock.now() + 2.minutes)
-                    .build()
 
             val viewModel = newViewModel()
             advanceUntilIdle()
             viewModel.startObserving()
             advanceUntilIdle()
 
-            departureRepository.emitSuccess(listOf(delayed))
+            departureRepository.emitSuccess(emptyList())
             advanceUntilIdle()
 
-            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
-            assertThat(loaded.groups.flatMap { it.departures }.map { it.runRef.value })
-                .containsExactly("OPS-LATE")
+            assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Empty)
         }
 
     @Test
-    fun `a delayed departure whose live estimate is within the grace window is kept`() =
+    fun `paged entries whose live estimate slips past the grace window are GC'd from the cache`() =
         runTest(dispatcher) {
-            // Live estimate is 90 s in the past — would render as "now" — so it stays.
+            // `pagedByRunRef` retains entries returned by `loadMore` so they survive across head
+            // polls. If an entry the user previously paged into view runs late and its live
+            // estimate slips into the past beyond the grace window, the head poll's next emission
+            // shouldn't keep showing it — the cache is GC'd alongside the visible list.
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
-            val barelyPast =
+
+            val initialHead =
                 DepartureMother.aDeparture()
-                    .withRunRef("OPS-NOWISH")
-                    .withScheduledDepartureUtc(clock.now() - 10.minutes)
-                    .withEstimatedDepartureUtc(clock.now() - 90.seconds)
+                    .withRunRef("OPS-HEAD")
+                    .withScheduledDepartureUtc(clock.now() + 5.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 5.minutes)
                     .build()
-
-            val viewModel = newViewModel()
-            advanceUntilIdle()
-            viewModel.startObserving()
-            advanceUntilIdle()
-
-            departureRepository.emitSuccess(listOf(barelyPast))
-            advanceUntilIdle()
-
-            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
-            assertThat(loaded.groups.flatMap { it.departures }.map { it.runRef.value })
-                .containsExactly("OPS-NOWISH")
-        }
-
-    @Test
-    fun `a delayed departure whose live estimate is past the grace window is filtered`() =
-        runTest(dispatcher) {
-            // Live estimate is 3 min in the past — beyond the 2 min grace — so the row
-            // would render as "departed". Filter it out.
-            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
-            val stale =
+            // A paged entry whose estimate has slipped 3 min into the past — past the 2 min
+            // grace window. After the next head poll, it should be evicted.
+            val stalePage =
                 DepartureMother.aDeparture()
-                    .withScheduledDepartureUtc(clock.now() - 10.minutes)
+                    .withRunRef("OPS-STALE-PAGE")
+                    .withScheduledDepartureUtc(clock.now() + 10.minutes)
                     .withEstimatedDepartureUtc(clock.now() - 3.minutes)
                     .build()
 
@@ -450,32 +422,22 @@ class StopDetailViewModelTest {
             viewModel.startObserving()
             advanceUntilIdle()
 
-            departureRepository.emitSuccess(listOf(stale))
+            departureRepository.emitSuccess(listOf(initialHead))
             advanceUntilIdle()
 
-            assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Empty)
-        }
-
-    @Test
-    fun `a list of only departed entries becomes DeparturesState Empty`() =
-        runTest(dispatcher) {
-            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
-
-            val past =
-                DepartureMother.aDeparture()
-                    .withScheduledDepartureUtc(clock.now() - 10.minutes)
-                    .withEstimatedDepartureUtc(clock.now() - 10.minutes)
-                    .build()
-
-            val viewModel = newViewModel()
-            advanceUntilIdle()
-            viewModel.startObserving()
+            // Page in the stale entry via loadMore.
+            departureRepository.enqueueLoadMoreSuccess(listOf(stalePage))
+            viewModel.loadMore()
             advanceUntilIdle()
 
-            departureRepository.emitSuccess(listOf(past))
+            // Next head poll lands; the paged entry's live estimate is past the grace window,
+            // so it disappears even though it isn't in the head response.
+            departureRepository.emitSuccess(listOf(initialHead))
             advanceUntilIdle()
 
-            assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Empty)
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.flatMap { it.departures }.map { it.runRef.value })
+                .containsExactly("OPS-HEAD")
         }
 
     // ---------- paging (issues #68 + #69) ----------
