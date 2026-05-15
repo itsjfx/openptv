@@ -897,8 +897,11 @@ class StopDetailViewModelTest {
         }
 
     @Test
-    fun `pinned group starts expanded`() =
+    fun `pinned group is not auto-expanded - issue #90`() =
         runTest(dispatcher) {
+            // Issue #90: tapping a favourite hoists the matching group to the top but does *not*
+            // automatically expand it. The user still has to tap the chevron to see the full
+            // timetable, same as any other group.
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel =
                 newViewModel(
@@ -909,19 +912,48 @@ class StopDetailViewModelTest {
             viewModel.startObserving()
             advanceUntilIdle()
 
-            val matching =
-                DepartureMother.aDeparture()
-                    .withRouteId(FAVE_ROUTE_ID)
-                    .withDirectionId(FAVE_DIRECTION_ID)
-                    .withRunRef("MATCH-1")
-                    .build()
-            departureRepository.emitSuccess(listOf(matching))
+            // Pinned group with more rows than the collapsed window would show, plus an unrelated
+            // group. The pinned group should sort to index 0 but should remain collapsed.
+            val pinned =
+                (1..6).map { i ->
+                    DepartureMother.aDeparture()
+                        .withRouteId(FAVE_ROUTE_ID)
+                        .withDirectionId(FAVE_DIRECTION_ID)
+                        .withDirectionName("North Coburg")
+                        .withRunRef("PIN-$i")
+                        .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:${10 + i}:00Z"))
+                        .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:${10 + i}:00Z"))
+                        .build()
+                }
+            val other =
+                (1..6).map { i ->
+                    DepartureMother.aDeparture()
+                        .withRouteId(OTHER_ROUTE_ID)
+                        .withDirectionId(OTHER_DIRECTION_ID)
+                        .withDirectionName("East Brunswick")
+                        .withRunRef("OTHER-$i")
+                        .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:0$i:00Z"))
+                        .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:0$i:00Z"))
+                        .build()
+                }
+            departureRepository.emitSuccess(pinned + other)
             advanceUntilIdle()
 
             val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
-            // The pinned group should be auto-expanded so the favourite-tap-through user lands
-            // straight on the route's expanded timetable.
-            assertThat(loaded.groups.single().expanded).isTrue()
+            assertThat(loaded.groups).hasSize(2)
+            val first = loaded.groups.first()
+            // Pinned and at the top.
+            assertThat(first.isPinned).isTrue()
+            assertThat(first.key.destination).isEqualTo("north coburg")
+            // But NOT auto-expanded — same affordance as any other group.
+            assertThat(first.expanded).isFalse()
+            // The non-pinned group also starts collapsed by default.
+            assertThat(loaded.groups[1].expanded).isFalse()
+            // And the toggle still works on the pinned group.
+            viewModel.toggleExpand(first.key)
+            advanceUntilIdle()
+            val afterToggle = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(afterToggle.groups.first().expanded).isTrue()
         }
 
     @Test
