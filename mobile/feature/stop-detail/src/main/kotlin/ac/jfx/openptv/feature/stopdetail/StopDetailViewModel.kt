@@ -84,9 +84,16 @@ class StopDetailViewModel
     ) : ViewModel() {
         private val stopId: StopId = StopId(stopIdValue)
         private val routeType: RouteType = RouteType.fromCode(routeTypeCode)
-        private val focusKey: GroupKey? =
+
+        /**
+         * The favourite-tap-through pin (issue #78) is still expressed as a specific
+         * (routeId, directionId) — favourites haven't changed shape. But groups are now keyed by
+         * destination (issue #87), so the pin is resolved at projection time by checking whether
+         * any of the group's departures match the focus tuple.
+         */
+        private val focusTuple: FocusTuple? =
             if (focusRouteIdValue >= 0 && focusDirectionIdValue >= 0) {
-                GroupKey(routeId = focusRouteIdValue, directionId = focusDirectionIdValue)
+                FocusTuple(routeId = focusRouteIdValue, directionId = focusDirectionIdValue)
             } else {
                 null
             }
@@ -101,7 +108,7 @@ class StopDetailViewModel
          * `focusRouteId` / `focusDirectionId` use `-1` as the sentinel for "no filter" because
          * the same nullable-primitive limitation applies — assisted-inject doesn't generate a
          * `Int?` parameter; the ViewModel converts the sentinel back into the real `null` (see
-         * `focusKey` above).
+         * `focusTuple` above).
          */
         @AssistedFactory
         interface Factory {
@@ -135,22 +142,35 @@ class StopDetailViewModel
          */
         private var lastHeadPoll: List<Departure> = emptyList()
 
-        /** Which group keys the user has expanded. Persists across head emissions. */
-        private val expandedGroups: MutableSet<GroupKey> =
-            mutableSetOf<GroupKey>().apply {
-                // Auto-expand the pinned group on first composition so the favourite-tap-through
-                // user sees their route's full timetable without an extra tap. The user can still
-                // collapse it via the chevron — we only seed the initial state once.
-                focusKey?.let { add(it) }
-            }
+        /**
+         * Which group keys the user has expanded. Persists across head emissions. Indexed by
+         * destination (issue #87) — the same key shape the visible [Group] uses.
+         *
+         * Auto-expansion of the pinned destination happens lazily inside [rebuildGroups]: we don't
+         * know the destination string for the focus `(routeId, directionId)` at construction time
+         * (we'd need a departure to read it off), so the first projection that has a matching row
+         * seeds the expanded entry.
+         */
+        private val expandedGroups: MutableSet<GroupKey> = mutableSetOf()
+
+        /**
+         * Tracks whether the pinned destination has already been seeded into [expandedGroups].
+         * Once the user toggles the chevron we don't want a later head poll to silently re-expand
+         * a group they collapsed — the seed runs once.
+         */
+        private var pinnedSeeded: Boolean = focusTuple == null
 
         /**
          * Snapshot of every `(routeId, directionId)` triple at the current stop the user has
          * favourited. Updated by the favourites flow; consumed when [rebuildGroups] projects each
          * `Group.isFavourite`. Kept as an in-memory `Set` so the per-group lookup is O(1) and the
          * cost of a favourites emission is one set rebuild rather than one DAO query per group.
+         *
+         * Stored as `(routeId, directionId)` tuples — not `GroupKey` — because favourites remain
+         * per-route even though [Group]s are now destination-keyed (issue #87). A single-route
+         * group whose only route is favourited shows the filled star; multi-route groups hide it.
          */
-        private var favouriteKeys: Set<GroupKey> = emptySet()
+        private var favouriteTuples: Set<FocusTuple> = emptySet()
 
         init {
             loadHeader()
@@ -252,11 +272,11 @@ class StopDetailViewModel
         private fun observeFavouritesAtThisStop() {
             viewModelScope.launch {
                 observeFavourites().collect { favourites ->
-                    favouriteKeys =
+                    favouriteTuples =
                         favourites
                             .asSequence()
                             .filter { it.stopId == stopId }
-                            .map { GroupKey(routeId = it.routeId.value, directionId = it.directionId.value) }
+                            .map { FocusTuple(routeId = it.routeId.value, directionId = it.directionId.value) }
                             .toSet()
                     _uiState.update { current -> current.rebuildGroups() }
                 }
@@ -405,11 +425,18 @@ class StopDetailViewModel
         }
 
         /**
-         * Group departures by (routeId, directionId), preserving insertion order within each
-         * group. The header label uses the [Route] from the header payload when available; that's
-         * what gives us "Route 19 · North Coburg" rather than "Route #19 · …". Groups are sorted
-         * by the earliest departure in each group so the closest service surfaces at the top —
-         * the exact "newer ones appear smoothly" criterion in the issue.
+         * Group departures by destination (issue #87). At busy interchanges (Richmond → City is
+         * the canonical case) several routes all run the same direction; rolling them into one
+         * block stops a single destination from dominating the screen and makes the "next
+         * service to {destination}" lookup obvious. Per-departure rows still render their own
+         * route badge so the user can tell a Lilydale-line train from a Belgrave one.
+         *
+         * Sort order:
+         *  - Within a group: by effective departure time. The head poll already returns rows in
+         *    departure order from the API (issue #86 server-side filter), but pagination merges
+         *    can produce out-of-order rows, so we re-sort here.
+         *  - Across groups: pinned destination first (issue #78), then earliest upcoming
+         *    departure in the group ascending — the "next service" surfaces at the top.
          */
         private fun List<Departure>.toGroupedList(currentHeader: HeaderState): List<Group> {
             val servingRoutes =
@@ -427,22 +454,59 @@ class StopDetailViewModel
             pagedByRunRef.entries.removeAll { (_, dep) ->
                 timeFormatter.isDeparted(dep.scheduledDepartureUtc, dep.estimatedDepartureUtc)
             }
-            return this
-                .groupBy { GroupKey(it.routeId.value, it.direction.id.value) }
-                .map { (key, departures) ->
-                    val route = servingRoutes[key.routeId]
-                    val routeNumber = route?.number?.ifBlank { route.name }.orEmpty().ifBlank { "#${key.routeId}" }
+            // Group by destination using a case-insensitive key so "City" and "city" collapse to
+            // one block even if PTV ever returns inconsistent casing across feeds. The display
+            // label uses the first row's original casing — PTV is consistent in practice, this
+            // is belt-and-braces.
+            val grouped = this.groupBy { GroupKey(destination = it.direction.name.lowercase()) }
+            val groups =
+                grouped.map { (key, departures) ->
+                    val sortedDepartures = departures.sortedBy { it.effectiveDepartureUtc() }
+                    val displayDestination = sortedDepartures.first().direction.name
+                    val containsFocus = focusTuple != null && departures.any { it.matches(focusTuple) }
+                    // Distinct routes in this destination block, ordered by their earliest
+                    // upcoming departure so the "next train to City" line is the first badge.
+                    val groupRoutes =
+                        sortedDepartures
+                            .map { it.routeId.value }
+                            .distinct()
+                            .mapNotNull { servingRoutes[it] }
+                    // Favourite affordance only applies when the block represents a single route
+                    // + single direction tuple. Multi-route blocks (Richmond "City") have no
+                    // single tuple to toggle and the star is suppressed in the UI.
+                    val singleRoute = sortedDepartures.distinctRouteAndDirection()
+                    val target = singleRoute?.let { FavouriteTarget(routeId = it.first, direction = it.second) }
+                    val isFavourite =
+                        singleRoute != null &&
+                            favouriteTuples.contains(
+                                FocusTuple(
+                                    routeId = singleRoute.first.value,
+                                    directionId = singleRoute.second.id.value,
+                                ),
+                            )
                     Group(
                         key = key,
-                        route = route,
-                        routeType = route?.routeType ?: routeType,
-                        headerLabel = "Route $routeNumber · ${departures.first().direction.name}",
-                        departures = departures.sortedBy { it.effectiveDepartureUtc() },
+                        routes = groupRoutes,
+                        routeType = groupRoutes.firstOrNull()?.routeType ?: routeType,
+                        headerLabel = displayDestination,
+                        departures = sortedDepartures,
                         expanded = expandedGroups.contains(key),
-                        isFavourite = favouriteKeys.contains(key),
-                        isPinned = focusKey == key,
+                        isFavourite = isFavourite,
+                        isPinned = containsFocus,
+                        favouriteTarget = target,
                     )
                 }
+            // Seed the pinned destination's auto-expand exactly once — we couldn't do it at init
+            // time because we didn't know the destination string for the focus tuple yet. After
+            // this runs the user is free to collapse the group and we won't re-seed.
+            if (!pinnedSeeded) {
+                groups.firstOrNull { it.isPinned }?.let { pinned ->
+                    expandedGroups += pinned.key
+                    pinnedSeeded = true
+                }
+            }
+            return groups
+                .map { if (expandedGroups.contains(it.key)) it.copy(expanded = true) else it }
                 // Pin the focus group at the top (issue #78). Default order is by earliest
                 // departure across the group; if a focus key matches, that group sorts to index 0
                 // and everything else keeps the earliest-departure ordering. compareBy
@@ -452,6 +516,21 @@ class StopDetailViewModel
                         .thenBy { it.departures.first().effectiveDepartureUtc() },
                 )
         }
+
+        /**
+         * If every departure in this list belongs to the same `(routeId, directionId)` tuple,
+         * return that tuple — the group represents a single route. Returns null when the list
+         * spans multiple routes (the Richmond → City case) so the caller can suppress the
+         * single-target favourite affordance.
+         */
+        private fun List<Departure>.distinctRouteAndDirection(): Pair<RouteId, Direction>? {
+            val first = firstOrNull() ?: return null
+            val sameRoute = all { it.routeId == first.routeId && it.direction.id == first.direction.id }
+            return if (sameRoute) first.routeId to first.direction else null
+        }
+
+        private fun Departure.matches(tuple: FocusTuple): Boolean =
+            routeId.value == tuple.routeId && direction.id.value == tuple.directionId
 
         private fun Throwable.toUserFacingReason(): String =
             when (this) {
@@ -475,3 +554,10 @@ class StopDetailViewModel
 
 /** Best-known departure instant — real-time prediction wins, falls back to the timetable. */
 internal fun Departure.effectiveDepartureUtc() = estimatedDepartureUtc ?: scheduledDepartureUtc
+
+/**
+ * A specific route+direction at this stop. Used internally to track the pinned focus tuple
+ * (issue #78) and favourited tuples (issue #34) without coupling either to the destination-keyed
+ * [GroupKey] used for display (issue #87).
+ */
+internal data class FocusTuple(val routeId: Int, val directionId: Int)

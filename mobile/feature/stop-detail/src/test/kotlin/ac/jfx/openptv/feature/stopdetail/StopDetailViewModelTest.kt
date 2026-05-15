@@ -291,7 +291,9 @@ class StopDetailViewModelTest {
     @Test
     fun `groups sort by earliest departure, departures within group sort by effective time`() =
         runTest(dispatcher) {
-            // Detail with two routes serving the stop.
+            // Two routes with distinct destinations so they don't fold into one block under the
+            // issue #87 destination grouping. We assert the earliest-destination-departure
+            // surfaces first.
             val detail =
                 StopDetailMother.aStopDetail()
                     .withServingRoutes(
@@ -312,6 +314,8 @@ class StopDetailViewModelTest {
             val later =
                 DepartureMother.aDeparture()
                     .withRouteId(LATE_ROUTE_ID)
+                    .withDirectionId(LATE_DIRECTION_ID)
+                    .withDirectionName("Hurstbridge")
                     .withRunRef("RUN-LATE")
                     .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
                     .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
@@ -319,6 +323,8 @@ class StopDetailViewModelTest {
             val earliest =
                 DepartureMother.aDeparture()
                     .withRouteId(EARLY_ROUTE_ID)
+                    .withDirectionId(EARLY_DIRECTION_ID)
+                    .withDirectionName("Mernda")
                     .withRunRef("RUN-EARLY")
                     .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
                     .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
@@ -334,8 +340,120 @@ class StopDetailViewModelTest {
             advanceUntilIdle()
 
             val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
-            assertThat(loaded.groups.first().key.routeId).isEqualTo(EARLY_ROUTE_ID)
-            assertThat(loaded.groups.last().key.routeId).isEqualTo(LATE_ROUTE_ID)
+            assertThat(loaded.groups.first().key.destination).isEqualTo("mernda")
+            assertThat(loaded.groups.last().key.destination).isEqualTo("hurstbridge")
+        }
+
+    @Test
+    fun `departures with the same destination but different routes collapse to one block`() =
+        runTest(dispatcher) {
+            // Issue #87: at Richmond, both the Belgrave and Lilydale lines run to "City". They
+            // should share a single block rather than show as two separate route headers eating
+            // half the screen each.
+            val belgrave =
+                ac.jfx.openptv.core.testing.RouteMother.aRoute()
+                    .withId(BELGRAVE_ROUTE_ID)
+                    .withNumber("BEL")
+                    .withName("Belgrave")
+                    .build()
+            val lilydale =
+                ac.jfx.openptv.core.testing.RouteMother.aRoute()
+                    .withId(LILYDALE_ROUTE_ID)
+                    .withNumber("LIL")
+                    .withName("Lilydale")
+                    .build()
+            val detail =
+                StopDetailMother.aStopDetail()
+                    .withServingRoutes(listOf(belgrave, lilydale))
+                    .build()
+            stopDetailRepository.enqueueSuccess(detail)
+
+            val belgraveCity =
+                DepartureMother.aDeparture()
+                    .withRouteId(BELGRAVE_ROUTE_ID)
+                    .withDirectionId(BELGRAVE_CITY_DIRECTION_ID)
+                    .withDirectionName("City")
+                    .withRunRef("BEL-1")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
+                    .build()
+            val lilydaleCity =
+                DepartureMother.aDeparture()
+                    .withRouteId(LILYDALE_ROUTE_ID)
+                    .withDirectionId(LILYDALE_CITY_DIRECTION_ID)
+                    .withDirectionName("City")
+                    .withRunRef("LIL-1")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:08:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:08:00Z"))
+                    .build()
+            val belgraveCityLater =
+                DepartureMother.aDeparture()
+                    .withRouteId(BELGRAVE_ROUTE_ID)
+                    .withDirectionId(BELGRAVE_CITY_DIRECTION_ID)
+                    .withDirectionName("City")
+                    .withRunRef("BEL-2")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:15:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:15:00Z"))
+                    .build()
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            // Emit out of order so both the grouping and the time sort prove themselves.
+            departureRepository.emitSuccess(listOf(belgraveCityLater, lilydaleCity, belgraveCity))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            // One block: every City departure folds in regardless of route id.
+            assertThat(loaded.groups).hasSize(1)
+            val cityBlock = loaded.groups.single()
+            assertThat(cityBlock.headerLabel).isEqualTo("City")
+            assertThat(cityBlock.key.destination).isEqualTo("city")
+            // Within the block, departures stay sorted by effective departure time.
+            assertThat(cityBlock.departures.map { it.runRef.value })
+                .containsExactly("BEL-1", "LIL-1", "BEL-2").inOrder()
+            // Both routes are listed under the block header.
+            assertThat(cityBlock.routes.map { it.id.value })
+                .containsExactly(BELGRAVE_ROUTE_ID, LILYDALE_ROUTE_ID)
+            // Multi-route blocks have no single favourite target — the star is suppressed.
+            assertThat(cityBlock.favouriteTarget).isNull()
+        }
+
+    @Test
+    fun `single-route group exposes a favouriteTarget so the star renders`() =
+        runTest(dispatcher) {
+            val mernda =
+                ac.jfx.openptv.core.testing.RouteMother.aRoute()
+                    .withId(EARLY_ROUTE_ID)
+                    .withNumber("MER")
+                    .withName("Mernda")
+                    .build()
+            stopDetailRepository.enqueueSuccess(
+                StopDetailMother.aStopDetail().withServingRoutes(listOf(mernda)).build(),
+            )
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val departure =
+                DepartureMother.aDeparture()
+                    .withRouteId(EARLY_ROUTE_ID)
+                    .withDirectionId(EARLY_DIRECTION_ID)
+                    .withDirectionName("Mernda")
+                    .withRunRef("ONLY-1")
+                    .build()
+            departureRepository.emitSuccess(listOf(departure))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            val target = loaded.groups.single().favouriteTarget
+            assertThat(target).isNotNull()
+            assertThat(target!!.routeId.value).isEqualTo(EARLY_ROUTE_ID)
+            assertThat(target.direction.id.value).isEqualTo(EARLY_DIRECTION_ID)
         }
 
     @Test
@@ -722,8 +840,8 @@ class StopDetailViewModelTest {
             advanceUntilIdle()
 
             val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
-            val faveGroup = loaded.groups.first { it.key.routeId == FAVE_ROUTE_ID }
-            val otherGroup = loaded.groups.first { it.key.routeId == OTHER_ROUTE_ID }
+            val faveGroup = loaded.groups.first { it.key.destination == "north coburg" }
+            val otherGroup = loaded.groups.first { it.key.destination == "east brunswick" }
             assertThat(faveGroup.isFavourite).isTrue()
             assertThat(otherGroup.isFavourite).isFalse()
         }
@@ -743,12 +861,13 @@ class StopDetailViewModelTest {
             viewModel.startObserving()
             advanceUntilIdle()
 
-            // Other group has the *earliest* departure time, so under the default
+            // Other destination group has the *earliest* departure time, so under the default
             // earliest-first sort it'd come first. The pin must hoist the favourite anyway.
             val other =
                 DepartureMother.aDeparture()
                     .withRouteId(OTHER_ROUTE_ID)
                     .withDirectionId(OTHER_DIRECTION_ID)
+                    .withDirectionName("East Brunswick")
                     .withRunRef("OTHER-1")
                     .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:01:00Z"))
                     .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:01:00Z"))
@@ -757,6 +876,7 @@ class StopDetailViewModelTest {
                 DepartureMother.aDeparture()
                     .withRouteId(FAVE_ROUTE_ID)
                     .withDirectionId(FAVE_DIRECTION_ID)
+                    .withDirectionName("North Coburg")
                     .withRunRef("MATCH-1")
                     .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
                     .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
@@ -765,15 +885,14 @@ class StopDetailViewModelTest {
             advanceUntilIdle()
 
             val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
-            // Both groups still render — full stop info is preserved per #78.
+            // Both destination groups still render — full stop info is preserved per #78.
             assertThat(loaded.groups).hasSize(2)
             // Pinned group is at the top despite the later departure time.
             val first = loaded.groups.first()
-            assertThat(first.key.routeId).isEqualTo(FAVE_ROUTE_ID)
-            assertThat(first.key.directionId).isEqualTo(FAVE_DIRECTION_ID)
+            assertThat(first.key.destination).isEqualTo("north coburg")
             assertThat(first.isPinned).isTrue()
             // Non-pinned group is unmarked and visible underneath.
-            assertThat(loaded.groups[1].key.routeId).isEqualTo(OTHER_ROUTE_ID)
+            assertThat(loaded.groups[1].key.destination).isEqualTo("east brunswick")
             assertThat(loaded.groups[1].isPinned).isFalse()
         }
 
@@ -848,12 +967,14 @@ class StopDetailViewModelTest {
                 DepartureMother.aDeparture()
                     .withRouteId(FAVE_ROUTE_ID)
                     .withDirectionId(FAVE_DIRECTION_ID)
+                    .withDirectionName("North Coburg")
                     .withRunRef("A-1")
                     .build()
             val b =
                 DepartureMother.aDeparture()
                     .withRouteId(OTHER_ROUTE_ID)
                     .withDirectionId(OTHER_DIRECTION_ID)
+                    .withDirectionName("East Brunswick")
                     .withRunRef("B-1")
                     .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
                     .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
@@ -894,10 +1015,18 @@ class StopDetailViewModelTest {
     private companion object {
         const val DEFAULT_STOP_ID = 1071
         const val EARLY_ROUTE_ID = 1
+        const val EARLY_DIRECTION_ID = 100
         const val LATE_ROUTE_ID = 2
+        const val LATE_DIRECTION_ID = 200
         const val FAVE_ROUTE_ID = 1881
         const val FAVE_DIRECTION_ID = 9
         const val OTHER_ROUTE_ID = 1882
         const val OTHER_DIRECTION_ID = 10
+
+        // Issue #87 — two routes that share a destination at the same stop.
+        const val BELGRAVE_ROUTE_ID = 7001
+        const val BELGRAVE_CITY_DIRECTION_ID = 8001
+        const val LILYDALE_ROUTE_ID = 7002
+        const val LILYDALE_CITY_DIRECTION_ID = 8002
     }
 }

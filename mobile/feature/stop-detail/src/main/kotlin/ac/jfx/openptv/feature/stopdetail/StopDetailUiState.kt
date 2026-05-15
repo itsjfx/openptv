@@ -1,7 +1,9 @@
 package ac.jfx.openptv.feature.stopdetail
 
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.Direction
 import ac.jfx.openptv.core.model.Route
+import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopDetail
 import kotlinx.datetime.Instant
@@ -46,8 +48,9 @@ sealed interface DeparturesState {
     data object Loading : DeparturesState
 
     /**
-     * Departures grouped by `(routeId, directionId)` for the section list. Each [Group] carries
-     * the route projection (for the badge / mode icon) so the UI doesn't have to cross-look-up.
+     * Departures grouped by destination (issue #87) for the section list. Each [Group] carries
+     * the routes that contribute to it (multiple at busy interchanges like Richmond where five
+     * lines all run to "City") so the UI can render per-row badges without a cross-lookup.
      *
      * `isLoadingMore` flips true while a paginated fetch (either "show more" or
      * "scrolled past the bottom") is in flight; the UI uses it to render the tail spinner.
@@ -67,11 +70,18 @@ sealed interface DeparturesState {
  * Pre-grouped section for the section list. Keeping the grouping in `UiState` (not Compose)
  * means the unit test asserts a stable order without reaching into the UI tree.
  *
- * `headerLabel` is "Route {number} · {direction}" — built at mapping time so the row composable
- * stays free of string concatenation. `route` is nullable because PTV occasionally references a
- * routeId in a departure that isn't in the `StopDetail.servingRoutes` payload (route filtering
- * disagreement between endpoints); rather than drop the row, we render it with a placeholder
- * badge and log the discrepancy later.
+ * Groups are keyed by destination (direction name) so multiple routes that all run to the same
+ * destination — e.g. every Burnley-group train at Richmond heading to "City" — appear in one
+ * block (issue #87). Per-departure rows still show their own route badge, so the user can tell
+ * which line a given service is.
+ *
+ * `headerLabel` is the destination ("City", "Mernda") — built at mapping time so the row
+ * composable stays free of string concatenation. `routes` is the de-duplicated list of routes
+ * inside the group, ordered by earliest departure. `routeType` is the screen's mode — every
+ * row at a stop shares it. The list is nullable / possibly empty because PTV occasionally
+ * references a routeId in a departure that isn't in the `StopDetail.servingRoutes` payload
+ * (route filtering disagreement between endpoints); rather than drop the row, we render it with
+ * a placeholder badge and log the discrepancy later.
  *
  * `expanded` tracks the per-group disclosure state (issue #68). Collapsed groups render the
  * first [COLLAPSED_VISIBLE] entries plus a "show N more" affordance; expanded groups render
@@ -80,29 +90,48 @@ sealed interface DeparturesState {
  */
 data class Group(
     val key: GroupKey,
-    val route: Route?,
+    val routes: List<Route>,
     val routeType: RouteType,
     val headerLabel: String,
     val departures: List<Departure>,
     val expanded: Boolean = false,
     /**
-     * Whether the user has favourited this `(stopId, routeId, directionId)` triple. Populated by
-     * the ViewModel from `ObserveFavouritesUseCase`. Defaults to `false` so a freshly-loaded
-     * group renders the hollow glyph until the first favourites emission lands (which is
-     * immediate — `StateFlow` is hot — so the user never sees a "wrong" state for more than a
-     * frame).
+     * Whether the user has favourited the (stopId, routeId, directionId) triple represented by
+     * this group. Only meaningful when the group contains a single route — see [favouriteTarget].
+     * Populated by the ViewModel from `ObserveFavouritesUseCase`. Defaults to `false`.
      */
     val isFavourite: Boolean = false,
     /**
-     * True when this group is the favourite-tap-through pinned route (issue #78). Pinned groups
-     * sort to the top of the list and start expanded, so the user lands on the route they
+     * True when this group is the favourite-tap-through pinned destination (issue #78). Pinned
+     * groups sort to the top of the list and start expanded, so the user lands on the route they
      * actually came in for, with the rest of the stop's services still visible underneath.
      */
     val isPinned: Boolean = false,
+    /**
+     * When the group contains exactly one route, this is the (routeId, direction) tuple the
+     * favourite star toggles. Null when the group bundles multiple routes — the favourite model
+     * is per-(routeId, directionId), so a "City" block at Richmond with five lines feeding into
+     * it has no single favourite target and the star is hidden.
+     */
+    val favouriteTarget: FavouriteTarget? = null,
 )
 
-/** Section key — pair of (routeId, directionId). Stable for `key=` slots in `LazyColumn`. */
-data class GroupKey(val routeId: Int, val directionId: Int)
+/**
+ * Pair the favourite star needs to toggle: the specific route and direction this group's single
+ * route serves. Only populated for single-route groups; multi-route groups (issue #87) set this
+ * to null and hide the star.
+ */
+data class FavouriteTarget(
+    val routeId: RouteId,
+    val direction: Direction,
+)
+
+/**
+ * Section key — the destination/direction name normalised to lowercase. Stable for `key=` slots
+ * in `LazyColumn` and stable across head polls / page fetches as long as PTV reports the same
+ * destination string.
+ */
+data class GroupKey(val destination: String)
 
 /**
  * How many entries a collapsed [Group] shows by default (issue #68). The PTV app uses 3; we
