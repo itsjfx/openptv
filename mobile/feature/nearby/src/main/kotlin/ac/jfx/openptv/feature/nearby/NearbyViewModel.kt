@@ -156,21 +156,40 @@ class NearbyViewModel
         }
 
         /**
-         * Toggle a [RouteType] chip on/off. An empty filter set means "show all" (mirrors the
-         * `route_types` query parameter contract). The active filter is kept on `_uiState` and
-         * exposed to issue #80's bottom-sheet list via the same `StateFlow` — adding a second
-         * source-of-truth would just create drift between the map and the list.
+         * Toggle a [RouteType] chip on/off. The filter is the single source of truth for both
+         * the map pins and the bottom-sheet list (issue #80) — adding a second knob would just
+         * create drift between the two surfaces.
+         *
+         * **Invariant: the filter is never empty.** A tap that would deselect the only selected
+         * chip is a no-op (returns early without re-firing the fetch). An empty filter would
+         * render zero stops everywhere — a dead-end UX — so the chip strip can always offer the
+         * user at least one mode worth of pins.
          *
          * Filter changes immediately re-fire the pin fetch with the new filter set. A debounce
          * still applies, so a user who taps three chips in rapid succession only fires one
          * request. The previous in-flight fetch (under `collectLatest`) is cancelled.
+         *
+         * Reads the filter directly from `_uiState.value` (rather than a captured local) so the
+         * "no-op when only one selected" check is consistent with the latest state — protects
+         * against a stale-snapshot race if two toggles fire on the same dispatcher tick.
          */
         fun onRouteTypeFilterToggled(routeType: RouteType) {
             // Unknown isn't a chip — guarding here keeps the UI from accidentally producing a
             // filter set that the repository would have to drop anyway.
             if (routeType == RouteType.Unknown) return
+            val current = currentFilter()
             val nextFilter =
-                if (currentFilter().contains(routeType)) currentFilter() - routeType else currentFilter() + routeType
+                if (current.contains(routeType)) {
+                    // Trying to deselect the only selected chip — no-op (invariant: never empty).
+                    if (current.size <= 1) return
+                    current - routeType
+                } else {
+                    current + routeType
+                }
+            // Already at the desired state (e.g. defensive: the toggle produced the same set
+            // because the routeType wasn't really in/out). Skip the re-emit so the debounce
+            // pipeline doesn't fire a redundant fetch.
+            if (nextFilter == current) return
             updateFilter(nextFilter)
             currentCamera()?.let { camera ->
                 pinFetchTriggers.tryEmit(PinFetchTrigger(camera, nextFilter))

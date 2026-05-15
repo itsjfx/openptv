@@ -279,9 +279,14 @@ class NearbyViewModelTest {
         }
 
     // -------------------- route-type filter --------------------
+    //
+    // Invariant: `routeTypeFilter` is **never empty**. Defaulting to every visible mode (the
+    // five chips: Train / Tram / Bus / V/Line / Night Bus) and disallowing the deselect-all
+    // tap means the user can never end up with zero pins anywhere — see issue comments on PR
+    // #84 ("filters not applying" / "must be on (≥1 selected)").
 
     @Test
-    fun `default filter is empty meaning show all types`() =
+    fun `default filter is the five visible modes`() =
         runTest(dispatcher) {
             locationProvider.seed(CoordinatesMother.flindersStreet().build())
             val viewModel = newViewModel()
@@ -289,12 +294,14 @@ class NearbyViewModelTest {
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
 
-            assertThat(viewModel.uiState.value.routeTypeFilter).isEmpty()
-            assertThat(nearbyRepo.requestedCalls.last().routeTypes).isEmpty()
+            assertThat(viewModel.uiState.value.routeTypeFilter).isEqualTo(DEFAULT_FILTER)
+            // The initial fetch is fired with the default filter so the server responds with
+            // exactly the modes the chip strip says are on.
+            assertThat(nearbyRepo.requestedCalls.last().routeTypes).isEqualTo(DEFAULT_FILTER)
         }
 
     @Test
-    fun `toggling a route type adds it to the filter and refires the fetch`() =
+    fun `toggling an already-selected chip removes it and refires the fetch`() =
         runTest(dispatcher) {
             locationProvider.seed(CoordinatesMother.flindersStreet().build())
             val viewModel = newViewModel()
@@ -307,13 +314,14 @@ class NearbyViewModelTest {
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
 
-            assertThat(viewModel.uiState.value.routeTypeFilter).containsExactly(RouteType.Tram)
+            assertThat(viewModel.uiState.value.routeTypeFilter).isEqualTo(DEFAULT_FILTER - RouteType.Tram)
             assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
-            assertThat(nearbyRepo.requestedCalls.last().routeTypes).containsExactly(RouteType.Tram)
+            assertThat(nearbyRepo.requestedCalls.last().routeTypes)
+                .isEqualTo(DEFAULT_FILTER - RouteType.Tram)
         }
 
     @Test
-    fun `toggling the same route type twice removes it from the filter`() =
+    fun `toggling a chip that's off adds it back and refires the fetch`() =
         runTest(dispatcher) {
             locationProvider.seed(CoordinatesMother.flindersStreet().build())
             val viewModel = newViewModel()
@@ -321,34 +329,213 @@ class NearbyViewModelTest {
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
 
-            viewModel.onRouteTypeFilterToggled(RouteType.Tram)
+            // First toggle: off
+            viewModel.onRouteTypeFilterToggled(RouteType.Bus)
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
-            viewModel.onRouteTypeFilterToggled(RouteType.Tram)
+            assertThat(viewModel.uiState.value.routeTypeFilter).doesNotContain(RouteType.Bus)
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Second toggle: on
+            viewModel.onRouteTypeFilterToggled(RouteType.Bus)
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
 
-            assertThat(viewModel.uiState.value.routeTypeFilter).isEmpty()
-            assertThat(nearbyRepo.requestedCalls.last().routeTypes).isEmpty()
+            assertThat(viewModel.uiState.value.routeTypeFilter).contains(RouteType.Bus)
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
         }
 
     @Test
-    fun `Unknown route type is ignored as a filter toggle`() =
+    fun `toggling Unknown is a no-op — Unknown is not a user-facing chip`() =
         runTest(dispatcher) {
             locationProvider.seed(CoordinatesMother.flindersStreet().build())
             val viewModel = newViewModel()
             viewModel.onPermissionResult(granted = true)
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
+            val baselineFilter = viewModel.uiState.value.routeTypeFilter
             val baselineCalls = nearbyRepo.requestedCalls.size
 
             viewModel.onRouteTypeFilterToggled(RouteType.Unknown)
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
 
-            assertThat(viewModel.uiState.value.routeTypeFilter).isEmpty()
-            // Ignoring Unknown means no extra fetch — the filter didn't change.
+            assertThat(viewModel.uiState.value.routeTypeFilter).isEqualTo(baselineFilter)
             assertThat(nearbyRepo.requestedCalls.size).isEqualTo(baselineCalls)
+        }
+
+    // -------------------- filter invariant: never empty --------------------
+    //
+    // Bug #2 on PR #84: "user can deselect every chip and end up with zero stops anywhere".
+    // The toggle MUST refuse to deselect the only selected chip (instead of letting the user
+    // walk into a dead-end state). Invariant: `routeTypeFilter.isNotEmpty()` after every
+    // toggle, regardless of what sequence of taps got the user here.
+
+    @Test
+    fun `tapping the only selected chip is a no-op — invariant filter is never empty`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Whittle down to exactly one chip (Tram).
+            (DEFAULT_FILTER - RouteType.Tram).forEach { mode ->
+                viewModel.onRouteTypeFilterToggled(mode)
+                advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+                advanceUntilIdle()
+            }
+            assertThat(viewModel.uiState.value.routeTypeFilter).containsExactly(RouteType.Tram)
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Try to deselect the last chip — should be ignored.
+            viewModel.onRouteTypeFilterToggled(RouteType.Tram)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.routeTypeFilter).containsExactly(RouteType.Tram)
+            assertThat(viewModel.uiState.value.routeTypeFilter).isNotEmpty()
+            // No fetch fires either — the no-op short-circuits before re-emitting.
+            assertThat(nearbyRepo.requestedCalls.size).isEqualTo(baselineCalls)
+        }
+
+    @Test
+    fun `every toggle leaves the filter non-empty across a long sequence`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Tap every chip three times each — even after every-on → every-off attempts the
+            // filter should never go to empty.
+            val sequence =
+                listOf(
+                    RouteType.Train,
+                    RouteType.Tram,
+                    RouteType.Bus,
+                    RouteType.VLine,
+                    RouteType.NightBus,
+                    RouteType.Train,
+                    RouteType.Tram,
+                    RouteType.Bus,
+                    RouteType.VLine,
+                    RouteType.NightBus,
+                    RouteType.Train,
+                    RouteType.Tram,
+                    RouteType.Bus,
+                    RouteType.VLine,
+                    RouteType.NightBus,
+                )
+            sequence.forEach { mode ->
+                viewModel.onRouteTypeFilterToggled(mode)
+                advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+                advanceUntilIdle()
+                assertThat(viewModel.uiState.value.routeTypeFilter).isNotEmpty()
+            }
+        }
+
+    // -------------------- filter race conditions --------------------
+    //
+    // Bug #1 on PR #84: "map filters apply inconsistently". The most plausible race: the user
+    // toggles a chip while a debounced camera-idle fetch is mid-flight, or pans the map
+    // immediately after toggling. The pipeline should always settle on the latest (camera,
+    // filter) pair — `collectLatest` cancels stale fetches and the filter set queried on PTV
+    // matches the last toggle.
+
+    @Test
+    fun `toggle mid-fetch — pending fetch is cancelled and the new filter wins`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Pan the camera, but only let half the debounce elapse.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 2)
+            // While the debounce is still pending, toggle a chip off.
+            viewModel.onRouteTypeFilterToggled(RouteType.Bus)
+            // Now drain the debounce.
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Exactly one fetch should have fired (the debounce coalesced the camera idle and
+            // the filter toggle), and it MUST carry the post-toggle filter.
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
+            assertThat(nearbyRepo.requestedCalls.last().routeTypes).doesNotContain(RouteType.Bus)
+            assertThat(viewModel.uiState.value.routeTypeFilter).doesNotContain(RouteType.Bus)
+        }
+
+    @Test
+    fun `toggle then pan — last camera + last filter both win`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Toggle, then immediately pan. Both events sit in the debounce window.
+            viewModel.onRouteTypeFilterToggled(RouteType.NightBus)
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.85, 144.99), 13.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // One fetch, with the latest camera centre and the post-toggle filter.
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
+            val lastCall = nearbyRepo.requestedCalls.last()
+            assertThat(lastCall.coordinates).isEqualTo(Coordinates(-37.85, 144.99))
+            assertThat(lastCall.routeTypes).doesNotContain(RouteType.NightBus)
+        }
+
+    @Test
+    fun `subset selected — fetch carries only that subset to PTV`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Whittle down to Train + Tram only.
+            (DEFAULT_FILTER - RouteType.Train - RouteType.Tram).forEach { mode ->
+                viewModel.onRouteTypeFilterToggled(mode)
+                advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+                advanceUntilIdle()
+            }
+
+            assertThat(viewModel.uiState.value.routeTypeFilter)
+                .containsExactly(RouteType.Train, RouteType.Tram)
+            assertThat(nearbyRepo.requestedCalls.last().routeTypes)
+                .containsExactly(RouteType.Train, RouteType.Tram)
+        }
+
+    @Test
+    fun `rapid same-chip taps coalesce — only one net change reaches the server`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Two quick taps on the same chip = net no-change, but each toggle re-emits.
+            // The debounce should still coalesce them into ONE fetch.
+            viewModel.onRouteTypeFilterToggled(RouteType.Bus)
+            viewModel.onRouteTypeFilterToggled(RouteType.Bus)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Net effect: filter ends up where it started; exactly one fetch fired.
+            assertThat(viewModel.uiState.value.routeTypeFilter).isEqualTo(DEFAULT_FILTER)
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
         }
 
     // -------------------- bottom-sheet routes + departures --------------------
@@ -459,13 +646,15 @@ class NearbyViewModelTest {
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
 
-            // Toggle "Tram only" — both surfaces (map pins + list rows) read this same filter.
-            viewModel.onRouteTypeFilterToggled(RouteType.Tram)
+            // Toggle Bus off — leaves Train + Tram + V/Line + NightBus selected. Both surfaces
+            // (map pins + list rows) read this same filter.
+            viewModel.onRouteTypeFilterToggled(RouteType.Bus)
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
 
             val state = viewModel.uiState.value as NearbyUiState.Loaded
-            assertThat(state.routeTypeFilter).containsExactly(RouteType.Tram)
+            assertThat(state.routeTypeFilter).doesNotContain(RouteType.Bus)
+            assertThat(state.routeTypeFilter).contains(RouteType.Tram)
             // The list's projection and the map's projection are the SAME field on uiState,
             // filtered by the SAME helper. So the filter set is the proof.
             assertThat(state.pins).contains(tramStop)

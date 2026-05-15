@@ -3,6 +3,7 @@ package ac.jfx.openptv.feature.nearby
 import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
+import android.view.MotionEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -67,7 +68,7 @@ internal class MapLibreOpenPtvMap
     @Inject
     constructor() : OpenPtvMap {
         @Composable
-        @Suppress("LongMethod", "LongParameterList")
+        @Suppress("LongMethod", "LongParameterList", "CyclomaticComplexMethod")
         override fun Render(
             camera: OpenPtvCameraState,
             userLocation: Coordinates?,
@@ -122,48 +123,93 @@ internal class MapLibreOpenPtvMap
                                     ),
                                 )
                             }
-                            map.addOnMapClickListener { latLng ->
-                                // Convert the click to a screen-space hit-test over the pins.
-                                // Phase 05 keeps this naive — proper SymbolLayer feature querying
-                                // is a follow-up. The naive impl: find the closest pin within
-                                // PIN_HIT_RADIUS_METERS of the tap.
-                                val tap = Coordinates(lat = latLng.latitude, lng = latLng.longitude)
-                                val hit =
-                                    pinsLatest.minByOrNull { stop ->
-                                        tap.distanceTo(Coordinates(stop.latitude, stop.longitude))
+                            // Tap detection runs through a custom touch listener instead of
+                            // MapLibre's built-in `addOnMapClickListener`. The View-side click
+                            // listener reliably fails to fire when MapView lives inside a
+                            // `BottomSheetScaffold.content` slot (PR #84 bug #4) — Compose's
+                            // pointer pipeline appears to swallow the synthesised
+                            // single-tap-confirmed event even though raw drag events still reach
+                            // the MapView. Watching the raw MotionEvents ourselves and treating a
+                            // small DOWN→UP delta as a tap sidesteps the problem entirely. We
+                            // return false from the listener so MapView's own gesture detector
+                            // still receives every event (pan + pinch zoom keep working); the tap
+                            // detection is purely additive.
+                            val touchSlop = mapView.context.resources.displayMetrics.density * TAP_SLOP_DP
+                            var downX = 0f
+                            var downY = 0f
+                            var downTime = 0L
+                            mapView.setOnTouchListener { _, ev ->
+                                when (ev.actionMasked) {
+                                    MotionEvent.ACTION_DOWN -> {
+                                        downX = ev.x
+                                        downY = ev.y
+                                        downTime = ev.eventTime
                                     }
-                                val dist =
-                                    hit?.let {
-                                        tap.distanceTo(Coordinates(it.latitude, it.longitude))
+                                    MotionEvent.ACTION_UP -> {
+                                        val dx = ev.x - downX
+                                        val dy = ev.y - downY
+                                        val moved = kotlin.math.hypot(dx.toDouble(), dy.toDouble())
+                                        val held = ev.eventTime - downTime
+                                        if (moved <= touchSlop && held <= TAP_MAX_DURATION_MS) {
+                                            val latLng =
+                                                map.projection.fromScreenLocation(
+                                                    android.graphics.PointF(ev.x, ev.y),
+                                                )
+                                            val tap =
+                                                Coordinates(lat = latLng.latitude, lng = latLng.longitude)
+                                            val hit =
+                                                pinsLatest.minByOrNull { stop ->
+                                                    tap.distanceTo(Coordinates(stop.latitude, stop.longitude))
+                                                }
+                                            val dist =
+                                                hit?.let {
+                                                    tap.distanceTo(Coordinates(it.latitude, it.longitude))
+                                                }
+                                            if (hit != null && dist != null && dist <= PIN_HIT_RADIUS_METERS) {
+                                                onPinClickedLatest(hit)
+                                            }
+                                        }
                                     }
-                                if (hit != null && dist != null && dist <= PIN_HIT_RADIUS_METERS) {
-                                    onPinClickedLatest(hit)
-                                    true
-                                } else {
-                                    false
                                 }
+                                // Return false so MapView's internal gesture detector still gets
+                                // every MotionEvent for pan/zoom — our tap detection is additive.
+                                false
                             }
                         }
                     }
                 },
-                update = { mapView ->
-                    // Camera updates from the ViewModel — the follow-me FAB sets a new
-                    // `OpenPtvCameraState` and we animate to it. MapLibre dedupes if the camera
-                    // is already there, so this is safe to fire every recomposition.
-                    mapView.getMapAsync { map ->
-                        map.animateCamera(
-                            CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.Builder()
-                                    .target(LatLng(camera.centre.lat, camera.centre.lng))
-                                    .zoom(camera.zoom)
-                                    .build(),
-                            ),
-                        )
-                        applyPins(map, pinsLatest)
-                        applyUserLocation(map, userLocationLatest)
-                    }
-                },
+                // No `update` block — pin and camera updates are routed through the keyed
+                // `LaunchedEffect`s below so they only fire when their input actually changes.
+                // Leaving `update` to re-run on every recomposition was rebuilding the
+                // FeatureCollection (and re-firing `setGeoJson`) at the bottom-sheet animation
+                // frame rate, which made the map feel sluggish on chip toggle / pan. See PR #84
+                // bug #5.
+                update = { /* see LaunchedEffect(pins) / LaunchedEffect(camera) below */ },
             )
+
+            // Push pin updates into the GeoJsonSource only when the pin set actually changes.
+            // `setGeoJson` is the right way to swap features in place (MapLibre diffs and
+            // re-renders only what moved); the bug was that we were calling it on every
+            // recomposition, including the bottom-sheet's animation frames.
+            LaunchedEffect(pins) {
+                mapViewRef.map?.let { map -> applyPins(map, pins) }
+            }
+
+            // Likewise for the camera — animate only when the requested camera changes.
+            LaunchedEffect(camera) {
+                mapViewRef.map?.animateCamera(
+                    CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder()
+                            .target(LatLng(camera.centre.lat, camera.centre.lng))
+                            .zoom(camera.zoom)
+                            .build(),
+                    ),
+                )
+            }
+
+            LaunchedEffect(userLocation) {
+                mapViewRef.map?.let { map -> applyUserLocation(map, userLocation) }
+            }
 
             // Forward Compose's lifecycle into MapView's mirror lifecycle. Without this the GL
             // surface leaks on screen rotation / config change.
@@ -345,8 +391,33 @@ internal class MapLibreOpenPtvMap
              * slop that a deliberate tap on a pin actually lands. PTV stops in central
              * Melbourne are typically 100-200 m apart, so a tap still resolves to the right
              * stop unambiguously.
+             *
+             * The naive distance hit-test runs in lat/lng space and is invariant to the current
+             * camera zoom, so a tap that "looks close" to a pin at zoom 18 is also "close" at
+             * zoom 14. The wider radius is a usability tradeoff favouring "the tap registers"
+             * over "I might hit the wrong nearby stop" — the bottom sheet anyway shows the
+             * stop name front-and-centre so the user spots a wrong-pin hit immediately and
+             * dismisses.
              */
             private const val PIN_HIT_RADIUS_METERS: Double = 80.0
+
+            /**
+             * Tap detection threshold — DOWN→UP movement (in pixels at 1x density) below this
+             * counts as a tap. Anything larger is a drag and we ignore it (MapView handles
+             * panning natively). Picked to roughly match `ViewConfiguration.scaledTouchSlop` on
+             * a typical phone (~8-12 dp) — generous enough that a fingertip tap doesn't get
+             * mis-classified as a drag, tight enough that a deliberate swipe doesn't trigger a
+             * spurious pin hit at the start of the gesture.
+             */
+            private const val TAP_SLOP_DP: Float = 16f
+
+            /**
+             * Tap-duration ceiling. Touches held longer than this are treated as long-press /
+             * drag-init and ignored, even if the movement was small. Matches Android's default
+             * long-press threshold so the tap surface lines up with what the user expects from
+             * other apps.
+             */
+            private const val TAP_MAX_DURATION_MS: Long = 500L
 
             // GeoJSON source + layer ids
             private const val SOURCE_PINS = "openptv-stops"

@@ -105,6 +105,74 @@ class NearbyListProjectionTest {
         assertThat(rows.single().distanceMetres).isWithin(METRES_TOLERANCE).of(0.0)
     }
 
+    // -------------------- filter applies to the list (issue #80, bug #3 on PR #84) --------
+    //
+    // The list rows are derived from the same `filteredBy(routeTypeFilter)` projection the map
+    // pins use (single source of truth). When the user toggles a chip off, the list should
+    // shrink in lock-step with the map.
+
+    @Test
+    fun `filteredBy keeps only stops whose route type is in the filter`() {
+        val tramStop = StopMother.aStop().withId(1).withRouteType(RouteType.Tram).build()
+        val busStop = StopMother.aStop().withId(2).withRouteType(RouteType.Bus).build()
+        val trainStop = StopMother.aStop().withId(3).withRouteType(RouteType.Train).build()
+
+        val pins = listOf(tramStop, busStop, trainStop)
+        val rowsTramOnly = pins.filteredBy(setOf(RouteType.Tram)).toRows(from = null)
+        val rowsTramAndBus = pins.filteredBy(setOf(RouteType.Tram, RouteType.Bus)).toRows(from = null)
+
+        assertThat(rowsTramOnly.map { it.stop.id.value }).containsExactly(1)
+        assertThat(rowsTramAndBus.map { it.stop.id.value }).containsExactly(1, 2)
+    }
+
+    @Test
+    fun `list shrinks when a chip is toggled off — fewer rows for fewer modes`() {
+        val tram = StopMother.aStop().withId(10).withRouteType(RouteType.Tram).build()
+        val bus = StopMother.aStop().withId(20).withRouteType(RouteType.Bus).build()
+        val train = StopMother.aStop().withId(30).withRouteType(RouteType.Train).build()
+        val nightBus = StopMother.aStop().withId(40).withRouteType(RouteType.NightBus).build()
+        val pins = listOf(tram, bus, train, nightBus)
+
+        // All four modes selected → all four rows render.
+        val all = pins.filteredBy(setOf(RouteType.Tram, RouteType.Bus, RouteType.Train, RouteType.NightBus)).toRows(from = null)
+        // User taps NightBus off → list drops to three rows.
+        val withoutNightBus = pins.filteredBy(setOf(RouteType.Tram, RouteType.Bus, RouteType.Train)).toRows(from = null)
+
+        assertThat(all).hasSize(4)
+        assertThat(withoutNightBus).hasSize(3)
+        assertThat(withoutNightBus.map { it.stop.id.value }).doesNotContain(40)
+    }
+
+    // -------------------- composite-key regression (bug #6 on PR #84) -----------------------
+    //
+    // `/stops/location` returns the same `stop_id` once per route type the stop serves — e.g.
+    // Box Hill (stop_id 4407) appears as one Train row and one Bus row in the same payload.
+    // Both are legitimately distinct (stop, mode) rows the user expects to see, so we don't
+    // dedupe; the LazyColumn keys by the (stopId, routeType) pair instead.
+
+    @Test
+    fun `duplicate stop ids with different route types both produce a row`() {
+        // Box Hill — actual reproduction of the FATAL crash on the AOSP emulator.
+        val boxHillTrain =
+            StopMother.aStop()
+                .withId(BOX_HILL_STOP_ID)
+                .withName("Box Hill Railway Station")
+                .withRouteType(RouteType.Train)
+                .build()
+        val boxHillBus =
+            StopMother.aStop()
+                .withId(BOX_HILL_STOP_ID)
+                .withName("Box Hill Railway Station")
+                .withRouteType(RouteType.Bus)
+                .build()
+
+        val rows = listOf(boxHillTrain, boxHillBus).toRows(from = null)
+
+        // Both rows present — the (id, mode) pair distinguishes them. No dedupe.
+        assertThat(rows).hasSize(2)
+        assertThat(rows.map { it.stop.routeType }).containsExactly(RouteType.Train, RouteType.Bus)
+    }
+
     private companion object {
         // Federation Square — ~170 m east of Flinders Street, the same fixture pair used in
         // CoordinatesTest. Picking real Melbourne lat/lngs over synthetic +0.01-degree offsets
@@ -126,6 +194,13 @@ class NearbyListProjectionTest {
 
         // Same metre-tolerance the CoordinatesTest uses for its near-distance assertions.
         private const val METRES_TOLERANCE = 1.0
+
+        /**
+         * Box Hill stop_id — actual repro of the FATAL crash on PR #84. The PTV
+         * `/stops/location` endpoint returns this stop once with `route_type=2` (Bus) and once
+         * with `route_type=3` (Train) when a query covers the Box Hill interchange.
+         */
+        private const val BOX_HILL_STOP_ID = 4407
 
         // Suppress unused-private warning for now — the constant lives in case of future tests.
         @Suppress("unused")

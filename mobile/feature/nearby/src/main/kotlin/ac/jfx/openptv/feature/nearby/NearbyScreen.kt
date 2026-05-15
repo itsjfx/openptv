@@ -437,8 +437,13 @@ private fun EmptyStateHint(modifier: Modifier = Modifier) {
  * out through [onRowClicked] which is wired to the same `onPinClicked` the map pins use, so a
  * row tap and a pin tap end up at the same `StopBottomSheet` projection.
  *
- * The list is keyed on `stop.id.value` so a re-sort (e.g. after a fresh user fix) animates rows
- * in place instead of recomposing every row from scratch.
+ * The list is keyed by `(stop.id.value, stop.routeType.name)` because PTV's
+ * `/stops/location` endpoint returns the same `stop_id` once per `route_type` it serves —
+ * keying on stop id alone crashes the LazyColumn with `IllegalArgumentException: Key "X" was
+ * already used` when an interchange stop (e.g. Box Hill, stop_id 4407 — Train + Bus) appears.
+ * Each `(stop, route-type)` pair is a legitimately distinct row that the user expects to see, so
+ * we don't dedupe — the composite key matches the convention `:feature:stop-detail` already uses
+ * for grouped/run rows (`group-${routeId}-${directionId}` / `${routeId}-${directionId}-${runRef}`).
  */
 @Composable
 private fun NearbyStopsList(
@@ -486,7 +491,7 @@ private fun NearbyStopsList(
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().testTag(TestTagNearbyListItems),
             ) {
-                items(items = rows, key = { it.stop.id.value }) { row ->
+                items(items = rows, key = { "${it.stop.id.value}-${it.stop.routeType.name}" }) { row ->
                     NearbyStopRow(
                         row = row,
                         distanceFormatter = distanceFormatter,
@@ -516,7 +521,7 @@ private fun NearbyStopRow(
                 .fillMaxWidth()
                 .clickable(onClick = onClick)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
-                .testTag(nearbyListRowTestTag(row.stop.id.value)),
+                .testTag(nearbyListRowTestTag(row.stop.id.value, row.stop.routeType)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -769,9 +774,13 @@ private fun NearbyUiState.pinsOrEmpty(): List<Stop> =
  * Belt-and-braces filter for the pin list. The repository fetch already passes the filter set
  * to PTV via `route_types`, but a stale fetch can land mid-toggle (e.g. between the user
  * tapping a chip and the debounce expiring). Re-applying the filter at the render seam keeps
- * the on-screen pins consistent with the chip state at all times.
+ * the on-screen pins consistent with the chip state at all times — both the map pins and the
+ * bottom-sheet list (issue #80) read this same filtered projection so they never disagree.
+ *
+ * The `filter` invariant (always non-empty, see [DEFAULT_FILTER]) means the empty-set short-circuit
+ * the previous version had is unreachable in practice — keeping it defensively is cheap.
  */
-private fun List<Stop>.filteredBy(filter: Set<RouteType>): List<Stop> =
+internal fun List<Stop>.filteredBy(filter: Set<RouteType>): List<Stop> =
     if (filter.isEmpty()) this else filter { it.routeType in filter }
 
 /**
@@ -839,7 +848,10 @@ internal const val TestTagNearbyListEmpty: String = "nearby-list-empty"
 
 internal fun filterChipTestTag(routeType: RouteType): String = "nearby-filter-chip-${routeType.name.lowercase()}"
 
-internal fun nearbyListRowTestTag(stopId: Int): String = "nearby-list-row-$stopId"
+internal fun nearbyListRowTestTag(
+    stopId: Int,
+    routeType: RouteType,
+): String = "nearby-list-row-$stopId-${routeType.name.lowercase()}"
 
 /**
  * Peek height — small enough that the user sees the map and the chip row, but tall enough that
