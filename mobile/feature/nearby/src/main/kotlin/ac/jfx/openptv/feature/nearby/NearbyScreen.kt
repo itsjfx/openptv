@@ -1,6 +1,9 @@
 package ac.jfx.openptv.feature.nearby
 
+import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.designsystem.LocationPermissionRationale
+import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import android.Manifest
@@ -10,6 +13,8 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,7 +23,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -41,6 +49,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -62,6 +72,7 @@ fun NearbyRoute(
     viewModel: NearbyViewModel = hiltViewModel(),
     map: OpenPtvMap = hiltViewModel<NearbyMapHolder>().map,
     initialiser: OpenPtvMapInitialiser = hiltViewModel<NearbyMapHolder>().initialiser,
+    timeFormatter: RelativeTimeFormatter = hiltViewModel<NearbyMapHolder>().timeFormatter,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -98,10 +109,12 @@ fun NearbyRoute(
     NearbyScreen(
         uiState = uiState,
         map = map,
+        timeFormatter = timeFormatter,
         onCameraIdle = viewModel::onCameraIdle,
         onPinClicked = viewModel::onPinClicked,
         onSheetDismissed = viewModel::onSheetDismissed,
         onFollowMeClicked = viewModel::onFollowMeClicked,
+        onRouteTypeFilterToggled = viewModel::onRouteTypeFilterToggled,
         onViewStop = { stop ->
             viewModel.onSheetDismissed()
             onOpenStopDetail(stop.id.value, stop.routeType.toCode())
@@ -129,6 +142,10 @@ fun NearbyRoute(
 /**
  * Stateless screen. Renders the map at full-bleed; permission overlays + the follow-me FAB sit on
  * top via a Box stack; the bottom sheet animates up when [SheetState.Open] lands in `uiState`.
+ *
+ * The route-type filter row sits OVER the map (not above it in a separate column) so the map
+ * stays full-bleed — the chips overlay the top of the map content with a translucent surface
+ * underneath them, mirroring how Google Maps renders its mode chips.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -136,10 +153,12 @@ fun NearbyRoute(
 internal fun NearbyScreen(
     uiState: NearbyUiState,
     map: OpenPtvMap,
+    timeFormatter: RelativeTimeFormatter,
     onCameraIdle: (OpenPtvCameraState) -> Unit,
     onPinClicked: (Stop) -> Unit,
     onSheetDismissed: () -> Unit,
     onFollowMeClicked: () -> Unit,
+    onRouteTypeFilterToggled: (RouteType) -> Unit,
     onViewStop: (Stop) -> Unit,
     onOpenAppSettings: () -> Unit,
     rationaleDismissed: Boolean,
@@ -165,7 +184,8 @@ internal fun NearbyScreen(
         ) {
             // Underlying map — always present. The variant decides whether overlays show.
             val camera = uiState.cameraOrCbd()
-            val pins = uiState.pinsOrEmpty()
+            val rawPins = uiState.pinsOrEmpty()
+            val pins = rawPins.filteredBy(uiState.routeTypeFilter)
             val userLocation = (uiState as? NearbyUiState.Loaded)?.userLocation
             map.Render(
                 camera = camera,
@@ -177,7 +197,19 @@ internal fun NearbyScreen(
                 modifier = Modifier.fillMaxSize().testTag(TestTagMap),
             )
 
-            // Permission banner (denied state)
+            // Filter chip row pinned to the top of the map content.
+            RouteTypeFilterRow(
+                selected = uiState.routeTypeFilter,
+                onToggle = onRouteTypeFilterToggled,
+                modifier =
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                        .testTag(TestTagFilterRow),
+            )
+
+            // Permission banner (denied state) — sits below the chip row so both are visible.
             if (uiState is NearbyUiState.PermissionDenied) {
                 PermissionDeniedBanner(
                     onOpenSettings = onOpenAppSettings,
@@ -185,7 +217,7 @@ internal fun NearbyScreen(
                         Modifier
                             .align(Alignment.TopCenter)
                             .fillMaxWidth()
-                            .padding(16.dp)
+                            .padding(top = 64.dp, start = 16.dp, end = 16.dp)
                             .testTag(TestTagPermissionDeniedBanner),
                 )
             }
@@ -236,8 +268,9 @@ internal fun NearbyScreen(
             modifier = Modifier.testTag(TestTagBottomSheet),
         ) {
             StopBottomSheetContent(
-                stop = pendingSheet.stop,
-                onViewStop = { onViewStop(pendingSheet.stop) },
+                sheet = pendingSheet.sheet,
+                timeFormatter = timeFormatter,
+                onViewStop = { onViewStop(pendingSheet.sheet.stop) },
             )
         }
     }
@@ -247,6 +280,50 @@ internal fun NearbyScreen(
     // before sheet opens" needs to launch from a Compose scope.
     @Suppress("UNUSED_EXPRESSION")
     scope
+}
+
+/**
+ * Horizontal row of [FilterChip]s, one per visible [RouteType] (Unknown is intentionally absent
+ * — it's a runtime fallback, never a user-facing mode). The row scrolls horizontally so the five
+ * chips fit comfortably on a 360-dp width device without overflowing into a menu — the five
+ * common modes are short labels and a `horizontalScroll` is the cheapest "still readable on a
+ * narrow phone" option that keeps every chip discoverable.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RouteTypeFilterRow(
+    selected: Set<RouteType>,
+    onToggle: (RouteType) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shape = MaterialTheme.shapes.medium,
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .semantics { contentDescription = "Filter by mode" },
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            filterTypes.forEach { routeType ->
+                val isSelected = selected.contains(routeType)
+                FilterChip(
+                    selected = isSelected,
+                    onClick = { onToggle(routeType) },
+                    label = { Text(routeType.label()) },
+                    leadingIcon = { Text(routeType.glyph()) },
+                    colors = FilterChipDefaults.filterChipColors(),
+                    modifier = Modifier.testTag(filterChipTestTag(routeType)),
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -299,31 +376,117 @@ private fun EmptyStateHint(modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * Bottom sheet body for a tapped pin. Three sections: stop header, serving routes, next
+ * departures. Each fetched section ([StopBottomSheet.routes] / [StopBottomSheet.departures])
+ * shows a placeholder line while `null` (i.e. the fetch hasn't landed yet); empty list renders
+ * a "no rows" message; populated list renders the rows. The error chip surfaces above the
+ * sections when at least one fetch failed.
+ */
 @Composable
+@Suppress("LongMethod")
 private fun StopBottomSheetContent(
-    stop: Stop,
+    sheet: StopBottomSheet,
+    timeFormatter: RelativeTimeFormatter,
     onViewStop: () -> Unit,
 ) {
     Column(modifier = Modifier.padding(24.dp).testTag(TestTagSheetContent)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = stop.routeType.glyph(),
+                text = sheet.stop.routeType.glyph(),
                 style = MaterialTheme.typography.headlineSmall,
                 modifier = Modifier.padding(end = 12.dp),
             )
             Column {
                 Text(
-                    text = stop.name,
+                    text = sheet.stop.name,
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Text(
-                    text = stop.suburb,
+                    text = sheet.stop.suburb,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
+
         Spacer(modifier = Modifier.height(16.dp))
+
+        if (sheet.hadError) {
+            Text(
+                text = stringResource(R.string.feature_nearby_sheet_error),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.testTag(TestTagSheetError),
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // Routes section
+        SectionHeader(text = stringResource(R.string.feature_nearby_sheet_routes))
+        when (val routes = sheet.routes) {
+            null ->
+                Text(
+                    text = stringResource(R.string.feature_nearby_sheet_routes_loading),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            else ->
+                if (routes.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.feature_nearby_sheet_routes_none),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Row(
+                        modifier =
+                            Modifier
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 4.dp)
+                                .testTag(TestTagSheetRoutes),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        routes.forEach { route -> RouteChip(route) }
+                    }
+                }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Departures section
+        SectionHeader(text = stringResource(R.string.feature_nearby_sheet_next_departures))
+        when (val departures = sheet.departures) {
+            null ->
+                Text(
+                    text = stringResource(R.string.feature_nearby_sheet_departures_loading),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            else ->
+                if (departures.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.feature_nearby_sheet_departures_none),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Column(
+                        modifier =
+                            Modifier
+                                .padding(top = 4.dp)
+                                .testTag(TestTagSheetDepartures),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        departures.forEach { departure ->
+                            DepartureRow(departure, timeFormatter)
+                        }
+                    }
+                }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         TextButton(
             onClick = onViewStop,
             modifier = Modifier.testTag(TestTagViewStop),
@@ -333,11 +496,59 @@ private fun StopBottomSheetContent(
     }
 }
 
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun RouteChip(route: Route) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        val label = route.number.ifBlank { route.name }.ifBlank { "#${route.id.value}" }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun DepartureRow(
+    departure: Departure,
+    timeFormatter: RelativeTimeFormatter,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = departure.direction.name,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            text =
+                timeFormatter.format(
+                    scheduled = departure.scheduledDepartureUtc,
+                    estimated = departure.estimatedDepartureUtc,
+                ),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
 /**
- * Hilt-injected holder for the [OpenPtvMap] singleton + [OpenPtvMapInitialiser]. We resolve them
- * through a ViewModel because `@Composable fun NearbyRoute(...)` has no other Hilt-aware seam
- * apart from `hiltViewModel`. This is the same trick `:feature:stop-detail` uses for cross-VM
- * dependencies.
+ * Hilt-injected holder for the [OpenPtvMap] singleton + [OpenPtvMapInitialiser] +
+ * [RelativeTimeFormatter]. We resolve them through a ViewModel because `@Composable fun
+ * NearbyRoute(...)` has no other Hilt-aware seam apart from `hiltViewModel`. This is the same
+ * trick `:feature:stop-detail` uses for cross-VM dependencies.
  */
 @dagger.hilt.android.lifecycle.HiltViewModel
 class NearbyMapHolder
@@ -345,9 +556,26 @@ class NearbyMapHolder
     constructor(
         val map: OpenPtvMap,
         val initialiser: OpenPtvMapInitialiser,
+        val timeFormatter: RelativeTimeFormatter,
     ) : androidx.lifecycle.ViewModel()
 
 // ----------- helpers -----------
+
+private val filterTypes: List<RouteType> =
+    listOf(RouteType.Train, RouteType.Tram, RouteType.Bus, RouteType.VLine, RouteType.NightBus)
+
+@Composable
+private fun RouteType.label(): String =
+    when (this) {
+        RouteType.Train -> stringResource(R.string.feature_nearby_filter_train)
+        RouteType.Tram -> stringResource(R.string.feature_nearby_filter_tram)
+        RouteType.Bus -> stringResource(R.string.feature_nearby_filter_bus)
+        RouteType.VLine -> stringResource(R.string.feature_nearby_filter_vline)
+        RouteType.NightBus -> stringResource(R.string.feature_nearby_filter_nightbus)
+        // Unknown isn't in FILTER_TYPES, but the `when` has to be exhaustive — fall back to its
+        // glyph so a future caller never crashes.
+        RouteType.Unknown -> "•"
+    }
 
 private fun NearbyUiState.cameraOrCbd(): OpenPtvCameraState =
     when (this) {
@@ -366,6 +594,15 @@ private fun NearbyUiState.pinsOrEmpty(): List<Stop> =
         is NearbyUiState.PermissionDenied -> pins
         NearbyUiState.PermissionUnasked -> emptyList()
     }
+
+/**
+ * Belt-and-braces filter for the pin list. The repository fetch already passes the filter set
+ * to PTV via `route_types`, but a stale fetch can land mid-toggle (e.g. between the user
+ * tapping a chip and the debounce expiring). Re-applying the filter at the render seam keeps
+ * the on-screen pins consistent with the chip state at all times.
+ */
+private fun List<Stop>.filteredBy(filter: Set<RouteType>): List<Stop> =
+    if (filter.isEmpty()) this else filter { it.routeType in filter }
 
 private fun RouteType.glyph(): String =
     when (this) {
@@ -402,4 +639,10 @@ internal const val TestTagOpenSettings: String = "nearby-open-settings"
 internal const val TestTagEmptyHint: String = "nearby-empty-hint"
 internal const val TestTagBottomSheet: String = "nearby-bottom-sheet"
 internal const val TestTagSheetContent: String = "nearby-sheet-content"
+internal const val TestTagSheetError: String = "nearby-sheet-error"
+internal const val TestTagSheetRoutes: String = "nearby-sheet-routes"
+internal const val TestTagSheetDepartures: String = "nearby-sheet-departures"
 internal const val TestTagViewStop: String = "nearby-view-stop"
+internal const val TestTagFilterRow: String = "nearby-filter-row"
+
+internal fun filterChipTestTag(routeType: RouteType): String = "nearby-filter-chip-${routeType.name.lowercase()}"

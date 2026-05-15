@@ -13,8 +13,23 @@
     <!-- Follow-me FAB -->
     <string name="feature_nearby_follow_me">Centre on my location</string>
 
+    <!-- Route-type filter chips -->
+    <string name="feature_nearby_filter_train">Train</string>
+    <string name="feature_nearby_filter_tram">Tram</string>
+    <string name="feature_nearby_filter_bus">Bus</string>
+    <string name="feature_nearby_filter_vline">V/Line</string>
+    <string name="feature_nearby_filter_nightbus">Night Bus</string>
+    <string name="feature_nearby_filter_row_label">Filter by mode</string>
+
     <!-- Bottom sheet -->
     <string name="feature_nearby_view_stop">View stop</string>
+    <string name="feature_nearby_sheet_routes">Routes</string>
+    <string name="feature_nearby_sheet_routes_loading">Loading routes…</string>
+    <string name="feature_nearby_sheet_routes_none">No routes published.</string>
+    <string name="feature_nearby_sheet_next_departures">Next departures</string>
+    <string name="feature_nearby_sheet_departures_loading">Loading departures…</string>
+    <string name="feature_nearby_sheet_departures_none">No upcoming services.</string>
+    <string name="feature_nearby_sheet_error">Couldn\'t load. Pull again or open the stop.</string>
 
     <!-- Empty state -->
     <string name="feature_nearby_no_stops">No PTV stops in this area.</string>

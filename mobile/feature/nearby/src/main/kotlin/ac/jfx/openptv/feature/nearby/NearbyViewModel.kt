@@ -2,13 +2,17 @@ package ac.jfx.openptv.feature.nearby
 
 import ac.jfx.openptv.core.common.LocationProvider
 import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.data.DepartureRepository
 import ac.jfx.openptv.core.data.NearbyStopsRepository
+import ac.jfx.openptv.core.data.StopDetailRepository
 import ac.jfx.openptv.core.model.Coordinates
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,8 +23,9 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * ViewModel for the nearby map screen (issue #37). Owns the camera position, the pin list, the
- * permission state, the follow-me toggle, and the pin-tap bottom sheet.
+ * ViewModel for the nearby map screen. Owns the camera position, the pin list, the permission
+ * state, the follow-me toggle, the route-type filter, and the pin-tap bottom sheet (including
+ * its on-demand routes + 30 s realtime departures fetches).
  *
  * **State machine.**
  *  - On entry → [NearbyUiState.PermissionUnasked]. The screen asks the user for coarse location.
@@ -38,6 +43,19 @@ import javax.inject.Inject
  * 2^(MAX_ZOOM - zoom)` capped at [MAX_RADIUS_METERS]. The base is sized so the visible viewport
  * fits inside the fetched circle with ~30% headroom — small enough that panning a screen-width
  * triggers a refresh, big enough that the user sees pins as they enter the visible area.
+ *
+ * **Route-type filter.** [NearbyUiState.routeTypeFilter] is the single source of truth — both
+ * the map pins and the bottom-sheet `:feature:nearby` (#80) subscribe to it. Toggling a chip
+ * updates the filter and immediately re-fires the camera-idle fetch with the new filter
+ * forwarded to PTV's `route_types` query parameter (server-side filter — PTV's response is
+ * already small for the typical viewport, but server-side keeps the bytes-on-wire minimal in
+ * dense regions like Flinders Street where a "trams only" tap should drop ~80% of the payload).
+ *
+ * **Bottom-sheet fetches.** Tapping a pin opens the sheet immediately with a placeholder
+ * (`routes = null`, `departures = null`); the routes one-shot + departures Flow fan out from
+ * [pinTapped]. Both jobs are tracked in [sheetJob] so a tap on a different pin (or sheet
+ * dismissal) cancels the previous in-flight fetches — the sheet never shows stale rows for the
+ * wrong stop.
  */
 @HiltViewModel
 class NearbyViewModel
@@ -45,6 +63,8 @@ class NearbyViewModel
     constructor(
         private val locationProvider: LocationProvider,
         private val nearbyStopsRepository: NearbyStopsRepository,
+        private val stopDetailRepository: StopDetailRepository,
+        private val departureRepository: DepartureRepository,
     ) : ViewModel() {
         private val _uiState: MutableStateFlow<NearbyUiState> =
             MutableStateFlow(NearbyUiState.PermissionUnasked)
@@ -55,9 +75,19 @@ class NearbyViewModel
          * collector in [wireCameraDebounce] is scheduled (e.g. the initial seed inside
          * `onPermissionResult` while we're still under a `StandardTestDispatcher`) is still
          * delivered — the collector picks it up as a replay value as soon as it starts.
+         *
+         * The pair carries `(camera, filter)` so the collector debounces both the camera and
+         * the filter through the same gate. A filter toggle re-emits the current camera so the
+         * fetch fires with the new filter without waiting for the next pan.
          */
-        private val cameraIdles: MutableSharedFlow<OpenPtvCameraState> =
+        private val pinFetchTriggers: MutableSharedFlow<PinFetchTrigger> =
             MutableSharedFlow(replay = 1, extraBufferCapacity = 1)
+
+        /**
+         * Holds the bottom-sheet's in-flight fetches (routes + departures) so a tap on a new
+         * pin can cancel the previous pin's work. `null` when no sheet is open.
+         */
+        private var sheetJob: Job? = null
 
         init {
             wireCameraDebounce()
@@ -85,15 +115,23 @@ class NearbyViewModel
                             isFollowingUser = fix != null,
                             pendingSheet = SheetState.Closed,
                             showEmptyHint = false,
+                            routeTypeFilter = currentFilter(),
                         )
                     // Seed the debounce so the initial fetch lands without a manual pan.
-                    cameraIdles.tryEmit(initialCamera)
+                    pinFetchTriggers.tryEmit(PinFetchTrigger(initialCamera, currentFilter()))
                 } else {
                     _uiState.value =
                         NearbyUiState.PermissionDenied(
                             camera = OpenPtvCameraState(centre = MELBOURNE_CBD, zoom = INITIAL_ZOOM),
                             pins = emptyList(),
+                            routeTypeFilter = currentFilter(),
                         )
+                    pinFetchTriggers.tryEmit(
+                        PinFetchTrigger(
+                            OpenPtvCameraState(MELBOURNE_CBD, INITIAL_ZOOM),
+                            currentFilter(),
+                        ),
+                    )
                 }
             }
         }
@@ -101,27 +139,60 @@ class NearbyViewModel
         /** Called from MapLibre's camera-idle listener through the [OpenPtvMap] callback. */
         fun onCameraIdle(camera: OpenPtvCameraState) {
             val current = _uiState.value
-            if (current is NearbyUiState.Loaded) {
-                // A manual pan disengages follow-me — same convention every other map app uses.
-                val stillFollowing =
-                    current.isFollowingUser &&
-                        current.userLocation != null &&
-                        camera.centre.distanceTo(current.userLocation) < FOLLOW_LEASH_METERS
-                _uiState.value = current.copy(camera = camera, isFollowingUser = stillFollowing)
+            when (current) {
+                is NearbyUiState.Loaded -> {
+                    // A manual pan disengages follow-me — same convention every other map app uses.
+                    val stillFollowing =
+                        current.isFollowingUser &&
+                            current.userLocation != null &&
+                            camera.centre.distanceTo(current.userLocation) < FOLLOW_LEASH_METERS
+                    _uiState.value = current.copy(camera = camera, isFollowingUser = stillFollowing)
+                }
+                is NearbyUiState.PermissionDenied ->
+                    _uiState.value = current.copy(camera = camera)
+                NearbyUiState.PermissionUnasked -> Unit
             }
-            cameraIdles.tryEmit(camera)
+            pinFetchTriggers.tryEmit(PinFetchTrigger(camera, currentFilter()))
+        }
+
+        /**
+         * Toggle a [RouteType] chip on/off. An empty filter set means "show all" (mirrors the
+         * `route_types` query parameter contract). The active filter is kept on `_uiState` and
+         * exposed to issue #80's bottom-sheet list via the same `StateFlow` — adding a second
+         * source-of-truth would just create drift between the map and the list.
+         *
+         * Filter changes immediately re-fire the pin fetch with the new filter set. A debounce
+         * still applies, so a user who taps three chips in rapid succession only fires one
+         * request. The previous in-flight fetch (under `collectLatest`) is cancelled.
+         */
+        fun onRouteTypeFilterToggled(routeType: RouteType) {
+            // Unknown isn't a chip — guarding here keeps the UI from accidentally producing a
+            // filter set that the repository would have to drop anyway.
+            if (routeType == RouteType.Unknown) return
+            val nextFilter =
+                if (currentFilter().contains(routeType)) currentFilter() - routeType else currentFilter() + routeType
+            updateFilter(nextFilter)
+            currentCamera()?.let { camera ->
+                pinFetchTriggers.tryEmit(PinFetchTrigger(camera, nextFilter))
+            }
         }
 
         /** Called when the user taps a pin. */
         fun onPinClicked(stop: Stop) {
-            val current = _uiState.value
-            if (current is NearbyUiState.Loaded) {
-                _uiState.value = current.copy(pendingSheet = SheetState.Open(stop))
-            }
+            val current = _uiState.value as? NearbyUiState.Loaded ?: return
+            // Render the sheet in its loading shape immediately so the user gets feedback on
+            // tap; the routes + departures land asynchronously.
+            _uiState.value =
+                current.copy(
+                    pendingSheet = SheetState.Open(StopBottomSheet(stop = stop)),
+                )
+            startSheetFetches(stop)
         }
 
         /** Called when the bottom sheet is dismissed without selecting "View stop". */
         fun onSheetDismissed() {
+            sheetJob?.cancel()
+            sheetJob = null
             val current = _uiState.value
             if (current is NearbyUiState.Loaded) {
                 _uiState.value = current.copy(pendingSheet = SheetState.Closed)
@@ -142,14 +213,19 @@ class NearbyViewModel
         @OptIn(FlowPreview::class)
         private fun wireCameraDebounce() {
             viewModelScope.launch {
-                cameraIdles
+                pinFetchTriggers
                     .debounce(CAMERA_IDLE_DEBOUNCE_MS)
-                    // `collectLatest` cancels an in-flight fetch if the user pans again mid-call.
-                    // Avoids a slow fetch landing on top of a fresher one and overwriting the pins
-                    // the user is currently looking at.
-                    .collectLatest { camera ->
-                        val radius = radiusForZoom(camera.zoom)
-                        val result = nearbyStopsRepository.stopsNear(camera.centre, radius)
+                    // `collectLatest` cancels an in-flight fetch if the user pans (or toggles a
+                    // filter) again mid-call. Avoids a slow fetch landing on top of a fresher
+                    // one and overwriting the pins the user is currently looking at.
+                    .collectLatest { trigger ->
+                        val radius = radiusForZoom(trigger.camera.zoom)
+                        val result =
+                            nearbyStopsRepository.stopsNear(
+                                coordinates = trigger.camera.centre,
+                                radiusMeters = radius,
+                                routeTypes = trigger.filter,
+                            )
                         val pins =
                             when (result) {
                                 is Result.Success -> result.data
@@ -173,6 +249,93 @@ class NearbyViewModel
         }
 
         /**
+         * Kicks off the bottom-sheet's routes + departures fetches in a single Job so a sheet
+         * dismissal (or a tap on a new pin) cancels both via [sheetJob].`cancel()`. Both update
+         * `pendingSheet` in place by copying the existing [StopBottomSheet] so a slow-routes /
+         * fast-departures (or vice-versa) lands cleanly without one fetch overwriting the
+         * other's data.
+         *
+         * The departures fetch goes through [DepartureRepository.observeDepartures] so the 30 s
+         * polling tick is reused — every other realtime surface (stop detail, the favourites
+         * grouping) ticks on the same cadence, so the user sees consistent freshness.
+         */
+        private fun startSheetFetches(stop: Stop) {
+            sheetJob?.cancel()
+            sheetJob =
+                viewModelScope.launch {
+                    val outerJob = this
+                    // Routes one-shot
+                    launch {
+                        val result = stopDetailRepository.getStopDetail(stop.id, stop.routeType)
+                        updateSheet(forStopId = stop.id.value) { current ->
+                            when (result) {
+                                is Result.Success -> current.copy(routes = result.data.servingRoutes)
+                                is Result.Error -> current.copy(hadError = true)
+                                Result.Loading -> current
+                            }
+                        }
+                    }
+                    // Departures polling
+                    launch {
+                        departureRepository
+                            .observeDepartures(stop.id, stop.routeType)
+                            .collect { result ->
+                                updateSheet(forStopId = stop.id.value) { current ->
+                                    when (result) {
+                                        is Result.Success ->
+                                            current.copy(
+                                                departures =
+                                                    result.data
+                                                        .sortedBy { it.estimatedDepartureUtc ?: it.scheduledDepartureUtc }
+                                                        .take(StopBottomSheet.DEPARTURES_PREVIEW_LIMIT),
+                                            )
+                                        is Result.Error ->
+                                            // Keep whatever we already have on screen; flip the
+                                            // error chip on. The next 30 s tick can still recover.
+                                            current.copy(hadError = true)
+                                        Result.Loading -> current
+                                    }
+                                }
+                            }
+                    }
+                    @Suppress("UNUSED_EXPRESSION")
+                    outerJob
+                }
+        }
+
+        /**
+         * Atomic update of the currently-open sheet, gated on `forStopId` matching the open
+         * sheet's stop id — guards against a fetch landing for a stop the user has already
+         * dismissed (the cancellation usually wins this race, but the gate is cheap insurance).
+         */
+        private fun updateSheet(
+            forStopId: Int,
+            transform: (StopBottomSheet) -> StopBottomSheet,
+        ) {
+            val current = _uiState.value as? NearbyUiState.Loaded ?: return
+            val sheet = current.pendingSheet as? SheetState.Open ?: return
+            if (sheet.sheet.stop.id.value != forStopId) return
+            _uiState.value = current.copy(pendingSheet = SheetState.Open(transform(sheet.sheet)))
+        }
+
+        private fun currentFilter(): Set<RouteType> = _uiState.value.routeTypeFilter
+
+        private fun currentCamera(): OpenPtvCameraState? =
+            when (val state = _uiState.value) {
+                is NearbyUiState.Loaded -> state.camera
+                is NearbyUiState.PermissionDenied -> state.camera
+                NearbyUiState.PermissionUnasked -> null
+            }
+
+        private fun updateFilter(filter: Set<RouteType>) {
+            when (val state = _uiState.value) {
+                is NearbyUiState.Loaded -> _uiState.value = state.copy(routeTypeFilter = filter)
+                is NearbyUiState.PermissionDenied -> _uiState.value = state.copy(routeTypeFilter = filter)
+                NearbyUiState.PermissionUnasked -> Unit
+            }
+        }
+
+        /**
          * Picks a fetch radius from the current zoom. The mapping is a coarse power-of-two: each
          * zoom step out doubles the radius, up to a per-request ceiling so a low-zoom pan over
          * regional Victoria doesn't ask PTV for an unreasonable bbox.
@@ -184,6 +347,11 @@ class NearbyViewModel
             val radius = (RADIUS_BASE_METERS * multiplier).toInt()
             return radius.coerceIn(RADIUS_BASE_METERS, MAX_RADIUS_METERS)
         }
+
+        private data class PinFetchTrigger(
+            val camera: OpenPtvCameraState,
+            val filter: Set<RouteType>,
+        )
 
         internal companion object {
             /** Melbourne CBD centroid — Flinders Street area. Default camera when no fix. */
