@@ -357,8 +357,13 @@ class NearbyViewModel
             /** Melbourne CBD centroid — Flinders Street area. Default camera when no fix. */
             internal val MELBOURNE_CBD: Coordinates = Coordinates(lat = -37.8136, lng = 144.9631)
 
-            /** Initial zoom — covers central CBD comfortably. */
-            internal const val INITIAL_ZOOM: Double = 12.0
+            /**
+             * Initial zoom on entry. Picked to be > the MapLibre cluster max-zoom (14) so the
+             * user lands on the unclustered "individual stops" view as soon as permission is
+             * granted — at zoom 12 every CBD pin would collapse into one cluster and the user
+             * would need to manually zoom in to see anything useful.
+             */
+            internal const val INITIAL_ZOOM: Double = 15.0
 
             /** Follow-me FAB re-centres at a tighter zoom (~street level). */
             internal const val FOLLOW_ME_ZOOM: Double = 15.0

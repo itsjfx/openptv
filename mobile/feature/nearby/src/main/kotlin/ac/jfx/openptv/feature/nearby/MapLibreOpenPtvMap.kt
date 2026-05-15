@@ -217,16 +217,21 @@ internal class MapLibreOpenPtvMap
             style.addSource(GeoJsonSource(SOURCE_PINS, options))
 
             // Cluster halo — a soft circle behind the count label. Sized in two steps so a busy
-            // CBD area still looks distinguishable from a quiet suburb pair.
+            // CBD area still looks distinguishable from a quiet suburb pair. Wrapping the
+            // colour in `Expression.color` matches the same fix the unclustered layer uses —
+            // a raw int works with `PropertyFactory.circleColor(int)` directly but NOT inside
+            // a parent expression.
             val clusterCircle =
                 CircleLayer(LAYER_CLUSTERS, SOURCE_PINS).withProperties(
                     PropertyFactory.circleColor(CLUSTER_COLOR),
                     PropertyFactory.circleRadius(
                         Expression.step(
-                            Expression.toNumber(Expression.get(GEOJSON_PROP_POINT_COUNT)),
+                            Expression.get(GEOJSON_PROP_POINT_COUNT),
                             Expression.literal(CLUSTER_RADIUS_SMALL_PX),
-                            Expression.stop(CLUSTER_STEP_MID, CLUSTER_RADIUS_MID_PX),
-                            Expression.stop(CLUSTER_STEP_LARGE, CLUSTER_RADIUS_LARGE_PX),
+                            Expression.literal(CLUSTER_STEP_MID),
+                            Expression.literal(CLUSTER_RADIUS_MID_PX),
+                            Expression.literal(CLUSTER_STEP_LARGE),
+                            Expression.literal(CLUSTER_RADIUS_LARGE_PX),
                         ),
                     ),
                     PropertyFactory.circleStrokeColor(STROKE_COLOR),
@@ -255,14 +260,33 @@ internal class MapLibreOpenPtvMap
                     PropertyFactory.circleStrokeColor(STROKE_COLOR),
                     PropertyFactory.circleStrokeWidth(PIN_STROKE_WIDTH_PX),
                     PropertyFactory.circleColor(
+                        // `match` on the integer route_type code → a colour expression.
+                        // `Expression.color(int)` is required around each ARGB int — passing the
+                        // raw int produces a "circle-color: Expected color but found number"
+                        // error from the GL renderer at style-load time.
                         Expression.match(
                             Expression.toNumber(Expression.get(GEOJSON_PROP_ROUTE_TYPE)),
-                            Expression.literal(routeTypeColor(RouteType.Unknown)),
-                            Expression.stop(RouteType.Train.toCode(), routeTypeColor(RouteType.Train)),
-                            Expression.stop(RouteType.Tram.toCode(), routeTypeColor(RouteType.Tram)),
-                            Expression.stop(RouteType.Bus.toCode(), routeTypeColor(RouteType.Bus)),
-                            Expression.stop(RouteType.VLine.toCode(), routeTypeColor(RouteType.VLine)),
-                            Expression.stop(RouteType.NightBus.toCode(), routeTypeColor(RouteType.NightBus)),
+                            Expression.color(routeTypeColor(RouteType.Unknown)),
+                            Expression.stop(
+                                RouteType.Train.toCode(),
+                                Expression.color(routeTypeColor(RouteType.Train)),
+                            ),
+                            Expression.stop(
+                                RouteType.Tram.toCode(),
+                                Expression.color(routeTypeColor(RouteType.Tram)),
+                            ),
+                            Expression.stop(
+                                RouteType.Bus.toCode(),
+                                Expression.color(routeTypeColor(RouteType.Bus)),
+                            ),
+                            Expression.stop(
+                                RouteType.VLine.toCode(),
+                                Expression.color(routeTypeColor(RouteType.VLine)),
+                            ),
+                            Expression.stop(
+                                RouteType.NightBus.toCode(),
+                                Expression.color(routeTypeColor(RouteType.NightBus)),
+                            ),
                         ),
                     ),
                 )
@@ -313,8 +337,16 @@ internal class MapLibreOpenPtvMap
         }
 
         private companion object {
-            /** Tap within ~30 m of a pin counts as a hit. ~one stop's worth of granularity. */
-            private const val PIN_HIT_RADIUS_METERS: Double = 30.0
+            /**
+             * Tap within ~80 m of a pin counts as a hit. Original Phase 05 default of 30 m was
+             * tuned to the metric "one stop's worth of granularity" but in practice that's only
+             * 5-10 screen pixels at the unclustered zoom (14+), which is below a finger-tip
+             * tap's accuracy on a typical phone. Bumping to ~80 m gives the tap surface enough
+             * slop that a deliberate tap on a pin actually lands. PTV stops in central
+             * Melbourne are typically 100-200 m apart, so a tap still resolves to the right
+             * stop unambiguously.
+             */
+            private const val PIN_HIT_RADIUS_METERS: Double = 80.0
 
             // GeoJSON source + layer ids
             private const val SOURCE_PINS = "openptv-stops"
