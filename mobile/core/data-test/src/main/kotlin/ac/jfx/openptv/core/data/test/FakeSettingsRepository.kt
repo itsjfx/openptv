@@ -33,11 +33,13 @@ class FakeSettingsRepository
         private val state =
             MutableStateFlow(
                 AppSettings(
-                    backendBaseUrl = "http://test.local/api/v3/",
+                    backendBaseUrl = DEFAULT_TEST_URL,
                     setupCompleted = true,
                 ),
             )
         override val settings: Flow<AppSettings> = state.asStateFlow()
+
+        override val defaultBackendBaseUrl: String = DEFAULT_TEST_URL
 
         override suspend fun setBackendBaseUrl(url: String) {
             state.update { it.copy(backendBaseUrl = url) }
@@ -54,5 +56,11 @@ class FakeSettingsRepository
          */
         fun seed(settings: AppSettings) {
             state.value = settings
+        }
+
+        private companion object {
+            // Stable test URL — exposed as both the seeded `backendBaseUrl` and the
+            // `defaultBackendBaseUrl` so picker tests can assert "the dialog opens on Default".
+            const val DEFAULT_TEST_URL: String = "http://test.local/api/v3/"
         }
     }

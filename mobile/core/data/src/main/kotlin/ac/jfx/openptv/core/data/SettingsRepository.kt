@@ -15,6 +15,16 @@ interface SettingsRepository {
      */
     val settings: Flow<AppSettings>
 
+    /**
+     * The bundled default backend base URL — `BuildConfig.BACKEND_BASE_URL` for the
+     * DataStore-backed impl. Exposed on the interface so feature modules (e.g.
+     * `:feature:settings`'s server picker) can show "what's the default" as the subtitle of the
+     * Default radio row without depending on `:app`'s `BuildConfig`. The picker also uses this
+     * to decide whether the currently-persisted URL matches the default (open the dialog on
+     * the Default row) or is custom (open on Custom with the field pre-filled).
+     */
+    val defaultBackendBaseUrl: String
+
     /** Update only the backend URL — used by the Settings screen post-onboarding. */
     suspend fun setBackendBaseUrl(url: String)
 
