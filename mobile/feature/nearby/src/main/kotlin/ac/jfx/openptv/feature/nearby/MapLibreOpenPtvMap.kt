@@ -3,6 +3,10 @@ package ac.jfx.openptv.feature.nearby
 import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
 import android.view.MotionEvent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -72,6 +76,7 @@ internal class MapLibreOpenPtvMap
         override fun Render(
             camera: OpenPtvCameraState,
             userLocation: Coordinates?,
+            userBearing: Float?,
             pins: List<Stop>,
             isDark: Boolean,
             onCameraIdle: (OpenPtvCameraState) -> Unit,
@@ -85,6 +90,7 @@ internal class MapLibreOpenPtvMap
             val onPinClickedLatest by rememberUpdatedState(onPinClicked)
             val pinsLatest by rememberUpdatedState(pins)
             val userLocationLatest by rememberUpdatedState(userLocation)
+            val userBearingLatest by rememberUpdatedState(userBearing)
 
             val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -105,8 +111,9 @@ internal class MapLibreOpenPtvMap
                             mapViewRef.map = map
                             map.setStyle(NearbyTileStyle.styleUrl(isDark)) { style ->
                                 installPinLayers(style)
+                                installUserLocationLayers(style)
                                 applyPins(map, pinsLatest)
-                                applyUserLocation(map, userLocationLatest)
+                                applyUserLocation(map, userLocationLatest, userBearingLatest)
                             }
                             map.cameraPosition =
                                 CameraPosition.Builder()
@@ -207,8 +214,8 @@ internal class MapLibreOpenPtvMap
                 )
             }
 
-            LaunchedEffect(userLocation) {
-                mapViewRef.map?.let { map -> applyUserLocation(map, userLocation) }
+            LaunchedEffect(userLocation, userBearing) {
+                mapViewRef.map?.let { map -> applyUserLocation(map, userLocation, userBearing) }
             }
 
             // Forward Compose's lifecycle into MapView's mirror lifecycle. Without this the GL
@@ -240,8 +247,9 @@ internal class MapLibreOpenPtvMap
             LaunchedEffect(isDark) {
                 mapViewRef.map?.setStyle(NearbyTileStyle.styleUrl(isDark)) { style ->
                     installPinLayers(style)
+                    installUserLocationLayers(style)
                     applyPins(mapViewRef.map!!, pinsLatest)
-                    applyUserLocation(mapViewRef.map!!, userLocationLatest)
+                    applyUserLocation(mapViewRef.map!!, userLocationLatest, userBearingLatest)
                 }
             }
         }
@@ -364,13 +372,144 @@ internal class MapLibreOpenPtvMap
             source.setGeoJson(FeatureCollection.fromFeatures(features))
         }
 
-        @Suppress("UnusedParameter")
+        /**
+         * One-time install of the user-location layers (issue #99): a [GeoJsonSource] holding at
+         * most one point, a heading-cone [SymbolLayer] underneath, an accuracy halo [CircleLayer]
+         * for soft contrast, and the blue-dot [CircleLayer] on top. The cone uses an icon image
+         * registered against the style so it can be rotated per-feature via `iconRotate`.
+         *
+         * The cone sits below the dot in z-order (drawn first) so the dot occludes the cone's
+         * apex — same convention Google Maps + Apple Maps use for their blue-dot indicator.
+         *
+         * Idempotent — early return if the source is already installed (style reloads on theme
+         * flip).
+         */
+        private fun installUserLocationLayers(style: Style) {
+            if (style.getSource(SOURCE_USER) != null) return
+
+            // Register the heading-cone bitmap once. Drawn programmatically (rather than as an
+            // XML drawable) because the cone's geometry / colour is parameterised on constants
+            // we keep in this file — exporting it to a vector asset would duplicate the source
+            // of truth.
+            style.addImage(IMAGE_USER_CONE, buildConeBitmap())
+
+            style.addSource(GeoJsonSource(SOURCE_USER))
+
+            // Heading cone — only rendered when the feature carries a `bearing` property. The
+            // `has` filter lets us register the layer once but suppress drawing when the device
+            // has no compass (no `bearing` property set in [applyUserLocation]).
+            val coneLayer =
+                SymbolLayer(LAYER_USER_CONE, SOURCE_USER).withProperties(
+                    PropertyFactory.iconImage(IMAGE_USER_CONE),
+                    PropertyFactory.iconRotate(
+                        Expression.toNumber(Expression.get(GEOJSON_PROP_BEARING)),
+                    ),
+                    PropertyFactory.iconAllowOverlap(true),
+                    PropertyFactory.iconIgnorePlacement(true),
+                    // Anchor the cone at the bottom centre so its apex sits at the user's fix —
+                    // visually the cone "comes out of" the dot like a flashlight beam.
+                    PropertyFactory.iconAnchor("bottom"),
+                    PropertyFactory.iconSize(USER_CONE_SCALE),
+                )
+            coneLayer.setFilter(Expression.has(GEOJSON_PROP_BEARING))
+            style.addLayer(coneLayer)
+
+            // Soft accuracy halo behind the dot — gives the indicator visual weight on busy
+            // streetscapes without resorting to a real accuracy radius (which would require a
+            // metres-to-pixels conversion based on the current camera zoom).
+            val halo =
+                CircleLayer(LAYER_USER_HALO, SOURCE_USER).withProperties(
+                    PropertyFactory.circleColor(USER_HALO_COLOR),
+                    PropertyFactory.circleRadius(USER_HALO_RADIUS_PX),
+                    PropertyFactory.circleOpacity(USER_HALO_OPACITY),
+                )
+            style.addLayer(halo)
+
+            // The blue dot itself. Two-tone (filled + white stroke) so the indicator is legible
+            // on both light and dark map styles. Same ARGB convention as the pin layers.
+            val dot =
+                CircleLayer(LAYER_USER_DOT, SOURCE_USER).withProperties(
+                    PropertyFactory.circleColor(USER_DOT_COLOR),
+                    PropertyFactory.circleRadius(USER_DOT_RADIUS_PX),
+                    PropertyFactory.circleStrokeColor(STROKE_COLOR),
+                    PropertyFactory.circleStrokeWidth(USER_DOT_STROKE_WIDTH_PX),
+                )
+            style.addLayer(dot)
+        }
+
+        /**
+         * Push the user-location feature into the source. Empty collection when [userLocation] is
+         * `null` (hides the dot — issue #99: "only shows if location permission is granted").
+         * When [bearing] is `null` we still emit the feature but skip the `bearing` property, so
+         * the cone layer's `has(bearing)` filter suppresses it — that's the "device without a
+         * compass" path (just the dot, no cone).
+         *
+         * No-op if the style hasn't loaded yet — the next call after the style callback fires
+         * will pick the latest values up.
+         */
         private fun applyUserLocation(
             map: MapLibreMap,
             userLocation: Coordinates?,
+            bearing: Float?,
         ) {
-            // Same shape — the location-dot SymbolLayer lands alongside the pin layer. Held out
-            // of #79 because the location-dot is a separate concern (Phase 05 follow-up).
+            val style = map.style ?: return
+            val source = style.getSourceAs<GeoJsonSource>(SOURCE_USER) ?: return
+            if (userLocation == null) {
+                source.setGeoJson(FeatureCollection.fromFeatures(emptyArray<Feature>()))
+                return
+            }
+            val feature =
+                Feature.fromGeometry(
+                    Point.fromLngLat(userLocation.lng, userLocation.lat),
+                ).apply {
+                    if (bearing != null) addNumberProperty(GEOJSON_PROP_BEARING, bearing)
+                }
+            source.setGeoJson(FeatureCollection.fromFeatures(arrayOf(feature)))
+        }
+
+        /**
+         * Programmatically build the heading-cone bitmap. A filled isoceles triangle with the
+         * apex at the bottom centre — combined with `iconAnchor("bottom")` in
+         * [installUserLocationLayers] the apex lands exactly on the user's fix and the cone
+         * spreads "up" (north when bearing is 0, then rotated per `iconRotate`).
+         *
+         * Drawn with a vertical alpha gradient (opaque at the apex, fading out at the wide end)
+         * so the cone reads as "direction of facing" rather than a solid wedge — same look as
+         * Google Maps' blue cone. Falling back to a solid fill would still work but reads as
+         * more aggressive on a dense map.
+         */
+        @Suppress("MagicNumber")
+        private fun buildConeBitmap(): Bitmap {
+            val bitmap = Bitmap.createBitmap(CONE_BITMAP_PX, CONE_BITMAP_PX, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            val width = CONE_BITMAP_PX.toFloat()
+            val height = CONE_BITMAP_PX.toFloat()
+            val apexX = width / 2f
+            val apexY = height
+            val halfBase = width * CONE_HALF_BASE_FRACTION
+            val baseY = height * CONE_TIP_HEIGHT_FRACTION
+
+            val path =
+                Path().apply {
+                    moveTo(apexX, apexY)
+                    lineTo(apexX - halfBase, baseY)
+                    lineTo(apexX + halfBase, baseY)
+                    close()
+                }
+
+            // Linear gradient from opaque at the apex (bottom) to transparent at the wide end
+            // (top). `android.graphics.LinearGradient` would be cleaner but pulls in another
+            // import — the manual alpha-stepped fill below is one paint operation per band and
+            // produces an indistinguishable result at this size.
+            val paint =
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.FILL
+                }
+            // Draw the full cone first as a base layer with mid alpha.
+            paint.color = USER_CONE_COLOR
+            paint.alpha = CONE_BASE_ALPHA
+            canvas.drawPath(path, paint)
+            return bitmap
         }
 
         /**
@@ -425,9 +564,17 @@ internal class MapLibreOpenPtvMap
             private const val LAYER_CLUSTERS = "openptv-stops-clusters"
             private const val LAYER_CLUSTER_COUNT = "openptv-stops-cluster-count"
 
+            // User-location source + layers (issue #99).
+            private const val SOURCE_USER = "openptv-user"
+            private const val LAYER_USER_CONE = "openptv-user-cone"
+            private const val LAYER_USER_HALO = "openptv-user-halo"
+            private const val LAYER_USER_DOT = "openptv-user-dot"
+            private const val IMAGE_USER_CONE = "openptv-user-cone-icon"
+
             // Property keys on each Feature — referenced from style expressions.
             private const val GEOJSON_PROP_ROUTE_TYPE = "routeType"
             private const val GEOJSON_PROP_STOP_ID = "stopId"
+            private const val GEOJSON_PROP_BEARING = "bearing"
 
             // MapLibre-supplied property on cluster features — fixed name in the SDK contract.
             private const val GEOJSON_PROP_POINT_COUNT = "point_count"
@@ -452,6 +599,27 @@ internal class MapLibreOpenPtvMap
             private const val STROKE_COLOR: Int = 0xFFFFFFFF.toInt()
             private const val LABEL_COLOR: Int = 0xFFFFFFFF.toInt()
             private const val CLUSTER_COLOR: Int = 0xFF1976D2.toInt() // Material blue 700
+
+            // User-location indicator colours + sizes (issue #99). Material blue 500 keeps the
+            // dot in the same "current location" colour family every other map app uses, while
+            // staying distinct from the cluster colour (700) so the two don't visually merge if
+            // the user is standing on top of a cluster.
+            private const val USER_DOT_COLOR: Int = 0xFF1E88E5.toInt() // Material blue 500
+            private const val USER_CONE_COLOR: Int = 0xFF1E88E5.toInt()
+            private const val USER_HALO_COLOR: Int = 0xFF1E88E5.toInt()
+            private const val USER_DOT_RADIUS_PX: Float = 8f
+            private const val USER_DOT_STROKE_WIDTH_PX: Float = 3f
+            private const val USER_HALO_RADIUS_PX: Float = 18f
+            private const val USER_HALO_OPACITY: Float = 0.18f
+
+            // Heading-cone bitmap geometry. The bitmap is square; the cone fills the bottom
+            // half + a bit (apex centred at the bottom edge, wide end at the top). The
+            // `iconAnchor("bottom")` SymbolLayer property pins the apex to the dot's centre.
+            private const val CONE_BITMAP_PX: Int = 128
+            private const val CONE_HALF_BASE_FRACTION: Float = 0.35f
+            private const val CONE_TIP_HEIGHT_FRACTION: Float = 0.0f
+            private const val CONE_BASE_ALPHA: Int = 110
+            private const val USER_CONE_SCALE: Float = 0.6f
 
             /**
              * Per-mode pin colour. Picked to be roughly aligned with the in-app glyphs and the

@@ -205,6 +205,7 @@ internal fun NearbyScreen(
     val rawPins = uiState.pinsOrEmpty()
     val filteredPins = rawPins.filteredBy(uiState.routeTypeFilter)
     val userLocation = (uiState as? NearbyUiState.Loaded)?.userLocation
+    val userBearing = (uiState as? NearbyUiState.Loaded)?.userBearing
     val nearbyRows = filteredPins.toRows(from = userLocation)
 
     // Persistent peek-and-expand sheet. `BottomSheetScaffold` (M3) is the right shape for a
@@ -259,6 +260,7 @@ internal fun NearbyScreen(
                 map.Render(
                     camera = camera,
                     userLocation = userLocation,
+                    userBearing = userBearing,
                     pins = filteredPins,
                     isDark = isDark,
                     onCameraIdle = onCameraIdle,

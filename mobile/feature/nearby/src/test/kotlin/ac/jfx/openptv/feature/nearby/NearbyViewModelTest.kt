@@ -2,6 +2,7 @@ package ac.jfx.openptv.feature.nearby
 
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.test.FakeDepartureRepository
+import ac.jfx.openptv.core.data.test.FakeDeviceHeadingProvider
 import ac.jfx.openptv.core.data.test.FakeLocationProvider
 import ac.jfx.openptv.core.data.test.FakeNearbyStopsRepository
 import ac.jfx.openptv.core.data.test.FakeStopDetailRepository
@@ -36,6 +37,7 @@ import org.junit.Test
 class NearbyViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val locationProvider = FakeLocationProvider()
+    private val headingProvider = FakeDeviceHeadingProvider()
     private val nearbyRepo = FakeNearbyStopsRepository()
     private val stopDetailRepo = FakeStopDetailRepository()
     private val departureRepo = FakeDepartureRepository()
@@ -53,6 +55,7 @@ class NearbyViewModelTest {
     private fun newViewModel(): NearbyViewModel =
         NearbyViewModel(
             locationProvider = locationProvider,
+            deviceHeadingProvider = headingProvider,
             nearbyStopsRepository = nearbyRepo,
             stopDetailRepository = stopDetailRepo,
             departureRepository = departureRepo,
@@ -679,6 +682,129 @@ class NearbyViewModelTest {
             val loaded = viewModel.uiState.value as NearbyUiState.Loaded
             val sheet = loaded.pendingSheet as SheetState.Open
             assertThat(sheet.sheet.stop).isEqualTo(stop)
+        }
+
+    // -------------------- user location + heading (issue #99) --------------------
+    //
+    // The blue-dot indicator is sourced from a continuous `LocationProvider.observe()` flow plus
+    // a separate `DeviceHeadingProvider.observe()` for the cone rotation. The contract here:
+    //  - on permission grant, both subscriptions start; updates land in `userLocation` /
+    //    `userBearing` on the `Loaded` state.
+    //  - on permission deny, neither tracker is running and both fields stay null.
+    //  - if the heading provider completes (no rotation sensor), `userBearing` stays at null —
+    //    the screen renders the dot without a cone.
+    //  - while follow-me is on, the camera tracks the user (centre moves with the fix).
+
+    @Test
+    fun `user location updates land in the Loaded state's userLocation field`() =
+        runTest(dispatcher) {
+            val seeded = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(seeded)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val moved = Coordinates(lat = -37.81, lng = 144.97)
+            locationProvider.emit(moved)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.userLocation).isEqualTo(moved)
+        }
+
+    @Test
+    fun `following the user — camera tracks the moving fix`() =
+        runTest(dispatcher) {
+            val seeded = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(seeded)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            // Follow-me starts on by default when a fix is present at grant time.
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).isFollowingUser).isTrue()
+
+            val moved = Coordinates(lat = -37.82, lng = 144.98)
+            locationProvider.emit(moved)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(moved)
+        }
+
+    @Test
+    fun `not following the user — fix updates but camera holds`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            // A manual pan past the leash drops follow-me.
+            viewModel.onCameraIdle(
+                OpenPtvCameraState(Coordinates(lat = -37.86, lng = 144.99), 13.0),
+            )
+            advanceUntilIdle()
+            val pannedCamera = (viewModel.uiState.value as NearbyUiState.Loaded).camera
+
+            // A subsequent location update should NOT move the camera back.
+            val moved = Coordinates(lat = -37.82, lng = 144.98)
+            locationProvider.emit(moved)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.userLocation).isEqualTo(moved)
+            assertThat(loaded.camera).isEqualTo(pannedCamera)
+        }
+
+    @Test
+    fun `heading updates land in the Loaded state's userBearing field`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            // No emit yet — the sensor flow doesn't replay, so the field starts null.
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).userBearing).isNull()
+
+            // 90° clockwise from north = east. The fake passes the value straight through; the
+            // ViewModel doesn't transform it.
+            headingProvider.emit(90f)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.userBearing).isEqualTo(90f)
+        }
+
+    @Test
+    fun `heading provider completion leaves userBearing at null — no compass case`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            // Simulate "device has no rotation sensor" — the production provider closes the flow
+            // immediately on subscribe in that case.
+            headingProvider.complete()
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.userBearing).isNull()
+        }
+
+    @Test
+    fun `permission denied — neither user location nor heading is tracked`() =
+        runTest(dispatcher) {
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = false)
+            advanceUntilIdle()
+
+            // Pushing values on either provider should not flip the state out of PermissionDenied.
+            locationProvider.emit(CoordinatesMother.flindersStreet().build())
+            // 0° = north — any value works here; we're testing that the state isn't flipped.
+            headingProvider.emit(0f)
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value).isInstanceOf(NearbyUiState.PermissionDenied::class.java)
         }
 
     @Test
