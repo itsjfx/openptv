@@ -56,9 +56,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Placeholder until the hosted backend is up. HTTPS only — release builds do
-            // not allow cleartext.
-            buildConfigField("String", "BACKEND_BASE_URL", "\"https://api.openptv.app/api/v3/\"")
+            // Maintainer-operated proxy. HTTPS only — release builds do not allow cleartext.
+            buildConfigField("String", "BACKEND_BASE_URL", "\"https://ptv.jfx.ac/api/v3/\"")
         }
     }
 
