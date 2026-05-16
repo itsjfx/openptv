@@ -11,6 +11,7 @@ on:
     paths:
       - 'mobile/**'
       - '.github/workflows/mobile-prerelease.yml'
+      - 'bin/mobile-preview-release.sh'
   workflow_dispatch:
 
 # Cancel in-flight runs when a newer commit lands on master so we don't race
@@ -25,13 +26,8 @@ permissions:
 jobs:
   prerelease:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mobile
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      PREVIEW_TAG: preview
-      APK_NAME: openptv-preview.apk
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-java@v5
@@ -43,52 +39,11 @@ jobs:
       # Same artifact CI already uploads on PRs. Unsigned debug APK is fine
       # for a preview channel — see PR description for why we deliberately
       # avoid signing secrets here.
-      - run: ./gradlew :app:assembleDebug
+      - working-directory: mobile
+        run: ./gradlew :app:assembleDebug
 
-      - name: Stage APK with deterministic name
-        run: cp app/build/outputs/apk/debug/app-debug.apk "../${APK_NAME}"
-
-      - name: Build release notes
-        working-directory: ${{ github.workspace }}
-        env:
-          SHA: ${{ github.sha }}
-          REPO: ${{ github.repository }}
-          SERVER: ${{ github.server_url }}
-        run: |
-          short="${SHA:0:7}"
-          subject="$(git log -1 --format='%s' "$SHA")"
-          built="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          {
-            echo "# openptv preview build"
-            echo
-            echo "Automated build from commit: [\`${short}\`](${SERVER}/${REPO}/commit/${SHA}) — ${subject}"
-            echo
-            echo "Built on: ${built}"
-            echo
-            echo "## Download"
-            echo
-            echo "- [${APK_NAME}](${SERVER}/${REPO}/releases/download/${PREVIEW_TAG}/${APK_NAME})"
-            echo
-            echo "This is an unsigned debug APK rebuilt on every push to \`master\` that touches \`mobile/\`. It is **not** a stable release and may contain unfinished features."
-          } > release_notes.md
-
-      # Delete any existing preview release + tag so the new one cleanly takes
-      # over the `preview` tag (gh refuses to recreate against an existing tag).
-      - name: Remove previous preview release
-        working-directory: ${{ github.workspace }}
-        run: |
-          if gh release view "${PREVIEW_TAG}" >/dev/null 2>&1; then
-            gh release delete "${PREVIEW_TAG}" --yes --cleanup-tag
-          fi
-
-      # `--target` pins the tag to this commit; `--prerelease` keeps it out of
-      # the "latest release" slot on the repo home page.
-      - name: Create rolling preview release
-        working-directory: ${{ github.workspace }}
-        run: |
-          gh release create "${PREVIEW_TAG}" \
-            --target "${GITHUB_SHA}" \
-            --title "openptv preview ($(date -u '+%Y-%m-%d'))" \
-            --notes-file release_notes.md \
-            --prerelease \
-            "${APK_NAME}"
+      # Everything past the build (staging the APK, building notes, moving the
+      # `preview` tag, creating the release) lives in bin/mobile-preview-release.sh.
+      # The script reads GITHUB_SHA / GITHUB_REPOSITORY / GITHUB_SERVER_URL from
+      # the default Actions environment — no `${{ github.* }}` expansion inline.
+      - run: bin/mobile-preview-release.sh
