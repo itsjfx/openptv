@@ -16,10 +16,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -154,7 +156,12 @@ fun SettingsScreen(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    .padding(padding)
+                    // The screen now overflows on shorter devices once direct-mode credential
+                    // fields are visible — wrap in a vertical scroll so the bottom rows stay
+                    // reachable. Plain Column (not LazyColumn) is fine here: the row count is
+                    // fixed and small, and LazyColumn's overhead would be wasted.
+                    .verticalScroll(rememberScrollState()),
         ) {
             SectionHeader(text = stringResource(R.string.feature_settings_appearance_section))
             ThemeModeSection(
