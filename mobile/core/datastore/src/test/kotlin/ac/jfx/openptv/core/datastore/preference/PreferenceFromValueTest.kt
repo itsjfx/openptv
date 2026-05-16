@@ -1,5 +1,6 @@
 package ac.jfx.openptv.core.datastore.preference
 
+import ac.jfx.openptv.core.model.RouteType
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
@@ -110,5 +111,79 @@ class PreferenceFromValueTest {
     @Test
     fun `timeFormat default is System`() {
         assertThat(TimeFormatPreference.default).isEqualTo(TimeFormatPreference.System)
+    }
+
+    // -------------------- MapRouteTypeFilterPreference (issue #112) --------------------
+    //
+    // Wire format: stringified RouteType.toCode() ints in a Set<String>. The persister drops
+    // Unknown defensively; the parser drops unknown codes (forward-compat) and falls back to
+    // default if the resulting set is empty (preserves the "filter is never empty" invariant the
+    // ViewModel enforces at runtime).
+
+    @Test
+    fun `mapRouteTypeFilter fromValue parses every known wire code`() {
+        // 0=Train, 1=Tram, 2=Bus, 3=VLine, 4=NightBus — see RouteType.toCode().
+        val parsed = MapRouteTypeFilterPreference.fromValue(setOf("0", "1", "2", "3", "4"))
+        assertThat(parsed.value).containsExactly(
+            RouteType.Train,
+            RouteType.Tram,
+            RouteType.Bus,
+            RouteType.VLine,
+            RouteType.NightBus,
+        )
+    }
+
+    @Test
+    fun `mapRouteTypeFilter fromValue parses a non-default subset`() {
+        val parsed = MapRouteTypeFilterPreference.fromValue(setOf("1"))
+        assertThat(parsed.value).containsExactly(RouteType.Tram)
+    }
+
+    @Test
+    fun `mapRouteTypeFilter fromValue null falls back to default`() {
+        assertThat(MapRouteTypeFilterPreference.fromValue(null))
+            .isEqualTo(MapRouteTypeFilterPreference.default)
+    }
+
+    @Test
+    fun `mapRouteTypeFilter fromValue empty set falls back to default`() {
+        // Invariant: the filter is never empty. An empty persisted set must restore default.
+        assertThat(MapRouteTypeFilterPreference.fromValue(emptySet()))
+            .isEqualTo(MapRouteTypeFilterPreference.default)
+    }
+
+    @Test
+    fun `mapRouteTypeFilter fromValue drops unknown wire codes`() {
+        // A newer build wrote a code (e.g. "99" for a future mode) this build doesn't know —
+        // drop it silently rather than crash. The known entries still come through.
+        val parsed = MapRouteTypeFilterPreference.fromValue(setOf("0", "99"))
+        assertThat(parsed.value).containsExactly(RouteType.Train)
+    }
+
+    @Test
+    fun `mapRouteTypeFilter fromValue drops unparseable entries`() {
+        val parsed = MapRouteTypeFilterPreference.fromValue(setOf("0", "garbage"))
+        assertThat(parsed.value).containsExactly(RouteType.Train)
+    }
+
+    @Test
+    fun `mapRouteTypeFilter fromValue all-unknown falls back to default`() {
+        // Every entry was unparseable / unknown — set ends up empty after filtering, which
+        // triggers the same fall-back as a null stored value.
+        assertThat(MapRouteTypeFilterPreference.fromValue(setOf("99", "garbage")))
+            .isEqualTo(MapRouteTypeFilterPreference.default)
+    }
+
+    @Test
+    fun `mapRouteTypeFilter default contains the five visible modes`() {
+        // Mirrors NearbyUiState.DEFAULT_FILTER exactly. Unknown is intentionally excluded — it's
+        // a runtime fall-back, not a user-facing mode, so it never goes on the wire.
+        assertThat(MapRouteTypeFilterPreference.default.value).containsExactly(
+            RouteType.Train,
+            RouteType.Tram,
+            RouteType.Bus,
+            RouteType.VLine,
+            RouteType.NightBus,
+        )
     }
 }

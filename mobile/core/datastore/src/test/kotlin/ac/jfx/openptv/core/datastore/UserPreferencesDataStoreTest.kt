@@ -2,8 +2,10 @@ package ac.jfx.openptv.core.datastore
 
 import ac.jfx.openptv.core.datastore.preference.DynamicColourPreference
 import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
+import ac.jfx.openptv.core.datastore.preference.MapRouteTypeFilterPreference
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
 import ac.jfx.openptv.core.datastore.preference.TimeFormatPreference
+import ac.jfx.openptv.core.model.RouteType
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
@@ -135,6 +137,28 @@ class UserPreferencesDataStoreTest {
         }
 
     @Test
+    fun mapRouteTypeFilter_persists_across_datastore_reopen() =
+        runTest {
+            // Issue #112: write a non-default subset ({Tram, Train}), close the store, re-open
+            // against the same file, assert the typed flow emits the exact same subset.
+            val firstScope = newScope()
+            val firstStore = openDataStore(firstScope)
+            val written = MapRouteTypeFilterPreference.of(setOf(RouteType.Tram, RouteType.Train))
+            written.put(firstScope, firstStore)
+            firstStore.data.first()
+            firstScope.cancel()
+
+            val secondScope = newScope()
+            val reopened = UserPreferencesDataStore(openDataStore(secondScope))
+            reopened.mapRouteTypeFilter.test {
+                val emitted = awaitItem()
+                assertThat(emitted.value).containsExactly(RouteType.Tram, RouteType.Train)
+                cancelAndIgnoreRemainingEvents()
+            }
+            secondScope.cancel()
+        }
+
+    @Test
     fun empty_datastore_emits_default_for_every_preference() =
         runTest {
             val scope = newScope()
@@ -154,6 +178,10 @@ class UserPreferencesDataStoreTest {
             }
             facade.timeFormat.test {
                 assertThat(awaitItem()).isEqualTo(TimeFormatPreference.default)
+                cancelAndIgnoreRemainingEvents()
+            }
+            facade.mapRouteTypeFilter.test {
+                assertThat(awaitItem()).isEqualTo(MapRouteTypeFilterPreference.default)
                 cancelAndIgnoreRemainingEvents()
             }
             scope.cancel()

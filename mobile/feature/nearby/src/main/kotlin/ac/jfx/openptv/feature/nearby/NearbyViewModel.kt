@@ -6,6 +6,8 @@ import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.DepartureRepository
 import ac.jfx.openptv.core.data.NearbyStopsRepository
 import ac.jfx.openptv.core.data.StopDetailRepository
+import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
+import ac.jfx.openptv.core.datastore.preference.MapRouteTypeFilterPreference
 import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
@@ -13,11 +15,15 @@ import ac.jfx.openptv.core.model.StopId
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -68,10 +74,28 @@ class NearbyViewModel
         private val nearbyStopsRepository: NearbyStopsRepository,
         private val stopDetailRepository: StopDetailRepository,
         private val departureRepository: DepartureRepository,
+        private val userPreferences: UserPreferencesDataStore,
     ) : ViewModel() {
         private val _uiState: MutableStateFlow<NearbyUiState> =
             MutableStateFlow(NearbyUiState.PermissionUnasked)
         val uiState: StateFlow<NearbyUiState> = _uiState.asStateFlow()
+
+        /**
+         * Persisted route-type chip selection (issue #112). Loaded once at init eagerly so the
+         * first `Loaded` / `PermissionDenied` state can seed [NearbyUiState.routeTypeFilter] from
+         * the user's previous session instead of [DEFAULT_FILTER]. A `Deferred` (not a `Flow`)
+         * because DataStore only needs to read the value once at startup — subsequent writes are
+         * driven by [onRouteTypeFilterToggled] and the in-memory state is the source of truth.
+         *
+         * Starts eagerly ([CoroutineStart.DEFAULT]) so the DataStore read is already in flight by
+         * the time [onPermissionResult] awaits the value. If the persisted set is empty / unknown
+         * the parser falls back to [MapRouteTypeFilterPreference.default] — the "filter is never
+         * empty" invariant holds at the seed too.
+         */
+        private val persistedFilter: Deferred<Set<RouteType>> =
+            viewModelScope.async(start = CoroutineStart.DEFAULT) {
+                userPreferences.mapRouteTypeFilter.first().value
+            }
 
         /**
          * Holds the current pin-fetch coroutine (debounce + network call). Replaced on every
@@ -125,6 +149,13 @@ class NearbyViewModel
          */
         fun onPermissionResult(granted: Boolean) {
             viewModelScope.launch {
+                // Wait for the persisted chip selection (issue #112). The `async` started at init
+                // so this `await` is non-blocking once DataStore's first emission has landed —
+                // typically already done by the time the screen has finished its permission
+                // round-trip. If the persisted load is somehow still pending, we yield until it
+                // resolves; using the DEFAULT_FILTER here as a fall-back would silently lose the
+                // user's previous "trams only" choice on a slow first launch.
+                val seedFilter = persistedFilter.await()
                 if (granted) {
                     val fix = locationProvider.lastKnown()
                     val initialCamera =
@@ -141,10 +172,10 @@ class NearbyViewModel
                             isFollowingUser = fix != null,
                             pendingSheet = SheetState.Closed,
                             showEmptyHint = false,
-                            routeTypeFilter = currentFilter(),
+                            routeTypeFilter = seedFilter,
                         )
                     // Seed the debounce so the initial fetch lands without a manual pan.
-                    scheduleFetch(initialCamera, currentFilter())
+                    scheduleFetch(initialCamera, seedFilter)
                     // Start tracking the user's location + heading for the blue-dot indicator
                     // (issue #99). Both subscriptions are best-effort: a permission revocation or
                     // missing sensor completes the flow cleanly, leaving `userLocation`/
@@ -157,11 +188,11 @@ class NearbyViewModel
                         NearbyUiState.PermissionDenied(
                             camera = OpenPtvCameraState(centre = MELBOURNE_CBD, zoom = INITIAL_ZOOM),
                             pins = emptyList(),
-                            routeTypeFilter = currentFilter(),
+                            routeTypeFilter = seedFilter,
                         )
                     scheduleFetch(
                         OpenPtvCameraState(MELBOURNE_CBD, INITIAL_ZOOM),
-                        currentFilter(),
+                        seedFilter,
                     )
                     // Permission denied — make sure neither tracker is still running from a prior
                     // grant within the same VM lifetime.
@@ -291,6 +322,10 @@ class NearbyViewModel
             stopCache.clear()
             updateFilter(nextFilter)
             clearRenderedPins()
+            // Persist the new selection so the next app launch reopens on the same chip set
+            // (issue #112). Fire-and-forget on `viewModelScope` — DataStore serialises the write
+            // on its own dispatcher so two rapid taps land in order without explicit locking.
+            MapRouteTypeFilterPreference.of(nextFilter).put(viewModelScope, userPreferences.dataStore)
             currentCamera()?.let { camera ->
                 scheduleFetch(camera, nextFilter)
             }

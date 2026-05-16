@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.datastore
 
 import ac.jfx.openptv.core.datastore.preference.DynamicColourPreference
 import ac.jfx.openptv.core.datastore.preference.FavouritesSortPreference
+import ac.jfx.openptv.core.datastore.preference.MapRouteTypeFilterPreference
 import ac.jfx.openptv.core.datastore.preference.PreferenceKeys
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
 import ac.jfx.openptv.core.datastore.preference.TimeFormatPreference
@@ -60,5 +61,14 @@ class UserPreferencesDataStore(
     val timeFormat: Flow<TimeFormatPreference> =
         dataStore.data.map { prefs ->
             TimeFormatPreference.fromValue(prefs[PreferenceKeys.TIME_FORMAT])
+        }
+
+    /**
+     * Current [MapRouteTypeFilterPreference] for the Nearby map (issue #112) — the set of
+     * chip-selected `RouteType`s persisted across app launches. Re-emitted on every write.
+     */
+    val mapRouteTypeFilter: Flow<MapRouteTypeFilterPreference> =
+        dataStore.data.map { prefs ->
+            MapRouteTypeFilterPreference.fromValue(prefs[PreferenceKeys.MAP_ROUTE_TYPE_FILTER])
         }
 }
