@@ -1,0 +1,49 @@
+name: mobile-prerelease
+
+# Rolling pre-release: every push to master that touches mobile/ produces a
+# fresh debug APK and force-moves a single `preview` tag onto the new commit.
+# There is exactly one pre-release at any time — older builds are intentionally
+# replaced rather than archived (issue #50 will own the properly-signed release
+# pipeline; this one is preview-only, no secrets / no keystore).
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile-prerelease.yml'
+      - 'bin/mobile-preview-release.sh'
+  workflow_dispatch:
+
+# Cancel in-flight runs when a newer commit lands on master so we don't race
+# two `gh release create` calls against the same tag.
+concurrency:
+  group: mobile-prerelease
+  cancel-in-progress: true
+
+permissions:
+  contents: write  # needed to move the tag and create the release
+
+jobs:
+  prerelease:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6
+
+      # Same artifact CI already uploads on PRs. Unsigned debug APK is fine
+      # for a preview channel — see PR description for why we deliberately
+      # avoid signing secrets here.
+      - working-directory: mobile
+        run: ./gradlew :app:assembleDebug
+
+      # Everything past the build (staging the APK, building notes, moving the
+      # `preview` tag, creating the release) lives in bin/mobile-preview-release.sh.
+      # The script reads GITHUB_SHA / GITHUB_REPOSITORY / GITHUB_SERVER_URL from
+      # the default Actions environment — no `${{ github.* }}` expansion inline.
+      - run: bin/mobile-preview-release.sh
