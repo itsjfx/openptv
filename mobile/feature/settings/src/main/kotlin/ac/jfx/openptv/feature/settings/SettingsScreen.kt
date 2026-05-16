@@ -522,7 +522,7 @@ private fun ServerPickerDialog(
                     selected = state.choice == ServerChoice.Default,
                     titleRes = R.string.feature_settings_server_default_title,
                     bodyRes = R.string.feature_settings_server_default_body,
-                    detail = state.defaultUrl,
+                    detail = null,
                     onClick = { state = state.copy(choice = ServerChoice.Default) },
                     testTag = TestTagServerDefaultChoice,
                 )
@@ -702,7 +702,7 @@ private fun DirectPtvChoiceRow(
  * Build the Direct PTV blurb with two tappable spans. We rely on `indexOf` against the resolved
  * string rather than carrying span markers in `strings.xml`, because formatted-string spans in
  * Android resources don't survive translation tooling well and the source-of-truth substrings
- * (the email + the docs URL) are stable per the string-resource comment.
+ * (the email + the "see here" anchor) are stable per the string-resource comment.
  */
 @Composable
 private fun ptvApiKeyBlurb(): AnnotatedString {
@@ -711,6 +711,7 @@ private fun ptvApiKeyBlurb(): AnnotatedString {
     val emailSubject = stringResource(R.string.feature_settings_ptv_email_subject)
     val emailBody = stringResource(R.string.feature_settings_ptv_email_body)
     val docsUrl = stringResource(R.string.feature_settings_ptv_docs_url)
+    val docsAnchor = "see here"
     val mailto =
         "mailto:$email?subject=${URLEncoder.encode(emailSubject, Charsets.UTF_8.name())}" +
             "&body=${URLEncoder.encode(emailBody, Charsets.UTF_8.name())}"
@@ -726,16 +727,16 @@ private fun ptvApiKeyBlurb(): AnnotatedString {
 
     return buildAnnotatedString {
         val emailIdx = body.indexOf(email)
-        val docsIdx = body.indexOf(docsUrl)
+        val docsIdx = body.indexOf(docsAnchor)
 
-        // Three substrings can land in any order — append them in document order so the
+        // Two substrings can land in any order — append them in document order so the
         // surrounding `body` text reads exactly as written. Defence in depth: if either
         // substring is missing (translation accidentally dropped it), fall back to the raw
         // body without crashing.
         val anchors =
             listOfNotNull(
                 if (emailIdx >= 0) emailIdx to (emailIdx + email.length to mailto) else null,
-                if (docsIdx >= 0) docsIdx to (docsIdx + docsUrl.length to docsUrl) else null,
+                if (docsIdx >= 0) docsIdx to (docsIdx + docsAnchor.length to docsUrl) else null,
             ).sortedBy { it.first }
 
         if (anchors.isEmpty()) {
