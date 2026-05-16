@@ -45,6 +45,18 @@ class FakeSettingsRepository
             state.update { it.copy(backendBaseUrl = url) }
         }
 
+        override suspend fun setDirectMode(enabled: Boolean) {
+            state.update { it.copy(directMode = enabled) }
+        }
+
+        override suspend fun setDevId(devId: String) {
+            state.update { it.copy(devId = devId) }
+        }
+
+        override suspend fun setApiKey(apiKey: String) {
+            state.update { it.copy(apiKey = apiKey) }
+        }
+
         override suspend fun completeSetup(url: String) {
             state.update { it.copy(backendBaseUrl = url, setupCompleted = true) }
         }

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -43,6 +44,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -65,6 +68,9 @@ fun SettingsRoute(
     val currentBackendUrl by viewModel.currentBackendUrl.collectAsStateWithLifecycle(
         initialValue = "",
     )
+    val directModeState by viewModel.directModeState.collectAsStateWithLifecycle(
+        initialValue = DirectModeState.empty,
+    )
     SettingsScreen(
         themeMode = LocalThemeMode.current,
         dynamicColour = LocalDynamicColour.current,
@@ -72,10 +78,14 @@ fun SettingsRoute(
         timeFormat = LocalTimeFormat.current,
         currentBackendUrl = currentBackendUrl,
         defaultBackendUrl = viewModel.defaultBackendUrl,
+        directModeState = directModeState,
         onThemeMode = viewModel::setThemeMode,
         onDynamicColour = viewModel::setDynamicColour,
         onTimeFormat = viewModel::setTimeFormat,
         onBackendUrl = viewModel::setBackendBaseUrl,
+        onDirectMode = viewModel::setDirectMode,
+        onDevId = viewModel::setDevId,
+        onApiKey = viewModel::setApiKey,
         onBack = onBack,
     )
 }
@@ -108,10 +118,14 @@ fun SettingsScreen(
     timeFormat: TimeFormatPreference,
     currentBackendUrl: String,
     defaultBackendUrl: String,
+    directModeState: DirectModeState,
     onThemeMode: (ThemeModePreference) -> Unit,
     onDynamicColour: (DynamicColourPreference) -> Unit,
     onTimeFormat: (TimeFormatPreference) -> Unit,
     onBackendUrl: (String) -> Unit,
+    onDirectMode: (Boolean) -> Unit,
+    onDevId: (String) -> Unit,
+    onApiKey: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     var showServerDialog by rememberSaveable { mutableStateOf(false) }
@@ -163,6 +177,12 @@ fun SettingsScreen(
             ServerRow(
                 currentUrl = currentBackendUrl,
                 onClick = { showServerDialog = true },
+            )
+            DirectModeSection(
+                state = directModeState,
+                onToggle = onDirectMode,
+                onDevId = onDevId,
+                onApiKey = onApiKey,
             )
         }
     }
@@ -443,6 +463,100 @@ private fun ServerRow(
 }
 
 /**
+ * Direct-PTV-mode section. The toggle row mirrors `DynamicColourSection`'s shape (full-row
+ * `toggleable` + `Switch` with `onCheckedChange = null`), and the two TextFields appear inline
+ * below the toggle when it's on. Persistence is write-on-each-change — the user's last
+ * keystroke is what gets saved, no explicit Save button. The dev_id field is plain text; the
+ * api_key field is masked via [PasswordVisualTransformation] so over-the-shoulder readers can't
+ * see the secret. Auto-cap is off + `KeyboardCapitalization.None` because both values are
+ * case-sensitive opaque tokens — the system's "capitalize first letter" default would silently
+ * mangle them on first paste.
+ */
+@Composable
+private fun DirectModeSection(
+    state: DirectModeState,
+    onToggle: (Boolean) -> Unit,
+    onDevId: (String) -> Unit,
+    onApiKey: (String) -> Unit,
+) {
+    Column {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .toggleable(
+                        value = state.enabled,
+                        role = Role.Switch,
+                        onValueChange = onToggle,
+                    )
+                    .padding(horizontal = 24.dp, vertical = 12.dp)
+                    .testTag(TestTagDirectModeRow),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.padding(end = 16.dp)) {
+                Text(
+                    text = stringResource(R.string.feature_settings_direct_mode_label),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = stringResource(R.string.feature_settings_direct_mode_subtitle),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Switch(
+                checked = state.enabled,
+                // `null` so the row's `toggleable` owns the change; matches the dynamic-colour row.
+                onCheckedChange = null,
+                modifier = Modifier.testTag(TestTagDirectModeSwitch),
+            )
+        }
+        if (state.enabled) {
+            OutlinedTextField(
+                value = state.devId,
+                onValueChange = onDevId,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 4.dp)
+                        .testTag(TestTagDirectModeDevIdField),
+                label = { Text(stringResource(R.string.feature_settings_direct_mode_devid_label)) },
+                singleLine = true,
+                keyboardOptions =
+                    KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                    ),
+            )
+            OutlinedTextField(
+                value = state.apiKey,
+                onValueChange = onApiKey,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 4.dp)
+                        .testTag(TestTagDirectModeApiKeyField),
+                label = { Text(stringResource(R.string.feature_settings_direct_mode_apikey_label)) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions =
+                    KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                    ),
+            )
+            Text(
+                text = stringResource(R.string.feature_settings_direct_mode_helper),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+            )
+        }
+    }
+}
+
+/**
  * Picker dialog. Two radio rows (Default / Custom) plus a conditional URL field. The `Save`
  * button is disabled until [ServerPickerState.canSave] is `true` — same validation rule the
  * onboarding `SetupUiState.canContinue` uses (minus consent, which only applies on first run).
@@ -598,3 +712,7 @@ internal const val TestTagServerCustomChoice: String = "settings-server-custom-c
 internal const val TestTagServerCustomUrlField: String = "settings-server-custom-url-field"
 internal const val TestTagServerDialogSave: String = "settings-server-dialog-save"
 internal const val TestTagServerDialogCancel: String = "settings-server-dialog-cancel"
+internal const val TestTagDirectModeRow: String = "settings-direct-mode-row"
+internal const val TestTagDirectModeSwitch: String = "settings-direct-mode-switch"
+internal const val TestTagDirectModeDevIdField: String = "settings-direct-mode-devid"
+internal const val TestTagDirectModeApiKeyField: String = "settings-direct-mode-apikey"

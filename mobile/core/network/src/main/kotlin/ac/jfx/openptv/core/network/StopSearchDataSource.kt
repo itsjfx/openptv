@@ -13,8 +13,8 @@ import ac.jfx.openptv.core.model.Stop
  *
  * - [term] is the raw query string from the user. The data source URL-encodes it.
  *
- * The backend base URL was previously a parameter on this function; it now lives behind
- * [BackendUrlProvider] which the network impl injects. That keeps URL composition fully inside
+ * The absolute URL was previously composed from a `baseUrl` parameter; it now lives behind
+ * [PtvUrlResolver] which the network impl injects. That keeps URL composition fully inside
  * `:core:network` and means consumers in `:core:data` no longer touch URL strings.
  */
 interface StopSearchDataSource {

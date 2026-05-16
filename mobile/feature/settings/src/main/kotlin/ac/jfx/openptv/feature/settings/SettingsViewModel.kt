@@ -27,12 +27,13 @@ import javax.inject.Inject
  * `CoroutineScope` that outlives the composition (so a quick back-press during a write doesn't
  * drop the persist).
  *
- * **Server URL** is read here because `SettingsRepository` predates the typed-DSL machinery —
- * it owns its own `Flow<AppSettings>`, not a composition local. Exposing [currentBackendUrl] as
- * a `StateFlow` lets the Server row subtitle render the active URL without the screen having to
- * inject the repository directly. Writes go through [setBackendBaseUrl], which delegates to the
- * repository so URL normalisation (trailing slash, trim) stays in one place — the same path the
- * onboarding screen uses for `completeSetup`.
+ * **Server URL + direct-mode credentials** are read here because `SettingsRepository` predates
+ * the typed-DSL machinery — it owns its own `Flow<AppSettings>`, not a composition local.
+ * Exposing [directModeState] as a `StateFlow` lets the direct-mode UI render the persisted
+ * toggle / devid / api-key without the screen having to inject the repository directly. The API
+ * key intentionally does NOT flow through a composition local: only this ViewModel reads it.
+ * Writes go through [setDirectMode] / [setDevId] / [setApiKey], which delegate to the
+ * repository.
  *
  * `setThemeMode` / `setDynamicColour` accept the full typed preference (not an enum value)
  * because the DSL's exhaustive `when` matching belongs at the call site — the screen passes
@@ -59,6 +60,28 @@ class SettingsViewModel
                     scope = viewModelScope,
                     started = SharingStarted.WhileSubscribed(STATE_FLOW_TIMEOUT_MILLIS),
                     initialValue = "",
+                )
+
+        /**
+         * Direct-mode toggle + credentials, mapped off the same repository flow. One state object
+         * (rather than three separate flows) keeps the toggle and the field values in lock-step
+         * so the screen never observes a half-applied write. `apiKey` rides this flow only so
+         * the masked field can re-render after a write — composition locals deliberately don't
+         * carry it (one fewer place the secret could leak).
+         */
+        val directModeState: Flow<DirectModeState> =
+            settingsRepository.settings
+                .map {
+                    DirectModeState(
+                        enabled = it.directMode,
+                        devId = it.devId,
+                        apiKey = it.apiKey,
+                    )
+                }
+                .stateIn(
+                    scope = viewModelScope,
+                    started = SharingStarted.WhileSubscribed(STATE_FLOW_TIMEOUT_MILLIS),
+                    initialValue = DirectModeState.empty,
                 )
 
         /**
@@ -98,9 +121,45 @@ class SettingsViewModel
             }
         }
 
+        /** Persist the direct-mode toggle. */
+        fun setDirectMode(enabled: Boolean) {
+            viewModelScope.launch {
+                settingsRepository.setDirectMode(enabled)
+            }
+        }
+
+        /** Persist the user-supplied PTV `devid`. */
+        fun setDevId(devId: String) {
+            viewModelScope.launch {
+                settingsRepository.setDevId(devId)
+            }
+        }
+
+        /** Persist the user-supplied PTV API key. */
+        fun setApiKey(apiKey: String) {
+            viewModelScope.launch {
+                settingsRepository.setApiKey(apiKey)
+            }
+        }
+
         private companion object {
             // Standard NIA value — matches the rest of the app's `WhileSubscribed` timeouts so
             // configuration changes don't drop the upstream subscription mid-rotation.
             const val STATE_FLOW_TIMEOUT_MILLIS: Long = 5_000
         }
     }
+
+/**
+ * Snapshot of the direct-mode UI state. Plain `data class` — three primitive fields don't justify
+ * an Object Mother. Lives next to the ViewModel because the screen is the only consumer.
+ */
+data class DirectModeState(
+    val enabled: Boolean,
+    val devId: String,
+    val apiKey: String,
+) {
+    companion object {
+        /** Initial state — toggle off, no credentials. Used as `stateIn` seed. */
+        val empty = DirectModeState(enabled = false, devId = "", apiKey = "")
+    }
+}

@@ -246,4 +246,63 @@ class SettingsViewModelTest {
         // future change that decouples them gets a compile-time hint at every consumer.
         assertThat(viewModel.defaultBackendUrl).isEqualTo(settingsRepository.defaultBackendBaseUrl)
     }
+
+    // ------------------------------------------------------------------------
+    // Direct PTV mode — the surface added in #102.
+    // ------------------------------------------------------------------------
+
+    @Test
+    fun `directModeState defaults to disabled with empty credentials`() =
+        runTest {
+            viewModel.directModeState.test {
+                val state = awaitItem()
+                assertThat(state.enabled).isFalse()
+                assertThat(state.devId).isEmpty()
+                assertThat(state.apiKey).isEmpty()
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `setDirectMode true persists through SettingsRepository`() =
+        runTest {
+            viewModel.setDirectMode(true)
+
+            assertThat(settingsRepository.settings.first().directMode).isTrue()
+        }
+
+    @Test
+    fun `setDevId persists through SettingsRepository`() =
+        runTest {
+            viewModel.setDevId("3000176")
+
+            assertThat(settingsRepository.settings.first().devId).isEqualTo("3000176")
+        }
+
+    @Test
+    fun `setApiKey persists through SettingsRepository`() =
+        runTest {
+            viewModel.setApiKey("9c132d31-6a30-4cac-8d8b-8a1970834799")
+
+            assertThat(settingsRepository.settings.first().apiKey)
+                .isEqualTo("9c132d31-6a30-4cac-8d8b-8a1970834799")
+        }
+
+    @Test
+    fun `directModeState reflects writes through the same flow`() =
+        runTest {
+            viewModel.directModeState.test {
+                // Drain initial empty state.
+                awaitItem()
+                viewModel.setDirectMode(true)
+                viewModel.setDevId("DEV")
+                viewModel.setApiKey("KEY")
+                // Each write produces an emission; we only need the final one to be stable.
+                val final = expectMostRecentItem()
+                assertThat(final.enabled).isTrue()
+                assertThat(final.devId).isEqualTo("DEV")
+                assertThat(final.apiKey).isEqualTo("KEY")
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 }

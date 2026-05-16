@@ -17,8 +17,8 @@ import java.util.concurrent.CancellationException
  * repository's contract.
  *
  * URL resolution moved out of the repository in gap #4: `StopSearchDataSource.searchStops`
- * no longer takes a `baseUrl` parameter. The "reads URL from settings on every call" test moved
- * to [SettingsBackendUrlProviderTest], which now owns that responsibility.
+ * no longer takes a `baseUrl` parameter. The "reads URL / signing-mode from settings on every
+ * call" test lives next to the resolver itself in `SettingsPtvUrlResolverTest`.
  *
  * The inline `FakeDataSource` stays: it's a one-off `StopSearchDataSource` fake whose `calls`
  * recorder is specific to this test class. Promoting it to `:core:data-test` would be premature.

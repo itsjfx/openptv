@@ -29,6 +29,20 @@ interface SettingsRepository {
     suspend fun setBackendBaseUrl(url: String)
 
     /**
+     * Direct-mode toggle. When `true`, the network layer signs requests locally with the user's
+     * [AppSettings.devId] / [AppSettings.apiKey] and calls PTV's host directly, bypassing the
+     * proxy URL. Flipping the flag takes effect on the next request — no rebuild of the
+     * Retrofit graph.
+     */
+    suspend fun setDirectMode(enabled: Boolean)
+
+    /** Update the user's PTV `devid` (used for signing in direct mode). */
+    suspend fun setDevId(devId: String)
+
+    /** Update the user's PTV API key (used for signing in direct mode). */
+    suspend fun setApiKey(apiKey: String)
+
+    /**
      * First-run completion: store the chosen URL and flip [AppSettings.setupCompleted] to true
      * in a single transaction so the nav graph never observes a half-finished setup.
      */

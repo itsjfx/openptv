@@ -41,7 +41,7 @@ class RetrofitDepartureDataSourceTest {
         dataSource =
             RetrofitDepartureDataSource(
                 api = service,
-                backendUrl = BackendUrlProvider { baseUrl },
+                urlResolver = PtvUrlResolver { path -> "$baseUrl$path" },
             )
     }
 

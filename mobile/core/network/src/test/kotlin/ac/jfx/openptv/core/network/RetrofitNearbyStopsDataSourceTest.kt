@@ -40,7 +40,7 @@ class RetrofitNearbyStopsDataSourceTest {
         dataSource =
             RetrofitNearbyStopsDataSource(
                 api = service,
-                backendUrl = BackendUrlProvider { baseUrl },
+                urlResolver = PtvUrlResolver { path -> "$baseUrl$path" },
             )
     }
 

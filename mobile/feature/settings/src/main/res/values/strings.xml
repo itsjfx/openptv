@@ -42,4 +42,13 @@
     <string name="feature_settings_server_custom_field_helper">Include scheme, host, port, and the /api/v3/ path. A trailing slash will be added automatically.</string>
     <string name="feature_settings_server_dialog_save">Save</string>
     <string name="feature_settings_server_dialog_cancel">Cancel</string>
+
+    <!-- Direct PTV mode (issue #102). Lets users supply their own dev_id + key and bypass
+         the proxy. The toggle, devid label, and api_key label all live in the Server section
+         so users find them next to the proxy URL row. -->
+    <string name="feature_settings_direct_mode_label">Use my own PTV API key</string>
+    <string name="feature_settings_direct_mode_subtitle">Sign requests on-device and skip the backend.</string>
+    <string name="feature_settings_direct_mode_devid_label">PTV dev_id</string>
+    <string name="feature_settings_direct_mode_apikey_label">PTV API key</string>
+    <string name="feature_settings_direct_mode_helper">Stored on this device only. Both fields are required for direct mode to take effect; if either is blank the app falls back to the proxy.</string>
 </resources>
