@@ -15,11 +15,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,7 +66,9 @@ internal fun SearchScreenContent(
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(
+            // LargeTopAppBar — gear sits in the small action row above the hero heading, ReadYou
+            // layout (issue #111 review).
+            LargeTopAppBar(
                 title = { Text(stringResource(R.string.feature_search_title)) },
                 navigationIcon = {
                     SettingsGearButton(onClick = onOpenSettings)
