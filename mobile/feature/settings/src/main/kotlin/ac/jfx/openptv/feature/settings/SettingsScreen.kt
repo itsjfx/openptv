@@ -24,7 +24,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -63,10 +62,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * row without an explicit refresh.
  */
 @Composable
-fun SettingsRoute(
-    onBack: () -> Unit,
-    viewModel: SettingsViewModel = hiltViewModel(),
-) {
+fun SettingsRoute(viewModel: SettingsViewModel = hiltViewModel()) {
     val currentBackendUrl by viewModel.currentBackendUrl.collectAsStateWithLifecycle(
         initialValue = "",
     )
@@ -88,7 +84,6 @@ fun SettingsRoute(
         onDirectMode = viewModel::setDirectMode,
         onDevId = viewModel::setDevId,
         onApiKey = viewModel::setApiKey,
-        onBack = onBack,
     )
 }
 
@@ -128,7 +123,6 @@ fun SettingsScreen(
     onDirectMode: (Boolean) -> Unit,
     onDevId: (String) -> Unit,
     onApiKey: (String) -> Unit,
-    onBack: () -> Unit,
 ) {
     var showServerDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -136,17 +130,6 @@ fun SettingsScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.feature_settings_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        // Material icons aren't pulled into this module to keep the dep
-                        // surface tight; a glyph stand-in keeps the back affordance.
-                        // Mirrors `:feature:stop-detail`'s `StopDetailScreen.kt:184`.
-                        Text(
-                            text = "‹",
-                            style = MaterialTheme.typography.headlineMedium,
-                        )
-                    }
-                },
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },

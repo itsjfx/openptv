@@ -4,7 +4,6 @@
          `openptv.android.library` convention plugin: every string in :feature:settings starts
          with `feature_settings_`. -->
     <string name="feature_settings_title">Settings</string>
-    <string name="feature_settings_back">Back</string>
 
     <!-- Appearance section -->
     <string name="feature_settings_appearance_section">Appearance</string>

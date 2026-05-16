@@ -4,7 +4,6 @@
          `openptv.android.library` convention plugin: every string in :feature:stop-detail
          starts with `feature_stop_detail_`. -->
     <string name="feature_stop_detail_title">Stop detail</string>
-    <string name="feature_stop_detail_back">Back</string>
     <string name="feature_stop_detail_refresh">Refresh</string>
     <string name="feature_stop_detail_loading">Loading departures…</string>
     <string name="feature_stop_detail_empty">No upcoming departures.</string>

@@ -83,7 +83,6 @@ class StopDetailScreenTest {
             StopDetailRoute(
                 stopId = StopId(STOP_ID),
                 routeType = RouteType.Train,
-                onBack = { /* no-op */ },
             )
         }
 
@@ -114,7 +113,6 @@ class StopDetailScreenTest {
             StopDetailRoute(
                 stopId = StopId(STOP_ID),
                 routeType = RouteType.Train,
-                onBack = { /* no-op */ },
             )
         }
 
@@ -152,7 +150,6 @@ class StopDetailScreenTest {
             StopDetailRoute(
                 stopId = StopId(STOP_ID),
                 routeType = RouteType.Train,
-                onBack = { /* no-op */ },
             )
         }
 
@@ -184,7 +181,6 @@ class StopDetailScreenTest {
             StopDetailRoute(
                 stopId = StopId(STOP_ID),
                 routeType = RouteType.Train,
-                onBack = { /* no-op */ },
             )
         }
 
@@ -229,7 +225,6 @@ class StopDetailScreenTest {
             StopDetailRoute(
                 stopId = StopId(STOP_ID),
                 routeType = RouteType.Train,
-                onBack = { /* no-op */ },
             )
         }
 
@@ -274,7 +269,6 @@ class StopDetailScreenTest {
             StopDetailRoute(
                 stopId = StopId(STOP_ID),
                 routeType = RouteType.Train,
-                onBack = { /* no-op */ },
             )
         }
 
@@ -320,7 +314,6 @@ class StopDetailScreenTest {
             StopDetailRoute(
                 stopId = StopId(STOP_ID),
                 routeType = RouteType.Train,
-                onBack = { /* no-op */ },
             )
         }
 
@@ -377,7 +370,6 @@ class StopDetailScreenTest {
             StopDetailRoute(
                 stopId = StopId(STOP_ID),
                 routeType = RouteType.Train,
-                onBack = { /* no-op */ },
             )
         }
 
@@ -451,7 +443,6 @@ class StopDetailScreenTest {
                 routeType = RouteType.Tram,
                 focusRouteId = FAVE_ROUTE_ID,
                 focusDirectionId = FAVE_DIRECTION_ID,
-                onBack = { /* no-op */ },
             )
         }
 
