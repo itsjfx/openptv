@@ -241,6 +241,36 @@ class SettingsScreenTest {
     }
 
     // ------------------------------------------------------------------------
+    // Direct PTV mode — added in #102, moved inside the picker dialog in PR #113 review.
+    // ------------------------------------------------------------------------
+
+    @Test
+    fun savingDirectPtvCredentials_persistsDirectModeAndCreds() {
+        val devId = "3000176"
+        val apiKey = "9c132d31-6a30-4cac-8d8b-8a1970834799"
+
+        composeTestRule.setContent {
+            SettingsProvider(userPreferences = userPreferences) {
+                SettingsRoute(onBack = {})
+            }
+        }
+
+        // Open the dialog, switch to Direct PTV, fill credentials, save.
+        composeTestRule.onNodeWithTag(TestTagServerRow).performClick()
+        composeTestRule.onNodeWithTag(TestTagServerDirectChoice).performClick()
+        composeTestRule.onNodeWithTag(TestTagDirectModeDevIdField).performTextInput(devId)
+        composeTestRule.onNodeWithTag(TestTagDirectModeApiKeyField).performTextInput(apiKey)
+        composeTestRule.onNodeWithTag(TestTagServerDialogSave).performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            currentDirectMode() && currentDevId() == devId && currentApiKey() == apiKey
+        }
+        assertThat(currentDirectMode()).isTrue()
+        assertThat(currentDevId()).isEqualTo(devId)
+        assertThat(currentApiKey()).isEqualTo(apiKey)
+    }
+
+    // ------------------------------------------------------------------------
     // Time format — added in #89. Same pattern as the theme-mode rows above.
     // ------------------------------------------------------------------------
 
@@ -300,6 +330,15 @@ class SettingsScreenTest {
 
     private fun currentBackendUrl(): String =
         runBlocking { settingsRepository.settings.first().backendBaseUrl }
+
+    private fun currentDirectMode(): Boolean =
+        runBlocking { settingsRepository.settings.first().directMode }
+
+    private fun currentDevId(): String =
+        runBlocking { settingsRepository.settings.first().devId }
+
+    private fun currentApiKey(): String =
+        runBlocking { settingsRepository.settings.first().apiKey }
 
     private fun currentDynamicColour(): DynamicColourPreference = runBlocking { userPreferences.dynamicColour.first() }
 

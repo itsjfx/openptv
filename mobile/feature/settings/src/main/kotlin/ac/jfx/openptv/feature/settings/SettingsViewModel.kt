@@ -28,12 +28,11 @@ import javax.inject.Inject
  * drop the persist).
  *
  * **Server URL + direct-mode credentials** are read here because `SettingsRepository` predates
- * the typed-DSL machinery — it owns its own `Flow<AppSettings>`, not a composition local.
- * Exposing [directModeState] as a `StateFlow` lets the direct-mode UI render the persisted
- * toggle / devid / api-key without the screen having to inject the repository directly. The API
- * key intentionally does NOT flow through a composition local: only this ViewModel reads it.
- * Writes go through [setDirectMode] / [setDevId] / [setApiKey], which delegate to the
- * repository.
+ * the typed-DSL machinery — it owns its own `Flow<AppSettings>`, not a composition local. The
+ * single [serverConfigState] flow exposes the proxy URL + direct-mode toggle + credentials so
+ * the picker dialog can seed itself from one snapshot — no half-applied write the dialog could
+ * observe mid-keystroke. Writes go through [saveServerSelection], which sequences the three
+ * persists (direct flag, URL, credentials) in one place so the dialog has a single seam.
  *
  * `setThemeMode` / `setDynamicColour` accept the full typed preference (not an enum value)
  * because the DSL's exhaustive `when` matching belongs at the call site — the screen passes
@@ -48,32 +47,18 @@ class SettingsViewModel
         private val settingsRepository: SettingsRepository,
     ) : ViewModel() {
         /**
-         * Currently-active backend base URL. Backed by `SettingsRepository.settings` so a write
-         * from the picker dialog (or anywhere else) re-emits here without an explicit refresh.
-         * Initial value is empty — the row's subtitle handles that as a transient one-frame
-         * "loading" state and recomposes the moment the repository emits its first value.
+         * Snapshot of the persisted server configuration. One state object (rather than four
+         * separate flows) keeps the toggle, URL, and credential fields in lock-step so the
+         * picker dialog seeds from a consistent view of the world. `apiKey` rides this flow only
+         * so the masked field can re-render after a write — composition locals deliberately
+         * don't carry it (one fewer place the secret could leak).
          */
-        val currentBackendUrl: Flow<String> =
-            settingsRepository.settings
-                .map { it.backendBaseUrl }
-                .stateIn(
-                    scope = viewModelScope,
-                    started = SharingStarted.WhileSubscribed(STATE_FLOW_TIMEOUT_MILLIS),
-                    initialValue = "",
-                )
-
-        /**
-         * Direct-mode toggle + credentials, mapped off the same repository flow. One state object
-         * (rather than three separate flows) keeps the toggle and the field values in lock-step
-         * so the screen never observes a half-applied write. `apiKey` rides this flow only so
-         * the masked field can re-render after a write — composition locals deliberately don't
-         * carry it (one fewer place the secret could leak).
-         */
-        val directModeState: Flow<DirectModeState> =
+        val serverConfigState: Flow<ServerConfigState> =
             settingsRepository.settings
                 .map {
-                    DirectModeState(
-                        enabled = it.directMode,
+                    ServerConfigState(
+                        backendUrl = it.backendBaseUrl,
+                        directMode = it.directMode,
                         devId = it.devId,
                         apiKey = it.apiKey,
                     )
@@ -81,7 +66,7 @@ class SettingsViewModel
                 .stateIn(
                     scope = viewModelScope,
                     started = SharingStarted.WhileSubscribed(STATE_FLOW_TIMEOUT_MILLIS),
-                    initialValue = DirectModeState.empty,
+                    initialValue = ServerConfigState.empty,
                 )
 
         /**
@@ -111,34 +96,34 @@ class SettingsViewModel
         }
 
         /**
-         * Persist a new backend base URL via [SettingsRepository], reusing its normalisation
-         * (trim + trailing-slash). Fire-and-forget on the ViewModel scope so a quick dialog
-         * dismiss doesn't drop the write — DataStore serialises the edit on its own dispatcher.
+         * Persist the picker dialog's [ServerPickerState] in a single sequence of writes:
+         *
+         *  - **Default proxy** — directMode = false, backendBaseUrl = bundled default.
+         *  - **Custom proxy**  — directMode = false, backendBaseUrl = user-typed URL.
+         *  - **Direct PTV**   — directMode = true, devId + apiKey = user-typed creds. Leaves
+         *    the previously-chosen proxy URL untouched so flipping back later still works
+         *    without re-typing.
+         *
+         * Repository writes are fire-and-forget on the ViewModel scope so a quick dialog
+         * dismiss doesn't drop the persist — DataStore serialises edits on its own dispatcher.
          */
-        fun setBackendBaseUrl(url: String) {
+        fun saveServerSelection(state: ServerPickerState) {
             viewModelScope.launch {
-                settingsRepository.setBackendBaseUrl(url)
-            }
-        }
-
-        /** Persist the direct-mode toggle. */
-        fun setDirectMode(enabled: Boolean) {
-            viewModelScope.launch {
-                settingsRepository.setDirectMode(enabled)
-            }
-        }
-
-        /** Persist the user-supplied PTV `devid`. */
-        fun setDevId(devId: String) {
-            viewModelScope.launch {
-                settingsRepository.setDevId(devId)
-            }
-        }
-
-        /** Persist the user-supplied PTV API key. */
-        fun setApiKey(apiKey: String) {
-            viewModelScope.launch {
-                settingsRepository.setApiKey(apiKey)
+                when (state.choice) {
+                    ServerChoice.Default -> {
+                        settingsRepository.setDirectMode(false)
+                        settingsRepository.setBackendBaseUrl(state.defaultUrl)
+                    }
+                    ServerChoice.Custom -> {
+                        settingsRepository.setDirectMode(false)
+                        settingsRepository.setBackendBaseUrl(state.customUrl)
+                    }
+                    ServerChoice.DirectPtv -> {
+                        settingsRepository.setDevId(state.devId)
+                        settingsRepository.setApiKey(state.apiKey)
+                        settingsRepository.setDirectMode(true)
+                    }
+                }
             }
         }
 
@@ -150,16 +135,18 @@ class SettingsViewModel
     }
 
 /**
- * Snapshot of the direct-mode UI state. Plain `data class` — three primitive fields don't justify
- * an Object Mother. Lives next to the ViewModel because the screen is the only consumer.
+ * Snapshot of the persisted server configuration, surfaced to the Settings screen and used to
+ * seed the picker dialog. Plain `data class` — four primitive fields don't justify an Object
+ * Mother. Lives next to the ViewModel because the screen is the only consumer.
  */
-data class DirectModeState(
-    val enabled: Boolean,
+data class ServerConfigState(
+    val backendUrl: String,
+    val directMode: Boolean,
     val devId: String,
     val apiKey: String,
 ) {
     companion object {
-        /** Initial state — toggle off, no credentials. Used as `stateIn` seed. */
-        val empty = DirectModeState(enabled = false, devId = "", apiKey = "")
+        /** Initial state — empty URL, direct mode off, no credentials. Used as `stateIn` seed. */
+        val empty = ServerConfigState(backendUrl = "", directMode = false, devId = "", apiKey = "")
     }
 }
