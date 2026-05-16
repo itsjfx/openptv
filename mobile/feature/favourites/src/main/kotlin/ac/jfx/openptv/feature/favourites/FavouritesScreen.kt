@@ -26,6 +26,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -33,7 +34,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -146,7 +146,9 @@ internal fun FavouritesScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            // LargeTopAppBar puts the gear in the small action row up top and renders the title as
+            // a hero heading underneath — matches the ReadYou layout the issue calls out.
+            LargeTopAppBar(
                 title = { Text(stringResource(R.string.feature_favourites_title)) },
                 navigationIcon = {
                     SettingsGearButton(onClick = onOpenSettings)

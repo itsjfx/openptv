@@ -37,6 +37,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -44,7 +45,6 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -228,7 +228,9 @@ internal fun NearbyScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
+            // LargeTopAppBar — gear sits in the small action row above the hero heading, ReadYou
+            // layout (issue #111 review).
+            LargeTopAppBar(
                 title = { Text(stringResource(R.string.feature_nearby_title)) },
                 navigationIcon = {
                     SettingsGearButton(onClick = onOpenSettings)
