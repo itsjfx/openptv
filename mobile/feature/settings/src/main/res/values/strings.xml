@@ -29,26 +29,38 @@
     <string name="feature_settings_time_format_twenty_four">24-hour (15:30)</string>
 
     <!-- Server section. Mirrors the wording used by the first-run setup screen so users see the
-         same vocabulary in both places. -->
+         same vocabulary in both places. The picker dialog adds a third "Direct PTV API" choice
+         (issue #102) — selecting it signs requests on-device with the user's dev_id + key and
+         skips the proxy. -->
     <string name="feature_settings_server_section">Server</string>
     <string name="feature_settings_server_label">Backend server</string>
+    <string name="feature_settings_server_subtitle_direct">Direct PTV API (your key)</string>
     <string name="feature_settings_server_dialog_title">Choose your server</string>
     <string name="feature_settings_server_default_title">Use the default server</string>
-    <string name="feature_settings_server_default_body">Bundled URL, suitable for emulator development and the hosted release.</string>
+    <string name="feature_settings_server_default_body">This is a proxy operated by the maintainers so you can use OpenPTV without needing your own API key. We will block you if abuse or high traffic is detected. We respect your privacy and do not sell, track, or correlate user information for analytics or tracking purposes. We collect HTTP traffic logs for 24 hours for abuse tracking.</string>
     <string name="feature_settings_server_custom_title">Use a custom server</string>
     <string name="feature_settings_server_custom_body">Run your own proxy and point the app at it. The address is stored on this device only.</string>
     <string name="feature_settings_server_custom_field_label">Backend URL</string>
     <string name="feature_settings_server_custom_field_placeholder">http://192.168.1.10:8080/api/v3/</string>
     <string name="feature_settings_server_custom_field_helper">Include scheme, host, port, and the /api/v3/ path. A trailing slash will be added automatically.</string>
+    <string name="feature_settings_server_direct_title">Use my own PTV API key</string>
+    <!-- Body text shown under the Direct PTV radio. Two URLs inside the copy are rendered as
+         tappable LinkAnnotations at runtime — the mailto: link opens the system mail composer
+         pre-filled with the suggested subject + body, and the docs link opens the VIC.gov.au
+         registering-for-an-API-key section in the browser. Keep the literal substrings
+         "APIKeyRequest@ptv.vic.gov.au" and the vic.gov.au URL stable; SettingsScreen's
+         buildAnnotatedString matches them by indexOf. -->
+    <string name="feature_settings_server_direct_body">If you value your privacy, we suggest requesting an API key from Public Transport Victoria. OpenPTV can then make calls to PTV\'s API directly. Send an email to APIKeyRequest@ptv.vic.gov.au with the subject "PTV Timetable API – request for key" (see https://www.vic.gov.au/public-transport-timetable-api#registering-for-an-api-key-and-calculating-a-signature) for more information, and enter the API key and user Id you receive here. (This may take a week to process)</string>
+    <string name="feature_settings_server_direct_devid_label">PTV user ID</string>
+    <string name="feature_settings_server_direct_apikey_label">PTV API key</string>
+    <string name="feature_settings_server_direct_helper">Stored on this device only. Both fields are required.</string>
     <string name="feature_settings_server_dialog_save">Save</string>
     <string name="feature_settings_server_dialog_cancel">Cancel</string>
 
-    <!-- Direct PTV mode (issue #102). Lets users supply their own dev_id + key and bypass
-         the proxy. The toggle, devid label, and api_key label all live in the Server section
-         so users find them next to the proxy URL row. -->
-    <string name="feature_settings_direct_mode_label">Use my own PTV API key</string>
-    <string name="feature_settings_direct_mode_subtitle">Sign requests on-device and skip the backend.</string>
-    <string name="feature_settings_direct_mode_devid_label">PTV dev_id</string>
-    <string name="feature_settings_direct_mode_apikey_label">PTV API key</string>
-    <string name="feature_settings_direct_mode_helper">Stored on this device only. Both fields are required for direct mode to take effect; if either is blank the app falls back to the proxy.</string>
+    <!-- mailto: subject + body for the PTV API-key request link inside the Direct PTV blurb.
+         Subject mirrors Thomas's wording in the issue thread; body keeps it short and polite. -->
+    <string name="feature_settings_ptv_email">APIKeyRequest@ptv.vic.gov.au</string>
+    <string name="feature_settings_ptv_email_subject">PTV Timetable API – request for key</string>
+    <string name="feature_settings_ptv_email_body">Hi, I would like an API key to use OpenPTV, may I have one please?</string>
+    <string name="feature_settings_ptv_docs_url">https://www.vic.gov.au/public-transport-timetable-api#registering-for-an-api-key-and-calculating-a-signature</string>
 </resources>
