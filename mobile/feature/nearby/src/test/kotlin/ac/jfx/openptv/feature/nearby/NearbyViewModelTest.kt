@@ -34,6 +34,7 @@ import org.junit.Test
  * idles within 500 ms fires exactly one fetch") can be proved with virtual time.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass")
 class NearbyViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val locationProvider = FakeLocationProvider()
@@ -184,6 +185,83 @@ class NearbyViewModelTest {
 
             assertThat(afterFirst - baselineCalls).isEqualTo(1)
             assertThat(afterSecond - afterFirst).isEqualTo(1)
+        }
+
+    // -------------------- camera-move-started cancels in-flight fetch (issue #109) --------------------
+    //
+    // With #108's LRU cache, the previously-rendered pins persist on screen during a drag — so we
+    // can cancel an in-flight fetch the moment the user starts moving the camera without anything
+    // visibly flickering. Saves bandwidth + PTV rate-limit on viewports the user is panning past.
+
+    @Test
+    fun `move-started inside the debounce window cancels the pending fetch`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // User releases drag → idle. We're mid-debounce when they start a new drag.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 2)
+            // New drag begins — cancels the pending fetch.
+            viewModel.onCameraMoveStarted()
+            // Run past where the debounce WOULD have fired the fetch.
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // No new fetch — the cancel killed it before the network call landed.
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(0)
+        }
+
+    @Test
+    fun `camera idle after move-started fires a fresh fetch once settled`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Idle → mid-debounce drag → idle. The first fetch must be cancelled; the second must
+            // fire with the final camera position once the debounce elapses.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 2)
+            viewModel.onCameraMoveStarted()
+            advanceTimeBy(100)
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.83, 144.98), 13.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
+            assertThat(nearbyRepo.requestedCalls.last().coordinates)
+                .isEqualTo(Coordinates(-37.83, 144.98))
+        }
+
+    @Test
+    fun `repeated move-started events without a settle never fire a fetch`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Simulate a long continuous drag — the user releases and grabs the map again without
+            // ever letting the camera settle for the debounce window. No fetch should land.
+            repeat(5) {
+                viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96 + it * 0.01), 13.0))
+                advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 4)
+                viewModel.onCameraMoveStarted()
+                advanceTimeBy(50)
+            }
+            advanceUntilIdle()
+
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(0)
         }
 
     @Test

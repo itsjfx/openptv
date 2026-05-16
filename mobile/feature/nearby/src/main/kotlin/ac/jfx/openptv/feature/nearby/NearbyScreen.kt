@@ -136,6 +136,7 @@ fun NearbyRoute(
         timeFormatter = timeFormatter,
         distanceFormatter = distanceFormatter,
         onCameraIdle = viewModel::onCameraIdle,
+        onCameraMoveStarted = viewModel::onCameraMoveStarted,
         onPinClicked = viewModel::onPinClicked,
         onSheetDismissed = viewModel::onSheetDismissed,
         onFollowMeClicked = viewModel::onFollowMeClicked,
@@ -186,6 +187,7 @@ internal fun NearbyScreen(
     timeFormatter: RelativeTimeFormatter,
     distanceFormatter: DistanceFormatter,
     onCameraIdle: (OpenPtvCameraState) -> Unit,
+    onCameraMoveStarted: () -> Unit,
     onPinClicked: (Stop) -> Unit,
     onSheetDismissed: () -> Unit,
     onFollowMeClicked: () -> Unit,
@@ -264,6 +266,7 @@ internal fun NearbyScreen(
                     pins = filteredPins,
                     isDark = isDark,
                     onCameraIdle = onCameraIdle,
+                    onCameraMoveStarted = onCameraMoveStarted,
                     onPinClicked = onPinClicked,
                     modifier = Modifier.fillMaxSize().testTag(TestTagMap),
                 )
