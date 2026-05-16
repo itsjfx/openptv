@@ -47,6 +47,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.IntOffset
@@ -71,6 +73,7 @@ import kotlin.math.roundToInt
 fun FavouritesRoute(
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusRouteId: Int, focusDirectionId: Int) -> Unit,
     onOpenSearch: () -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: FavouritesViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -93,6 +96,7 @@ fun FavouritesRoute(
         onUndoDelete = viewModel::onUndoDelete,
         onClearUndo = viewModel::clearPendingUndo,
         onOpenSearch = onOpenSearch,
+        onOpenSettings = onOpenSettings,
         onToggleEditMode = viewModel::toggleEditMode,
         onRefresh = viewModel::refresh,
     )
@@ -109,6 +113,7 @@ internal fun FavouritesScreen(
     onUndoDelete: () -> Unit,
     onClearUndo: () -> Unit,
     onOpenSearch: () -> Unit,
+    onOpenSettings: () -> Unit,
     onToggleEditMode: () -> Unit,
     onRefresh: () -> Unit,
 ) {
@@ -143,6 +148,9 @@ internal fun FavouritesScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.feature_favourites_title)) },
+                navigationIcon = {
+                    SettingsGearButton(onClick = onOpenSettings)
+                },
                 actions = {
                     // Edit toggle (issue #78). A glyph stand-in keeps the dep surface tight —
                     // no Material Icons artifact pull, same trade as elsewhere in the app.
@@ -518,6 +526,29 @@ private fun NextDepartureSubtext(
     }
 }
 
+/**
+ * Top-left settings gear, used by the three bottom-nav main screens (issue #111). Settings is no
+ * longer a bottom-nav tab — it lives behind this gear instead, and the host pushes it as a
+ * destination so system back returns to whichever main screen launched it. Glyph stand-in keeps
+ * `:feature:favourites` off the Material Icons artifact, same trade as the edit toggle.
+ */
+@Composable
+private fun SettingsGearButton(onClick: () -> Unit) {
+    val description = stringResource(R.string.feature_favourites_open_settings)
+    IconButton(
+        onClick = onClick,
+        modifier =
+            Modifier
+                .testTag(TestTagSettingsGear)
+                .semantics { contentDescription = description },
+    ) {
+        Text(
+            text = "⚙",
+            style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
 private fun RouteType.glyph(): String =
     when (this) {
         RouteType.Train -> "🚆"
@@ -561,3 +592,4 @@ internal const val TestTagRowList: String = "favourites-row-list"
 internal const val TestTagDragHandle: String = "favourites-drag-handle"
 internal const val TestTagEditToggle: String = "favourites-edit-toggle"
 internal const val TestTagPullToRefresh: String = "favourites-pull-to-refresh"
+internal const val TestTagSettingsGear: String = "favourites-settings-gear"

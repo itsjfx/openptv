@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -40,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 @Composable
 fun SearchScreen(
     onStopSelected: (Stop) -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     val query by viewModel.query.collectAsStateWithLifecycle()
@@ -49,6 +51,7 @@ fun SearchScreen(
         uiState = uiState,
         onQueryChanged = viewModel::onQueryChanged,
         onStopSelected = onStopSelected,
+        onOpenSettings = onOpenSettings,
     )
 }
 
@@ -59,10 +62,16 @@ internal fun SearchScreenContent(
     uiState: SearchUiState,
     onQueryChanged: (String) -> Unit,
     onStopSelected: (Stop) -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(stringResource(R.string.feature_search_title)) })
+            TopAppBar(
+                title = { Text(stringResource(R.string.feature_search_title)) },
+                navigationIcon = {
+                    SettingsGearButton(onClick = onOpenSettings)
+                },
+            )
         },
     ) { padding ->
         Column(
@@ -200,5 +209,28 @@ private fun RouteType.label(): String =
         RouteType.Unknown -> stringResource(R.string.feature_search_route_type_unknown)
     }
 
+/**
+ * Top-left settings gear — see the equivalent doc on `:feature:favourites`. Pushed as a
+ * destination by the app composition root so system back returns to whichever main screen
+ * launched it (issue #111).
+ */
+@Composable
+private fun SettingsGearButton(onClick: () -> Unit) {
+    val description = stringResource(R.string.feature_search_open_settings)
+    IconButton(
+        onClick = onClick,
+        modifier =
+            Modifier
+                .testTag(TestTagSettingsGear)
+                .semantics { contentDescription = description },
+    ) {
+        Text(
+            text = "⚙",
+            style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
 internal const val TestTagQueryField: String = "search-query-field"
 internal const val TestTagResults: String = "search-results-list"
+internal const val TestTagSettingsGear: String = "search-settings-gear"

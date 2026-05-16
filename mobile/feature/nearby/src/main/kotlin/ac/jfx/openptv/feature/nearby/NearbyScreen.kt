@@ -36,6 +36,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -80,6 +81,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 @Composable
 fun NearbyRoute(
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int) -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: NearbyViewModel = hiltViewModel(),
     map: OpenPtvMap = hiltViewModel<NearbyMapHolder>().map,
     initialiser: OpenPtvMapInitialiser = hiltViewModel<NearbyMapHolder>().initialiser,
@@ -145,6 +147,7 @@ fun NearbyRoute(
             viewModel.onSheetDismissed()
             onOpenStopDetail(stop.id.value, stop.routeType.toCode())
         },
+        onOpenSettings = onOpenSettings,
         onOpenAppSettings = {
             val intent =
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
@@ -193,6 +196,7 @@ internal fun NearbyScreen(
     onFollowMeClicked: () -> Unit,
     onRouteTypeFilterToggled: (RouteType) -> Unit,
     onViewStop: (Stop) -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
     rationaleDismissed: Boolean,
     onRationaleDismiss: () -> Unit,
@@ -226,6 +230,9 @@ internal fun NearbyScreen(
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.feature_nearby_title)) },
+                navigationIcon = {
+                    SettingsGearButton(onClick = onOpenSettings)
+                },
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },
@@ -835,6 +842,27 @@ private fun RouteType.glyph(): String =
     }
 
 /**
+ * Top-left settings gear — see equivalent doc on `:feature:favourites`. Pushed as a destination
+ * by the app composition root so system back returns to whichever main screen launched it.
+ */
+@Composable
+private fun SettingsGearButton(onClick: () -> Unit) {
+    val description = stringResource(R.string.feature_nearby_open_settings)
+    IconButton(
+        onClick = onClick,
+        modifier =
+            Modifier
+                .testTag(TestTagSettingsGear)
+                .semantics { contentDescription = description },
+    ) {
+        Text(
+            text = "⚙",
+            style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
+/**
  * Estimate luminance from an `argb` color. Material 3's `ColorScheme.surface` is the host theme's
  * primary background; a low-luminance value means we're in dark mode. We do this rather than
  * reading a `LocalThemeMode` because `:feature:nearby` doesn't depend on `:core:datastore` and
@@ -868,6 +896,7 @@ internal const val TestTagNearbyList: String = "nearby-list"
 internal const val TestTagNearbyListHeader: String = "nearby-list-header"
 internal const val TestTagNearbyListItems: String = "nearby-list-items"
 internal const val TestTagNearbyListEmpty: String = "nearby-list-empty"
+internal const val TestTagSettingsGear: String = "nearby-settings-gear"
 
 internal fun filterChipTestTag(routeType: RouteType): String = "nearby-filter-chip-${routeType.name.lowercase()}"
 

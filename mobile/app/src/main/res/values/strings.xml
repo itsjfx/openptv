@@ -6,11 +6,12 @@
     <string name="home_open_search">Search stops</string>
 
     <!-- Bottom-navigation tab labels. Plain glyphs stand in for Material Icons so :app stays
-         off the icons artifact. -->
+         off the icons artifact. Settings is no longer a tab — it lives behind a top-left gear
+         on each main screen (issue #111) and is pushed as a destination so system back returns
+         to the launching tab. -->
     <string name="bottom_nav_favourites">Favourites</string>
     <string name="bottom_nav_nearby">Nearby</string>
     <string name="bottom_nav_search">Search</string>
-    <string name="bottom_nav_settings">Settings</string>
 
     <!-- Stop search strings live in :feature:search/.../strings.xml.
          Settings (theme mode + dynamic colour) strings live in :feature:settings. -->

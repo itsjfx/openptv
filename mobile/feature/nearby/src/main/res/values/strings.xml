@@ -42,4 +42,7 @@
 
     <!-- Bottom-nav -->
     <string name="feature_nearby_tab_label">Nearby</string>
+
+    <!-- Top-left gear (issue #111) — opens settings, replaces the old Settings bottom-nav tab. -->
+    <string name="feature_nearby_open_settings">Open settings</string>
 </resources>
