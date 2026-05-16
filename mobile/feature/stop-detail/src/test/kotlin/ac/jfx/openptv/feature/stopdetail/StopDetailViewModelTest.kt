@@ -15,6 +15,7 @@ import ac.jfx.openptv.core.model.DirectionId
 import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.testing.DepartureMother
+import ac.jfx.openptv.core.testing.FavouriteRouteAtStopMother
 import ac.jfx.openptv.core.testing.RouteMother
 import ac.jfx.openptv.core.testing.StopDetailMother
 import app.cash.turbine.test
@@ -1039,6 +1040,354 @@ class StopDetailViewModelTest {
             assertThat(favouritesRepository.current).isEmpty()
         }
 
+    // ---------- pin favourites to top (issue #100) ----------
+
+    @Test
+    fun `single favourite at the stop pins above non-favourited groups regardless of next-departure time`() =
+        runTest(dispatcher) {
+            // Two destination blocks. The non-favourite has the earlier next-departure but the
+            // favourite should still hoist to the top.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(DEFAULT_STOP_ID)
+                        .withRouteId(FAVE_ROUTE_ID)
+                        .withDirectionId(FAVE_DIRECTION_ID)
+                        .build(),
+                ),
+            )
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val nonFave =
+                DepartureMother.aDeparture()
+                    .withRouteId(OTHER_ROUTE_ID)
+                    .withDirectionId(OTHER_DIRECTION_ID)
+                    .withDirectionName("East Brunswick")
+                    .withRunRef("NON-1")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:01:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:01:00Z"))
+                    .build()
+            val fave =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID)
+                    .withDirectionId(FAVE_DIRECTION_ID)
+                    .withDirectionName("North Coburg")
+                    .withRunRef("FAV-1")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .build()
+            departureRepository.emitSuccess(listOf(nonFave, fave))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups).hasSize(2)
+            assertThat(loaded.groups[0].key.destination).isEqualTo("north coburg")
+            assertThat(loaded.groups[0].isFavourite).isTrue()
+            assertThat(loaded.groups[1].key.destination).isEqualTo("east brunswick")
+            assertThat(loaded.groups[1].isFavourite).isFalse()
+        }
+
+    @Test
+    fun `multiple favourites order deterministically by routeId asc then directionId asc`() =
+        runTest(dispatcher) {
+            // Three favourites at this stop and one non-favourite. Order them so the natural
+            // earliest-departure sort would *reverse* the expected favourite order — proves the
+            // (routeId, directionId) tie-break wins.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            // Favourite seed order is shuffled to prove the projection picks its own ordering.
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(DEFAULT_STOP_ID)
+                        .withRouteId(FAVE_ROUTE_ID_HIGH)
+                        .withDirectionId(FAVE_DIRECTION_LOW)
+                        .build(),
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(DEFAULT_STOP_ID)
+                        .withRouteId(FAVE_ROUTE_ID_LOW)
+                        .withDirectionId(FAVE_DIRECTION_HIGH)
+                        .build(),
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(DEFAULT_STOP_ID)
+                        .withRouteId(FAVE_ROUTE_ID_LOW)
+                        .withDirectionId(FAVE_DIRECTION_LOW)
+                        .build(),
+                ),
+            )
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            // Departure scheduling is deliberately the reverse of the (routeId, directionId)
+            // ordering so the tie-break is exercised. The non-favourite has the earliest time.
+            val nonFave =
+                DepartureMother.aDeparture()
+                    .withRouteId(OTHER_ROUTE_ID)
+                    .withDirectionId(OTHER_DIRECTION_ID)
+                    .withDirectionName("Footscray")
+                    .withRunRef("NON-1")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:01:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:01:00Z"))
+                    .build()
+            val faveHighRouteLowDir =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID_HIGH)
+                    .withDirectionId(FAVE_DIRECTION_LOW)
+                    .withDirectionName("Werribee")
+                    .withRunRef("F-H-L")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:10:00Z"))
+                    .build()
+            val faveLowRouteHighDir =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID_LOW)
+                    .withDirectionId(FAVE_DIRECTION_HIGH)
+                    .withDirectionName("Sunbury")
+                    .withRunRef("F-L-H")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:20:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:20:00Z"))
+                    .build()
+            val faveLowRouteLowDir =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID_LOW)
+                    .withDirectionId(FAVE_DIRECTION_LOW)
+                    .withDirectionName("Craigieburn")
+                    .withRunRef("F-L-L")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .build()
+            departureRepository.emitSuccess(
+                listOf(nonFave, faveHighRouteLowDir, faveLowRouteHighDir, faveLowRouteLowDir),
+            )
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups).hasSize(4)
+            // The three favourites sit above the non-favourite, ordered by routeId asc, then
+            // directionId asc. Lowest routeId + lowest directionId is first.
+            assertThat(loaded.groups.map { it.key.destination })
+                .containsExactly("craigieburn", "sunbury", "werribee", "footscray")
+                .inOrder()
+            assertThat(loaded.groups[0].isFavourite).isTrue()
+            assertThat(loaded.groups[1].isFavourite).isTrue()
+            assertThat(loaded.groups[2].isFavourite).isTrue()
+            assertThat(loaded.groups[3].isFavourite).isFalse()
+        }
+
+    @Test
+    fun `selected favourite hoists above other favourites even when its deterministic key is later`() =
+        runTest(dispatcher) {
+            // Two favourites at the stop; the user tapped the one whose (routeId, directionId)
+            // would otherwise sort second. That one must end up at index 0 regardless.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(DEFAULT_STOP_ID)
+                        .withRouteId(FAVE_ROUTE_ID_LOW)
+                        .withDirectionId(FAVE_DIRECTION_LOW)
+                        .build(),
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(DEFAULT_STOP_ID)
+                        .withRouteId(FAVE_ROUTE_ID_HIGH)
+                        .withDirectionId(FAVE_DIRECTION_HIGH)
+                        .build(),
+                ),
+            )
+
+            val viewModel =
+                newViewModel(
+                    // Hoist the "high" favourite even though its (routeId, directionId) key sorts
+                    // after the "low" favourite.
+                    focusRouteId = FAVE_ROUTE_ID_HIGH,
+                    focusDirectionId = FAVE_DIRECTION_HIGH,
+                )
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val faveLow =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID_LOW)
+                    .withDirectionId(FAVE_DIRECTION_LOW)
+                    .withDirectionName("Craigieburn")
+                    .withRunRef("F-LOW")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
+                    .build()
+            val faveHigh =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID_HIGH)
+                    .withDirectionId(FAVE_DIRECTION_HIGH)
+                    .withDirectionName("Werribee")
+                    .withRunRef("F-HIGH")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .build()
+            val nonFave =
+                DepartureMother.aDeparture()
+                    .withRouteId(OTHER_ROUTE_ID)
+                    .withDirectionId(OTHER_DIRECTION_ID)
+                    .withDirectionName("Footscray")
+                    .withRunRef("NON")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:02:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:02:00Z"))
+                    .build()
+            departureRepository.emitSuccess(listOf(faveLow, faveHigh, nonFave))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups).hasSize(3)
+            // Selected favourite at index 0, then the other favourite, then non-favourite at tail.
+            assertThat(loaded.groups[0].key.destination).isEqualTo("werribee")
+            assertThat(loaded.groups[0].isPinned).isTrue()
+            assertThat(loaded.groups[0].isFavourite).isTrue()
+            assertThat(loaded.groups[1].key.destination).isEqualTo("craigieburn")
+            assertThat(loaded.groups[1].isPinned).isFalse()
+            assertThat(loaded.groups[1].isFavourite).isTrue()
+            assertThat(loaded.groups[2].key.destination).isEqualTo("footscray")
+            assertThat(loaded.groups[2].isFavourite).isFalse()
+        }
+
+    @Test
+    fun `selected favourite that is not in the visible list falls back gracefully`() =
+        runTest(dispatcher) {
+            // User tapped a favourite for some route, but the current departures emission has no
+            // matching block (PTV temporarily not returning that route's run, or the run finished
+            // for the day). The screen should still render the remaining favourites and
+            // non-favourites in the normal order without crashing.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(DEFAULT_STOP_ID)
+                        .withRouteId(FAVE_ROUTE_ID_LOW)
+                        .withDirectionId(FAVE_DIRECTION_LOW)
+                        .build(),
+                ),
+            )
+
+            val viewModel =
+                newViewModel(
+                    focusRouteId = MISSING_ROUTE_ID,
+                    focusDirectionId = MISSING_DIRECTION_ID,
+                )
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val fave =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID_LOW)
+                    .withDirectionId(FAVE_DIRECTION_LOW)
+                    .withDirectionName("Craigieburn")
+                    .withRunRef("FAV")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .build()
+            val nonFave =
+                DepartureMother.aDeparture()
+                    .withRouteId(OTHER_ROUTE_ID)
+                    .withDirectionId(OTHER_DIRECTION_ID)
+                    .withDirectionName("Footscray")
+                    .withRunRef("NON")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
+                    .build()
+            departureRepository.emitSuccess(listOf(fave, nonFave))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            // Both groups still render — favourite up top, non-favourite underneath. The missing
+            // selected favourite simply doesn't get a pinned slot.
+            assertThat(loaded.groups).hasSize(2)
+            assertThat(loaded.groups[0].key.destination).isEqualTo("craigieburn")
+            assertThat(loaded.groups[0].isFavourite).isTrue()
+            assertThat(loaded.groups[0].isPinned).isFalse()
+            assertThat(loaded.groups[1].key.destination).isEqualTo("footscray")
+            assertThat(loaded.groups[1].isFavourite).isFalse()
+        }
+
+    @Test
+    fun `no favourites at this stop leaves the existing earliest-departure ordering intact`() =
+        runTest(dispatcher) {
+            // Baseline regression: when there are no favourites at the stop, groups still order
+            // by their earliest upcoming departure. Issue #100 must not regress this for the
+            // unfavourited case.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val later =
+                DepartureMother.aDeparture()
+                    .withRouteId(LATE_ROUTE_ID)
+                    .withDirectionId(LATE_DIRECTION_ID)
+                    .withDirectionName("Hurstbridge")
+                    .withRunRef("LATE")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:30:00Z"))
+                    .build()
+            val earlier =
+                DepartureMother.aDeparture()
+                    .withRouteId(EARLY_ROUTE_ID)
+                    .withDirectionId(EARLY_DIRECTION_ID)
+                    .withDirectionName("Mernda")
+                    .withRunRef("EARLY")
+                    .withScheduledDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
+                    .withEstimatedDepartureUtc(Instant.parse("2026-05-14T09:05:00Z"))
+                    .build()
+            departureRepository.emitSuccess(listOf(later, earlier))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.map { it.key.destination })
+                .containsExactly("mernda", "hurstbridge").inOrder()
+        }
+
+    @Test
+    fun `favourites at a different stop are ignored by the projection`() =
+        runTest(dispatcher) {
+            // Favourites flow is global; the ViewModel filters to "this stop" before projecting.
+            // Seed a favourite for a *different* stop and assert no group is treated as favourited.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
+                        .withStopId(OTHER_STOP_ID)
+                        .withRouteId(FAVE_ROUTE_ID)
+                        .withDirectionId(FAVE_DIRECTION_ID)
+                        .build(),
+                ),
+            )
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val matchingTuple =
+                DepartureMother.aDeparture()
+                    .withRouteId(FAVE_ROUTE_ID)
+                    .withDirectionId(FAVE_DIRECTION_ID)
+                    .withDirectionName("North Coburg")
+                    .build()
+            departureRepository.emitSuccess(listOf(matchingTuple))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            // Same (routeId, directionId) tuple, but the favourite is for another stop — should
+            // not light up here.
+            assertThat(loaded.groups.single().isFavourite).isFalse()
+        }
+
     /** A `Clock` that returns a fixed instant — same shape as the formatter's test-only clock. */
     private class FakeClock(private val instant: Instant) : Clock {
         override fun now(): Instant = instant
@@ -1060,5 +1409,14 @@ class StopDetailViewModelTest {
         const val BELGRAVE_CITY_DIRECTION_ID = 8001
         const val LILYDALE_ROUTE_ID = 7002
         const val LILYDALE_CITY_DIRECTION_ID = 8002
+
+        // Issue #100 — multiple favourites with a deterministic ordering key.
+        const val FAVE_ROUTE_ID_LOW = 200
+        const val FAVE_ROUTE_ID_HIGH = 300
+        const val FAVE_DIRECTION_LOW = 5
+        const val FAVE_DIRECTION_HIGH = 50
+        const val MISSING_ROUTE_ID = 9999
+        const val MISSING_DIRECTION_ID = 99
+        const val OTHER_STOP_ID = 2222
     }
 }
