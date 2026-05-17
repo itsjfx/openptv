@@ -3,6 +3,7 @@ package ac.jfx.openptv.feature.setup
 import ac.jfx.openptv.core.data.test.FakeSettingsRepository
 import ac.jfx.openptv.core.model.AppSettings
 import ac.jfx.openptv.core.testing.util.MainDispatcherRule
+import ac.jfx.openptv.feature.settings.ServerChoice
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.flow.first
@@ -31,8 +32,8 @@ class SetupViewModelTest {
             viewModel.uiState.test {
                 // Initial empty defaultUrl is replaced by the persisted value once the init job runs.
                 val seeded = expectMostRecentItem()
-                assertThat(seeded.defaultUrl).isEqualTo("http://default.local/api/v3/")
-                assertThat(seeded.serverChoice).isEqualTo(ServerChoice.Default)
+                assertThat(seeded.pickerState.defaultUrl).isEqualTo("http://default.local/api/v3/")
+                assertThat(seeded.pickerState.choice).isEqualTo(ServerChoice.Default)
                 assertThat(seeded.canContinue).isFalse()
             }
         }
@@ -51,10 +52,36 @@ class SetupViewModelTest {
     fun `custom server choice without URL cannot continue`() =
         runTest {
             val viewModel = SetupViewModel(settings)
-            viewModel.onServerChoiceChanged(ServerChoice.Custom)
+            viewModel.onPickerStateChanged(
+                viewModel.uiState.value.pickerState.copy(choice = ServerChoice.Custom),
+            )
             viewModel.onConsentToggled(true)
             assertThat(viewModel.uiState.value.canContinue).isFalse()
-            viewModel.onCustomUrlChanged("http://10.0.2.2:8080/api/v3/")
+            viewModel.onPickerStateChanged(
+                viewModel.uiState.value.pickerState.copy(customUrl = "http://10.0.2.2:8080/api/v3/"),
+            )
+            assertThat(viewModel.uiState.value.canContinue).isTrue()
+        }
+
+    @Test
+    fun `direct PTV choice without credentials cannot continue`() =
+        runTest {
+            val viewModel = SetupViewModel(settings)
+            viewModel.onPickerStateChanged(
+                viewModel.uiState.value.pickerState.copy(choice = ServerChoice.DirectPtv),
+            )
+            viewModel.onConsentToggled(true)
+            assertThat(viewModel.uiState.value.canContinue).isFalse()
+            viewModel.onPickerStateChanged(
+                viewModel.uiState.value.pickerState.copy(devId = "3000176"),
+            )
+            // Still missing api key.
+            assertThat(viewModel.uiState.value.canContinue).isFalse()
+            viewModel.onPickerStateChanged(
+                viewModel.uiState.value.pickerState.copy(
+                    apiKey = "9c132d31-6a30-4cac-8d8b-8a1970834799",
+                ),
+            )
             assertThat(viewModel.uiState.value.canContinue).isTrue()
         }
 
@@ -68,6 +95,7 @@ class SetupViewModelTest {
 
             val stored = settings.settings.first()
             assertThat(stored.backendBaseUrl).isEqualTo("http://default.local/api/v3/")
+            assertThat(stored.directMode).isFalse()
             assertThat(stored.setupCompleted).isTrue()
             assertThat(doneCalled).isTrue()
         }
@@ -76,13 +104,42 @@ class SetupViewModelTest {
     fun `completeSetup persists custom URL`() =
         runTest {
             val viewModel = SetupViewModel(settings)
-            viewModel.onServerChoiceChanged(ServerChoice.Custom)
-            viewModel.onCustomUrlChanged("http://192.168.1.5:8080/api/v3/")
+            viewModel.onPickerStateChanged(
+                viewModel.uiState.value.pickerState.copy(
+                    choice = ServerChoice.Custom,
+                    customUrl = "http://192.168.1.5:8080/api/v3/",
+                ),
+            )
             viewModel.onConsentToggled(true)
             viewModel.completeSetup { }
 
-            assertThat(settings.settings.first().backendBaseUrl)
-                .isEqualTo("http://192.168.1.5:8080/api/v3/")
+            val stored = settings.settings.first()
+            assertThat(stored.backendBaseUrl).isEqualTo("http://192.168.1.5:8080/api/v3/")
+            assertThat(stored.directMode).isFalse()
+        }
+
+    @Test
+    fun `completeSetup direct PTV persists credentials and flips direct mode on`() =
+        runTest {
+            val viewModel = SetupViewModel(settings)
+            viewModel.onPickerStateChanged(
+                viewModel.uiState.value.pickerState.copy(
+                    choice = ServerChoice.DirectPtv,
+                    devId = "3000176",
+                    apiKey = "9c132d31-6a30-4cac-8d8b-8a1970834799",
+                ),
+            )
+            viewModel.onConsentToggled(true)
+            viewModel.completeSetup { }
+
+            val stored = settings.settings.first()
+            assertThat(stored.directMode).isTrue()
+            assertThat(stored.devId).isEqualTo("3000176")
+            assertThat(stored.apiKey).isEqualTo("9c132d31-6a30-4cac-8d8b-8a1970834799")
+            // Bundled default URL is persisted alongside so the user can flip back to proxy
+            // mode later without re-typing.
+            assertThat(stored.backendBaseUrl).isEqualTo("http://default.local/api/v3/")
+            assertThat(stored.setupCompleted).isTrue()
         }
 
     @Test

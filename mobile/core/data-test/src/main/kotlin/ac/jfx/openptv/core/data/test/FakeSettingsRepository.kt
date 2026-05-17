@@ -57,8 +57,21 @@ class FakeSettingsRepository
             state.update { it.copy(apiKey = apiKey) }
         }
 
-        override suspend fun completeSetup(url: String) {
-            state.update { it.copy(backendBaseUrl = url, setupCompleted = true) }
+        override suspend fun completeSetup(
+            url: String,
+            directMode: Boolean,
+            devId: String,
+            apiKey: String,
+        ) {
+            state.update {
+                it.copy(
+                    backendBaseUrl = url,
+                    setupCompleted = true,
+                    directMode = directMode,
+                    devId = devId,
+                    apiKey = apiKey,
+                )
+            }
         }
 
         /**

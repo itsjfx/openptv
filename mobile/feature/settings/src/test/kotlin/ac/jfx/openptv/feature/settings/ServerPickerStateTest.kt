@@ -4,11 +4,12 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 /**
- * Pins the validation rules of the Settings server-picker dialog. The Default and Custom cases
- * mirror onboarding's `SetupUiState` so a change to either side surfaces here as a failing
- * test rather than a runtime divergence; the DirectPtv case is settings-only (the onboarding
- * flow never asks for a PTV key) and pins the dev_id + api_key non-blank contract that
- * `SettingsPtvUrlResolver` relies on to actually take the direct-sign path.
+ * Pins the validation rules of the shared server picker. The same [ServerPickerState] is used
+ * by both the Settings dialog and the first-run setup screen (which wraps `canSave` inside
+ * `SetupUiState.canContinue`), so a change here lands on both surfaces — that's exactly the
+ * single-source-of-truth this PR introduces. The DirectPtv case pins the dev_id + api_key
+ * non-blank contract that `SettingsPtvUrlResolver` relies on to actually take the direct-sign
+ * path.
  *
  * `effectiveUrl` resolution and `canSave` are pure-function — direct construction beats
  * pulling in an Object Mother for a six-field type with an obvious default.
@@ -64,8 +65,8 @@ class ServerPickerStateTest {
 
     @Test
     fun `custom choice with whitespace-only URL cannot save`() {
-        // Mirrors `SetupUiState.canContinue`'s `effectiveUrl.isNotBlank()` check — pure
-        // whitespace must be rejected at the same point both surfaces would reject it.
+        // Setup's `SetupUiState.canContinue` delegates to `canSave`, so pure whitespace must
+        // be rejected here for both surfaces to reject it identically.
         val state =
             ServerPickerState(
                 defaultUrl = "http://default.local/api/v3/",

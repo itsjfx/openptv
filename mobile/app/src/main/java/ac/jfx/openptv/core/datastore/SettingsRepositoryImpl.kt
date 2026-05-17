@@ -64,9 +64,20 @@ internal class SettingsRepositoryImpl
             dataStore.edit { prefs -> prefs[KEY_API_KEY] = apiKey }
         }
 
-        override suspend fun completeSetup(url: String) {
+        override suspend fun completeSetup(
+            url: String,
+            directMode: Boolean,
+            devId: String,
+            apiKey: String,
+        ) {
             dataStore.edit { prefs ->
                 prefs[KEY_BACKEND_BASE_URL] = url.normalised()
+                prefs[KEY_DIRECT_MODE] = directMode
+                prefs[KEY_DEV_ID] = devId.trim()
+                // Don't trim the api key — it's HMAC-input bytes; trimming could silently
+                // change the signature for users who paste a key with intentional surrounding
+                // whitespace. Mirrors `setApiKey` above.
+                prefs[KEY_API_KEY] = apiKey
                 prefs[KEY_SETUP_COMPLETED] = true
             }
         }
