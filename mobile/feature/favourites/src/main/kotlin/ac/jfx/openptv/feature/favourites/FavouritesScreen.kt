@@ -2,6 +2,7 @@ package ac.jfx.openptv.feature.favourites
 
 import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
 import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
+import ac.jfx.openptv.core.designsystem.ScreenHeading
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.feature.favourites.R
 import androidx.compose.foundation.background
@@ -26,7 +27,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -34,6 +34,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
@@ -146,10 +147,13 @@ internal fun FavouritesScreen(
 
     Scaffold(
         topBar = {
-            // LargeTopAppBar puts the gear in the small action row up top and renders the title as
-            // a hero heading underneath — matches the ReadYou layout the issue calls out.
-            LargeTopAppBar(
-                title = { Text(stringResource(R.string.feature_favourites_title)) },
+            // Small TopAppBar — gear + edit live in the compact icon row pinned under the status
+            // bar. The hero "Favourites" heading is rendered in the content body via
+            // [ScreenHeading]; same shape ReadYou's `FeedsPage` + `DisplayText` use. The previous
+            // `LargeTopAppBar` pushed the gear down into the expanded title section, which read as
+            // too low under the status bar.
+            TopAppBar(
+                title = {},
                 navigationIcon = {
                     SettingsGearButton(onClick = onOpenSettings)
                 },
@@ -180,36 +184,44 @@ internal fun FavouritesScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         modifier = Modifier.testTag(TestTagRoot),
     ) { padding ->
-        // PullToRefreshBox wraps the list so the user can drag down anywhere on the favourites
-        // surface to trigger a manual fan-out (issue #78). Mirrors stop-detail's pattern.
-        PullToRefreshBox(
-            isRefreshing = isRefreshing,
-            onRefresh = onRefresh,
+        Column(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(padding)
-                    .testTag(TestTagPullToRefresh),
+                    .padding(padding),
         ) {
-            when (uiState) {
-                FavouritesUiState.Loading ->
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                FavouritesUiState.Empty ->
-                    EmptyState(onOpenSearch = onOpenSearch)
-                is FavouritesUiState.Loaded ->
-                    if (uiState.rows.isEmpty()) {
+            ScreenHeading(text = stringResource(R.string.feature_favourites_title))
+            // PullToRefreshBox wraps the list so the user can drag down anywhere on the favourites
+            // surface to trigger a manual fan-out (issue #78). Mirrors stop-detail's pattern.
+            PullToRefreshBox(
+                isRefreshing = isRefreshing,
+                onRefresh = onRefresh,
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .testTag(TestTagPullToRefresh),
+            ) {
+                when (uiState) {
+                    FavouritesUiState.Loading ->
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
+                    FavouritesUiState.Empty ->
                         EmptyState(onOpenSearch = onOpenSearch)
-                    } else {
-                        RowList(
-                            rows = uiState.rows,
-                            editMode = uiState.editMode,
-                            onRowClicked = onRowClicked,
-                            onReorder = onReorder,
-                            onSwipeDelete = onSwipeDelete,
-                        )
-                    }
+                    is FavouritesUiState.Loaded ->
+                        if (uiState.rows.isEmpty()) {
+                            EmptyState(onOpenSearch = onOpenSearch)
+                        } else {
+                            RowList(
+                                rows = uiState.rows,
+                                editMode = uiState.editMode,
+                                onRowClicked = onRowClicked,
+                                onReorder = onReorder,
+                                onSwipeDelete = onSwipeDelete,
+                            )
+                        }
+                }
             }
         }
     }

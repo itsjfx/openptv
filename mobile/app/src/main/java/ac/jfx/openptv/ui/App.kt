@@ -13,7 +13,9 @@ import ac.jfx.openptv.feature.settings.SettingsRoute
 import ac.jfx.openptv.feature.setup.SetupScreen
 import ac.jfx.openptv.feature.stopdetail.StopDetailRoute
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -189,6 +191,11 @@ private fun HomeScaffold(
                 }
             }
         },
+        // Only consume the navigation-bar inset here so the bottom-nav sits above the system bar.
+        // The status-bar inset is left to the inner Scaffolds in each tab so their `TopAppBar`s
+        // pad against the status bar exactly once. Without this, the inner Scaffold double-pads
+        // and the gear lands ~28 dp lower than the ReadYou layout (issue #111 review).
+        contentWindowInsets = WindowInsets.navigationBars,
         modifier = Modifier.testTag(TestTagHomeScaffold),
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {

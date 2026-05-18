@@ -1,5 +1,6 @@
 package ac.jfx.openptv.feature.search
 
+import ac.jfx.openptv.core.designsystem.ScreenHeading
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.feature.search.R
@@ -15,11 +16,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -66,10 +67,11 @@ internal fun SearchScreenContent(
 ) {
     Scaffold(
         topBar = {
-            // LargeTopAppBar — gear sits in the small action row above the hero heading, ReadYou
-            // layout (issue #111 review).
-            LargeTopAppBar(
-                title = { Text(stringResource(R.string.feature_search_title)) },
+            // Small TopAppBar — gear lives in the compact icon row under the status bar, hero
+            // heading is rendered in the body via [ScreenHeading] (ReadYou layout, issue #111
+            // review).
+            TopAppBar(
+                title = {},
                 navigationIcon = {
                     SettingsGearButton(onClick = onOpenSettings)
                 },
@@ -80,45 +82,51 @@ internal fun SearchScreenContent(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(padding),
         ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChanged,
+            ScreenHeading(text = stringResource(R.string.feature_search_title))
+            Column(
                 modifier =
                     Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp)
-                        .testTag(TestTagQueryField),
-                label = { Text(stringResource(R.string.feature_search_field_label)) },
-                singleLine = true,
-                keyboardOptions =
-                    androidx.compose.foundation.text.KeyboardOptions(
-                        imeAction = ImeAction.Search,
-                    ),
-            )
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChanged,
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .testTag(TestTagQueryField),
+                    label = { Text(stringResource(R.string.feature_search_field_label)) },
+                    singleLine = true,
+                    keyboardOptions =
+                        androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = ImeAction.Search,
+                        ),
+                )
 
-            when (val state = uiState) {
-                SearchUiState.Idle ->
-                    CenteredMessage(
-                        text = stringResource(R.string.feature_search_idle_hint),
-                    )
-                SearchUiState.Loading -> CenteredLoader()
-                SearchUiState.Empty ->
-                    CenteredMessage(
-                        text = stringResource(R.string.feature_search_empty),
-                    )
-                is SearchUiState.Results ->
-                    StopList(
-                        stops = state.stops,
-                        // Phase 02 surfaced a snackbar here as a placeholder navigation target.
-                        // Phase 03 wires the real destination via the `onStopSelected` hoist —
-                        // the app composition root pushes `AppNavKey.StopDetail`.
-                        onStopSelected = onStopSelected,
-                    )
-                is SearchUiState.Error -> CenteredMessage(text = state.reason)
+                when (val state = uiState) {
+                    SearchUiState.Idle ->
+                        CenteredMessage(
+                            text = stringResource(R.string.feature_search_idle_hint),
+                        )
+                    SearchUiState.Loading -> CenteredLoader()
+                    SearchUiState.Empty ->
+                        CenteredMessage(
+                            text = stringResource(R.string.feature_search_empty),
+                        )
+                    is SearchUiState.Results ->
+                        StopList(
+                            stops = state.stops,
+                            // Phase 02 surfaced a snackbar here as a placeholder navigation target.
+                            // Phase 03 wires the real destination via the `onStopSelected` hoist —
+                            // the app composition root pushes `AppNavKey.StopDetail`.
+                            onStopSelected = onStopSelected,
+                        )
+                    is SearchUiState.Error -> CenteredMessage(text = state.reason)
+                }
             }
         }
 
