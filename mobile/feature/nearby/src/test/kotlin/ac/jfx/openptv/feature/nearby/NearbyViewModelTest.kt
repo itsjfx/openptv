@@ -6,6 +6,8 @@ import ac.jfx.openptv.core.data.test.FakeDeviceHeadingProvider
 import ac.jfx.openptv.core.data.test.FakeLocationProvider
 import ac.jfx.openptv.core.data.test.FakeNearbyStopsRepository
 import ac.jfx.openptv.core.data.test.FakeStopDetailRepository
+import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
+import ac.jfx.openptv.core.datastore.preference.MapRouteTypeFilterPreference
 import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.testing.CoordinatesMother
@@ -13,10 +15,18 @@ import ac.jfx.openptv.core.testing.DepartureMother
 import ac.jfx.openptv.core.testing.RouteMother
 import ac.jfx.openptv.core.testing.StopDetailMother
 import ac.jfx.openptv.core.testing.StopMother
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -25,7 +35,10 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.File
 
 /**
  * Unit tests for [NearbyViewModel]. Uses real [FakeLocationProvider] / [FakeNearbyStopsRepository]
@@ -43,14 +56,33 @@ class NearbyViewModelTest {
     private val stopDetailRepo = FakeStopDetailRepository()
     private val departureRepo = FakeDepartureRepository()
 
+    @get:Rule
+    val tempFolder = TemporaryFolder()
+
+    /**
+     * Real Preferences DataStore on a temp file backs the [UserPreferencesDataStore] the VM
+     * reads/writes (issue #112). Matches the rest of the codebase: a hand-rolled fake would let
+     * tests pass even if the wire format silently broke — the real DataStore catches that. The
+     * file is fresh per test (new temp folder), so cross-test leakage is impossible.
+     */
+    private lateinit var prefsFile: File
+    private lateinit var storeScope: CoroutineScope
+    private lateinit var dataStore: DataStore<Preferences>
+    private lateinit var userPreferences: UserPreferencesDataStore
+
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
+        prefsFile = File(tempFolder.newFolder("datastore"), "openptv_user_prefs.preferences_pb")
+        storeScope = CoroutineScope(UnconfinedTestDispatcher() + SupervisorJob())
+        dataStore = PreferenceDataStoreFactory.create(scope = storeScope, produceFile = { prefsFile })
+        userPreferences = UserPreferencesDataStore(dataStore)
     }
 
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+        storeScope.cancel()
     }
 
     private fun newViewModel(): NearbyViewModel =
@@ -60,7 +92,20 @@ class NearbyViewModelTest {
             nearbyStopsRepository = nearbyRepo,
             stopDetailRepository = stopDetailRepo,
             departureRepository = departureRepo,
+            userPreferences = userPreferences,
         )
+
+    /**
+     * Helper to pre-seed the persisted filter before constructing the VM. Tests that exercise
+     * the "filter survives a process restart" path use this to put the user's previous selection
+     * on disk first, then build a fresh VM and assert it picks up the seed via
+     * `persistedFilter.await()`.
+     */
+    private suspend fun seedPersistedFilter(filter: Set<RouteType>) {
+        MapRouteTypeFilterPreference.of(filter).put(storeScope, dataStore)
+        // Drain — DataStore's actor is serialised, `data.first()` completes only after our write.
+        dataStore.data.first()
+    }
 
     @Test
     fun `initial state is PermissionUnasked`() =
@@ -1022,5 +1067,113 @@ class NearbyViewModelTest {
             assertThat(sheet.sheet.stop).isEqualTo(second)
             // Both stops should have triggered a routes fetch.
             assertThat(stopDetailRepo.requestedKeys.map { it.first.value }).containsExactly(1, 2).inOrder()
+        }
+
+    // -------------------- persisted route-type filter (issue #112) --------------------
+    //
+    // The chip selection survives an app restart via DataStore. On init the VM reads the
+    // persisted set and seeds `routeTypeFilter` from it; on every chip toggle the new set is
+    // written back. The seed read is gated by `persistedFilter.await()` inside
+    // `onPermissionResult`, so even on a slow first emission the filter on screen matches the
+    // user's previous session.
+
+    @Test
+    fun `persisted filter seeds routeTypeFilter on permission grant`() =
+        runTest(dispatcher) {
+            // Seed disk with "trams + trains only" — the previous session's selection.
+            seedPersistedFilter(setOf(RouteType.Tram, RouteType.Train))
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // The seed wins over DEFAULT_FILTER — the chip strip opens on "Tram + Train" exactly.
+            assertThat(viewModel.uiState.value.routeTypeFilter)
+                .containsExactly(RouteType.Tram, RouteType.Train)
+            // The initial fetch carries the persisted filter, not the default — so PTV's
+            // `route_types` parameter reflects the user's choice from byte one.
+            assertThat(nearbyRepo.requestedCalls.last().routeTypes)
+                .containsExactly(RouteType.Tram, RouteType.Train)
+        }
+
+    @Test
+    fun `persisted filter seeds routeTypeFilter on permission denial`() =
+        runTest(dispatcher) {
+            // The denied path still surfaces a chip strip over the CBD map — the seed must apply
+            // there too. Same disk state, different branch.
+            seedPersistedFilter(setOf(RouteType.Bus))
+            val viewModel = newViewModel()
+
+            viewModel.onPermissionResult(granted = false)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.routeTypeFilter).containsExactly(RouteType.Bus)
+            assertThat(nearbyRepo.requestedCalls.last().routeTypes).containsExactly(RouteType.Bus)
+        }
+
+    @Test
+    fun `empty datastore — VM seeds from DEFAULT_FILTER`() =
+        runTest(dispatcher) {
+            // Fresh install / first launch: nothing on disk. The `fromValue(null)` fallback
+            // applies, so the VM seed is DEFAULT_FILTER — every chip on.
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.routeTypeFilter).isEqualTo(DEFAULT_FILTER)
+        }
+
+    @Test
+    fun `toggling a chip writes the new selection to datastore`() =
+        runTest(dispatcher) {
+            // After a toggle, a fresh VM constructed against the same DataStore should pick up
+            // the new selection — proves the write went through.
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val first = newViewModel()
+            first.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Toggle Bus off — write should land on disk.
+            first.onRouteTypeFilterToggled(RouteType.Bus)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Read directly from the typed flow — round-trip the wire encoding.
+            val persisted = userPreferences.mapRouteTypeFilter.first().value
+            assertThat(persisted).isEqualTo(DEFAULT_FILTER - RouteType.Bus)
+        }
+
+    @Test
+    fun `simulated app restart — fresh VM picks up the previous toggle`() =
+        runTest(dispatcher) {
+            // End-to-end shape of the user-visible behaviour: toggle, "restart" (build a fresh
+            // VM against the same DataStore), assert the new VM seeds from the persisted set.
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val first = newViewModel()
+            first.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            // Pare back to Tram-only — matches the manual emulator test in the PR plan.
+            (DEFAULT_FILTER - RouteType.Tram).forEach { mode ->
+                first.onRouteTypeFilterToggled(mode)
+                advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+                advanceUntilIdle()
+            }
+            assertThat(first.uiState.value.routeTypeFilter).containsExactly(RouteType.Tram)
+
+            // Build a fresh VM (same DataStore — same on-disk file as a process restart).
+            val restarted = newViewModel()
+            restarted.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            assertThat(restarted.uiState.value.routeTypeFilter).containsExactly(RouteType.Tram)
         }
 }

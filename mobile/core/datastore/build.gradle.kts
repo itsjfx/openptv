@@ -16,9 +16,11 @@
 // not depend on Material types.
 //
 // Allowed dependencies (per docs/mobile/00-conventions.md):
-//   - no `:core:*` module — preferences are leaf-level infrastructure. The DSL
-//     is intentionally self-contained so every later feature can depend on it
-//     without dragging in `:core:data` / `:core:network`.
+//   - `:core:model` — needed by `MapRouteTypeFilterPreference` (issue #112) to persist
+//     `Set<RouteType>`. `:core:model` is itself leaf-level (pure data classes, no Android),
+//     so the "leaf-level infrastructure" property is preserved.
+//   - no `:core:data` / `:core:network` — preferences must stay self-contained so every
+//     later feature can depend on the DSL without dragging in the data / network layers.
 plugins {
     id("openptv.android.library")
     id("openptv.android.library.compose")
@@ -37,6 +39,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:model"))
+
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)

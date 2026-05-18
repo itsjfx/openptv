@@ -34,6 +34,15 @@ dependencies {
     // Repository interface only — never the network impl. Mirrors `:feature:favourites`.
     implementation(project(":core:data"))
     implementation(project(":core:model"))
+    // `:core:datastore` — typed Preference DSL for the persisted route-type chip filter (#112).
+    // The ViewModel reads `UserPreferencesDataStore.mapRouteTypeFilter` on init and writes back
+    // through `MapRouteTypeFilterPreference.put(...)` on every chip toggle.
+    implementation(project(":core:datastore"))
+    // DataStore types leak through `UserPreferencesDataStore.dataStore` (the typed DSL's
+    // `put(scope, dataStore)` requires the underlying store as an argument). Pulled in directly
+    // here rather than `api`-exporting it from `:core:datastore` so the dep stays explicit at
+    // every consumer — mirrors the convention `:feature:settings` uses.
+    implementation(libs.androidx.datastore.preferences)
 
     // OkHttp goes onto MapLibre's HTTP stack via `HttpRequestUtil.setOkHttpClient(...)` so the
     // tile/style fetch hits our 50 MiB HTTP cache. The cache lives behind a `@MapsCache`

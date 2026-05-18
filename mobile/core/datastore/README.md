@@ -6,6 +6,9 @@ Typed `Preference` DSL on top of [Preferences DataStore][datastore]. Owns:
   `DynamicColourPreference`, `FavouritesSortPreference`),
 - one `compositionLocalOf { default }` per preference (`LocalThemeMode`, `LocalDynamicColour`,
   `LocalFavouritesSort`),
+- standalone preference types that don't live behind a composition local
+  (`MapRouteTypeFilterPreference` — read/written directly by `:feature:nearby`'s ViewModel,
+  not a UI-wide setting),
 - the `SettingsProvider` Composable that wraps app content at the root and pushes every
   collected value down through `CompositionLocalProvider`,
 - the Hilt-bound `UserPreferencesDataStore` singleton for non-Compose consumers (workers,

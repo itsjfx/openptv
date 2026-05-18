@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.datastore.preference
 
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 
 /**
  * Single registry of every [androidx.datastore.preferences.core.Preferences.Key] in this module.
@@ -21,4 +22,11 @@ internal object PreferenceKeys {
     val DYNAMIC_COLOUR = stringPreferencesKey("dynamic_colour")
     val FAVOURITES_SORT = stringPreferencesKey("favourites_sort")
     val TIME_FORMAT = stringPreferencesKey("time_format")
+
+    /**
+     * Nearby map's route-type chip selection (issue #112). Values are stringified
+     * `RouteType.toCode()` ints — the PTV wire format. Persisted as a `Set<String>` so the
+     * "trams only" chip configuration survives an app restart.
+     */
+    val MAP_ROUTE_TYPE_FILTER = stringSetPreferencesKey("map_route_type_filter")
 }
