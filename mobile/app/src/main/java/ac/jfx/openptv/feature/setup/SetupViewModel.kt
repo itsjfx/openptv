@@ -47,10 +47,6 @@ class SetupViewModel
             _uiState.update { it.copy(pickerState = pickerState) }
         }
 
-        fun onConsentToggled(accepted: Boolean) {
-            _uiState.update { it.copy(consentAccepted = accepted) }
-        }
-
         fun completeSetup(onDone: () -> Unit) {
             val state = _uiState.value
             if (!state.canContinue) return

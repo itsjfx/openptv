@@ -30,22 +30,11 @@ class SetupViewModelTest {
         runTest {
             val viewModel = SetupViewModel(settings)
             viewModel.uiState.test {
-                // Initial empty defaultUrl is replaced by the persisted value once the init job runs.
                 val seeded = expectMostRecentItem()
                 assertThat(seeded.pickerState.defaultUrl).isEqualTo("http://default.local/api/v3/")
                 assertThat(seeded.pickerState.choice).isEqualTo(ServerChoice.Default)
-                assertThat(seeded.canContinue).isFalse()
+                assertThat(seeded.canContinue).isTrue()
             }
-        }
-
-    @Test
-    fun `canContinue requires consent`() =
-        runTest {
-            val viewModel = SetupViewModel(settings)
-            viewModel.onConsentToggled(true)
-            assertThat(viewModel.uiState.value.canContinue).isTrue()
-            viewModel.onConsentToggled(false)
-            assertThat(viewModel.uiState.value.canContinue).isFalse()
         }
 
     @Test
@@ -55,7 +44,6 @@ class SetupViewModelTest {
             viewModel.onPickerStateChanged(
                 viewModel.uiState.value.pickerState.copy(choice = ServerChoice.Custom),
             )
-            viewModel.onConsentToggled(true)
             assertThat(viewModel.uiState.value.canContinue).isFalse()
             viewModel.onPickerStateChanged(
                 viewModel.uiState.value.pickerState.copy(customUrl = "http://10.0.2.2:8080/api/v3/"),
@@ -70,12 +58,10 @@ class SetupViewModelTest {
             viewModel.onPickerStateChanged(
                 viewModel.uiState.value.pickerState.copy(choice = ServerChoice.DirectPtv),
             )
-            viewModel.onConsentToggled(true)
             assertThat(viewModel.uiState.value.canContinue).isFalse()
             viewModel.onPickerStateChanged(
                 viewModel.uiState.value.pickerState.copy(devId = "3000176"),
             )
-            // Still missing api key.
             assertThat(viewModel.uiState.value.canContinue).isFalse()
             viewModel.onPickerStateChanged(
                 viewModel.uiState.value.pickerState.copy(
@@ -89,7 +75,6 @@ class SetupViewModelTest {
     fun `completeSetup persists chosen default URL and flips flag`() =
         runTest {
             val viewModel = SetupViewModel(settings)
-            viewModel.onConsentToggled(true)
             var doneCalled = false
             viewModel.completeSetup { doneCalled = true }
 
@@ -110,7 +95,6 @@ class SetupViewModelTest {
                     customUrl = "http://192.168.1.5:8080/api/v3/",
                 ),
             )
-            viewModel.onConsentToggled(true)
             viewModel.completeSetup { }
 
             val stored = settings.settings.first()
@@ -129,23 +113,23 @@ class SetupViewModelTest {
                     apiKey = "9c132d31-6a30-4cac-8d8b-8a1970834799",
                 ),
             )
-            viewModel.onConsentToggled(true)
             viewModel.completeSetup { }
 
             val stored = settings.settings.first()
             assertThat(stored.directMode).isTrue()
             assertThat(stored.devId).isEqualTo("3000176")
             assertThat(stored.apiKey).isEqualTo("9c132d31-6a30-4cac-8d8b-8a1970834799")
-            // Bundled default URL is persisted alongside so the user can flip back to proxy
-            // mode later without re-typing.
             assertThat(stored.backendBaseUrl).isEqualTo("http://default.local/api/v3/")
             assertThat(stored.setupCompleted).isTrue()
         }
 
     @Test
-    fun `completeSetup is a no-op without consent`() =
+    fun `completeSetup is a no-op when picker state is not committable`() =
         runTest {
             val viewModel = SetupViewModel(settings)
+            viewModel.onPickerStateChanged(
+                viewModel.uiState.value.pickerState.copy(choice = ServerChoice.Custom, customUrl = ""),
+            )
             var doneCalled = false
             viewModel.completeSetup { doneCalled = true }
             assertThat(doneCalled).isFalse()

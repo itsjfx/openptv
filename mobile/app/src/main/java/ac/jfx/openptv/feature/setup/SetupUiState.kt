@@ -8,18 +8,16 @@ import ac.jfx.openptv.feature.settings.ServerPickerState
  *
  * Wraps a [ServerPickerState] — the same state object the Settings server-picker dialog
  * drives — so the shared `ServerPickerContent` composable renders identically across both
- * surfaces. Adds the consent checkbox on top: the Continue CTA is disabled until the user has
- * both made a committable server choice and ticked consent.
+ * surfaces.
  *
- * `canContinue` borrows [ServerPickerState.canSave]'s validation — Default is always
- * committable, Custom requires a non-blank URL, Direct PTV requires both credentials — so any
- * future tightening of the picker's rules lands here automatically.
+ * `canContinue` delegates to [ServerPickerState.canSave] — Default is always committable,
+ * Custom requires a non-blank URL, Direct PTV requires both credentials — so any future
+ * tightening of the picker's rules lands here automatically.
  */
 data class SetupUiState(
     val pickerState: ServerPickerState,
-    val consentAccepted: Boolean = false,
 ) {
-    val canContinue: Boolean = consentAccepted && pickerState.canSave
+    val canContinue: Boolean = pickerState.canSave
 
     companion object {
         /**

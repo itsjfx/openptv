@@ -18,9 +18,8 @@
     <!-- First-run setup. The three radio rows + their bodies + the custom URL / direct-PTV
          field labels are shared with the Settings server-picker dialog and live in
          `:feature:settings/res/values/strings.xml` under the `feature_settings_server_*` prefix.
-         Only the title, intro, consent line, and Continue CTA are :app-local. -->
+         Only the title, intro, and Continue CTA are :app-local. -->
     <string name="setup_title">Choose your server</string>
-    <string name="setup_intro">OpenPTV needs to know which backend to talk to. Pick a server below. No requests are sent until you accept.</string>
-    <string name="setup_consent_label">I understand requests will be sent to the server above.</string>
-    <string name="setup_continue">Accept &amp; continue</string>
+    <string name="setup_intro">OpenPTV needs to know which backend to talk to. Pick a server below.</string>
+    <string name="setup_continue">Continue</string>
 </resources>
