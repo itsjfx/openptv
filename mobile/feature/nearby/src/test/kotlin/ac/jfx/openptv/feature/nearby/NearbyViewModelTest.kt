@@ -34,6 +34,7 @@ import org.junit.Test
  * idles within 500 ms fires exactly one fetch") can be proved with virtual time.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass")
 class NearbyViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val locationProvider = FakeLocationProvider()
@@ -184,6 +185,83 @@ class NearbyViewModelTest {
 
             assertThat(afterFirst - baselineCalls).isEqualTo(1)
             assertThat(afterSecond - afterFirst).isEqualTo(1)
+        }
+
+    // -------------------- camera-move-started cancels in-flight fetch (issue #109) --------------------
+    //
+    // With #108's LRU cache, the previously-rendered pins persist on screen during a drag — so we
+    // can cancel an in-flight fetch the moment the user starts moving the camera without anything
+    // visibly flickering. Saves bandwidth + PTV rate-limit on viewports the user is panning past.
+
+    @Test
+    fun `move-started inside the debounce window cancels the pending fetch`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // User releases drag → idle. We're mid-debounce when they start a new drag.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 2)
+            // New drag begins — cancels the pending fetch.
+            viewModel.onCameraMoveStarted()
+            // Run past where the debounce WOULD have fired the fetch.
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // No new fetch — the cancel killed it before the network call landed.
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(0)
+        }
+
+    @Test
+    fun `camera idle after move-started fires a fresh fetch once settled`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Idle → mid-debounce drag → idle. The first fetch must be cancelled; the second must
+            // fire with the final camera position once the debounce elapses.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 2)
+            viewModel.onCameraMoveStarted()
+            advanceTimeBy(100)
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.83, 144.98), 13.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
+            assertThat(nearbyRepo.requestedCalls.last().coordinates)
+                .isEqualTo(Coordinates(-37.83, 144.98))
+        }
+
+    @Test
+    fun `repeated move-started events without a settle never fire a fetch`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Simulate a long continuous drag — the user releases and grabs the map again without
+            // ever letting the camera settle for the debounce window. No fetch should land.
+            repeat(5) {
+                viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96 + it * 0.01), 13.0))
+                advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 4)
+                viewModel.onCameraMoveStarted()
+                advanceTimeBy(50)
+            }
+            advanceUntilIdle()
+
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(0)
         }
 
     @Test
@@ -805,6 +883,121 @@ class NearbyViewModelTest {
             advanceUntilIdle()
 
             assertThat(viewModel.uiState.value).isInstanceOf(NearbyUiState.PermissionDenied::class.java)
+        }
+
+    // -------------------- LRU stop cache (issue #108) --------------------
+    //
+    // The map's pin list is a merged view over an LRU cache, not the raw fetch response. Panning
+    // back into a region we've already loaded keeps those pins on-screen instead of dropping them
+    // until the next fetch lands. Cache is cleared on a filter change so a "trams only" tap
+    // doesn't keep bus pins visible. Bounded at `MAX_CACHED_STOPS` with eldest-out eviction.
+
+    @Test
+    fun `panning away and back keeps previously-fetched pins visible`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val flindersStop = StopMother.aStop().withId(1).withName("Flinders").build()
+            val richmondStop = StopMother.aStop().withId(2).withName("Richmond").build()
+            // First fetch (initial grant) returns Flinders.
+            nearbyRepo.enqueueSuccess(listOf(flindersStop))
+            // Second fetch (pan east) returns Richmond.
+            nearbyRepo.enqueueSuccess(listOf(richmondStop))
+            // Third fetch (pan back west) returns Flinders again — the user is back where they
+            // started. The point of the test is that BEFORE this third fetch lands, the cache
+            // already has Flinders visible, so the user doesn't see a flicker.
+            nearbyRepo.enqueueSuccess(listOf(flindersStop))
+            val viewModel = newViewModel()
+
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).pins).contains(flindersStop)
+
+            // Pan east — fetch returns Richmond only. The merged pin list MUST still include
+            // Flinders (it was cached on the first fetch).
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.82, 145.00), 15.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val afterEast = (viewModel.uiState.value as NearbyUiState.Loaded).pins
+            assertThat(afterEast).containsExactly(flindersStop, richmondStop)
+
+            // Pan back west — the cache already has Flinders + Richmond. Even if the fetch is in
+            // flight, those pins must still be on screen. Verify the state BEFORE the debounce
+            // elapses.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.8183, 144.9671), 15.0))
+            // Note: do NOT advance past the debounce yet — the assertion is that the existing
+            // cache is what the user sees while the next fetch is still pending.
+            val whilePanning = (viewModel.uiState.value as NearbyUiState.Loaded).pins
+            assertThat(whilePanning).containsExactly(flindersStop, richmondStop)
+        }
+
+    @Test
+    fun `filter change evicts stale-filter pins from the rendered list`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val tramStop = StopMother.aTramStop().withId(1).build()
+            val busStop = StopMother.aBusStop().withId(2).build()
+            // First fetch (default filter, all modes on) returns both.
+            nearbyRepo.enqueueSuccess(listOf(tramStop, busStop))
+            // Second fetch (after toggle, bus off) returns only the tram.
+            nearbyRepo.enqueueSuccess(listOf(tramStop))
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            // Both stops cached and rendered.
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).pins)
+                .containsExactly(tramStop, busStop)
+
+            // Toggle Bus off. Cache MUST be cleared so the stale bus pin doesn't linger on the
+            // map during the debounce window or after the next fetch lands.
+            viewModel.onRouteTypeFilterToggled(RouteType.Bus)
+            // Inspect BEFORE the next fetch fires — the rendered list should already be empty
+            // (cache cleared by the filter toggle).
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).pins).isEmpty()
+
+            // After the next fetch with the bus-off filter, only the tram is on screen — no stale
+            // bus pin even though it was cached pre-toggle.
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).pins).containsExactly(tramStop)
+        }
+
+    @Test
+    fun `LRU eviction drops the oldest entry once the cache exceeds capacity`() =
+        runTest(dispatcher) {
+            // Direct test on the cache class — the VM bound (2000) is too big to exercise via
+            // a fetch sequence, so we test the data structure that backs the merge directly.
+            val cache = LruStopCache(maxSize = 2)
+            val first = StopMother.aStop().withId(1).build()
+            val second = StopMother.aStop().withId(2).build()
+            val third = StopMother.aStop().withId(3).build()
+
+            cache.put(first)
+            cache.put(second)
+            cache.put(third)
+
+            // first was the eldest — evicted. Snapshot is in insertion (now LRU) order.
+            assertThat(cache.snapshot().map { it.id }).containsExactly(second.id, third.id).inOrder()
+            assertThat(cache.size()).isEqualTo(2)
+        }
+
+    @Test
+    fun `re-inserting a cached stop bumps its LRU recency`() =
+        runTest(dispatcher) {
+            val cache = LruStopCache(maxSize = 2)
+            val first = StopMother.aStop().withId(1).build()
+            val second = StopMother.aStop().withId(2).build()
+            val third = StopMother.aStop().withId(3).build()
+
+            cache.put(first)
+            cache.put(second)
+            // Re-fetch the first one — its recency should bump above `second`, so a subsequent
+            // third insertion evicts `second`, not `first`.
+            cache.put(first)
+            cache.put(third)
+
+            assertThat(cache.snapshot().map { it.id }).containsExactly(first.id, third.id).inOrder()
         }
 
     @Test

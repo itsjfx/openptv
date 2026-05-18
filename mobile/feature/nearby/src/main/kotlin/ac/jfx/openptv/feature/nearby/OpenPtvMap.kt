@@ -33,11 +33,16 @@ interface OpenPtvMap {
      *   propagate through `factory = { ... }`.
      * @param onCameraIdle called whenever MapLibre's camera-idle listener fires; the screen's
      *   ViewModel debounces this stream and re-queries [NearbyStopsRepository].
+     * @param onCameraMoveStarted called the moment the camera begins moving (user gesture or
+     *   programmatic animation). The ViewModel uses this to cancel any in-flight pin fetch so a
+     *   slow drag doesn't keep burning the PTV rate limit on viewports the user is panning past —
+     *   issue #109. Paired with [onCameraIdle] which fires the eventual fetch once the camera
+     *   settles.
      * @param onPinClicked called when the user taps a pin; the screen renders a bottom sheet
      *   from this.
      */
     @Composable
-    @Suppress("LongParameterList") // 8 params, all distinct concerns; collapsing would lose clarity
+    @Suppress("LongParameterList") // 9 params, all distinct concerns; collapsing would lose clarity
     fun Render(
         camera: OpenPtvCameraState,
         userLocation: Coordinates?,
@@ -45,6 +50,7 @@ interface OpenPtvMap {
         pins: List<Stop>,
         isDark: Boolean,
         onCameraIdle: (OpenPtvCameraState) -> Unit,
+        onCameraMoveStarted: () -> Unit,
         onPinClicked: (Stop) -> Unit,
         modifier: Modifier,
     )

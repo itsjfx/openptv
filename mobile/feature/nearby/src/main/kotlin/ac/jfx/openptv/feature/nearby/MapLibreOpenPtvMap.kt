@@ -80,6 +80,7 @@ internal class MapLibreOpenPtvMap
             pins: List<Stop>,
             isDark: Boolean,
             onCameraIdle: (OpenPtvCameraState) -> Unit,
+            onCameraMoveStarted: () -> Unit,
             onPinClicked: (Stop) -> Unit,
             modifier: Modifier,
         ) {
@@ -87,6 +88,7 @@ internal class MapLibreOpenPtvMap
             // the freshest callback — without this, a recomposition that swaps the lambda would
             // leave MapLibre's listener pointing at the stale one.
             val onCameraIdleLatest by rememberUpdatedState(onCameraIdle)
+            val onCameraMoveStartedLatest by rememberUpdatedState(onCameraMoveStarted)
             val onPinClickedLatest by rememberUpdatedState(onPinClicked)
             val pinsLatest by rememberUpdatedState(pins)
             val userLocationLatest by rememberUpdatedState(userLocation)
@@ -129,6 +131,14 @@ internal class MapLibreOpenPtvMap
                                         zoom = pos.zoom,
                                     ),
                                 )
+                            }
+                            // Forward MapLibre's move-started signal so the ViewModel can cancel
+                            // any in-flight pin fetch the moment the user starts dragging — issue
+                            // #109. We don't distinguish gesture vs programmatic moves because a
+                            // `setCameraPosition` (initial centre / follow-me) is followed by an
+                            // idle anyway, so cancelling and re-fetching is correct in both cases.
+                            map.addOnCameraMoveStartedListener { _ ->
+                                onCameraMoveStartedLatest()
                             }
                             // Tap detection runs through a custom touch listener instead of
                             // MapLibre's built-in `addOnMapClickListener`. The View-side click

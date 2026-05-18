@@ -9,17 +9,15 @@ import ac.jfx.openptv.core.data.StopDetailRepository
 import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
+import ac.jfx.openptv.core.model.StopId
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -35,10 +33,13 @@ import javax.inject.Inject
  *  - Denied → [NearbyUiState.PermissionDenied] with the CBD camera + pins for the CBD area;
  *    user can still pan and use the map.
  *
- * **Camera-idle debounce.** Pin fetches are gated on a [MutableSharedFlow] of camera positions,
- * debounced ≥ 500 ms via `Flow.debounce`. The debounce satisfies acceptance criterion "panning
- * across central Melbourne shows pins continuously" — without it, every micro-pan would fire a
- * fetch and the OpenFreeMap rate-limit-on-tiles + PTV-proxy rate-limit-on-stops would bite.
+ * **Camera-idle debounce + move-started cancel (issue #109).** Every [onCameraIdle] cancels the
+ * previous [fetchJob] and starts a new one that `delay`s [CAMERA_IDLE_DEBOUNCE_MS] before hitting
+ * [NearbyStopsRepository] — so a burst of idles inside the window collapses to a single fetch. A
+ * [onCameraMoveStarted] from MapLibre cancels the in-flight job outright, so the user dragging
+ * across the map doesn't keep burning bandwidth + the PTV rate limit on viewports they're panning
+ * past. With #108's LRU cache the previously-fetched pins stay on screen during the drag, so the
+ * cancel feels invisible rather than a flicker.
  *
  * **Overscan.** The fetch radius is derived from the visible zoom: roughly `RADIUS_BASE_METERS *
  * 2^(MAX_ZOOM - zoom)` capped at [MAX_RADIUS_METERS]. The base is sized so the visible viewport
@@ -73,17 +74,11 @@ class NearbyViewModel
         val uiState: StateFlow<NearbyUiState> = _uiState.asStateFlow()
 
         /**
-         * Inputs to the debounced fetch pipeline. `replay = 1` so an emit that fires before the
-         * collector in [wireCameraDebounce] is scheduled (e.g. the initial seed inside
-         * `onPermissionResult` while we're still under a `StandardTestDispatcher`) is still
-         * delivered — the collector picks it up as a replay value as soon as it starts.
-         *
-         * The pair carries `(camera, filter)` so the collector debounces both the camera and
-         * the filter through the same gate. A filter toggle re-emits the current camera so the
-         * fetch fires with the new filter without waiting for the next pan.
+         * Holds the current pin-fetch coroutine (debounce + network call). Replaced on every
+         * camera-idle / filter-toggle; cancelled outright on a camera-move-started so a slow
+         * drag doesn't keep a stale fetch in flight. `null` between settle events.
          */
-        private val pinFetchTriggers: MutableSharedFlow<PinFetchTrigger> =
-            MutableSharedFlow(replay = 1, extraBufferCapacity = 1)
+        private var fetchJob: Job? = null
 
         /**
          * Holds the bottom-sheet's in-flight fetches (routes + departures) so a tap on a new
@@ -106,9 +101,22 @@ class NearbyViewModel
          */
         private var userBearingJob: Job? = null
 
-        init {
-            wireCameraDebounce()
-        }
+        /**
+         * LRU cache of every stop the user has fetched this session. Solves the disappear/reappear
+         * problem: panning into a region we've fetched before keeps those pins on-screen
+         * immediately, instead of dropping them until the next fetch lands.
+         *
+         * Bounded at [MAX_CACHED_STOPS] so an hour of panning across Melbourne can't blow out
+         * memory — a couple of thousand `Stop` records is trivial (each is a handful of strings +
+         * two doubles), but the bound is the principled stop-gap.
+         *
+         * **Filter-aware via clear-on-change.** A route-type chip toggle clears the cache (see
+         * [onRouteTypeFilterToggled]) so a "trams only" tap doesn't keep bus pins on the map from
+         * a previous fetch. Re-keying by `(stopId, filter)` would let the cache hold stale-filter
+         * pins for nothing — the user has just expressed they don't want them. Clearing is
+         * simpler and matches user intent.
+         */
+        private val stopCache = LruStopCache(MAX_CACHED_STOPS)
 
         /**
          * Caller (the screen) tells us the permission decision. Permission grant kicks off a
@@ -136,7 +144,7 @@ class NearbyViewModel
                             routeTypeFilter = currentFilter(),
                         )
                     // Seed the debounce so the initial fetch lands without a manual pan.
-                    pinFetchTriggers.tryEmit(PinFetchTrigger(initialCamera, currentFilter()))
+                    scheduleFetch(initialCamera, currentFilter())
                     // Start tracking the user's location + heading for the blue-dot indicator
                     // (issue #99). Both subscriptions are best-effort: a permission revocation or
                     // missing sensor completes the flow cleanly, leaving `userLocation`/
@@ -151,11 +159,9 @@ class NearbyViewModel
                             pins = emptyList(),
                             routeTypeFilter = currentFilter(),
                         )
-                    pinFetchTriggers.tryEmit(
-                        PinFetchTrigger(
-                            OpenPtvCameraState(MELBOURNE_CBD, INITIAL_ZOOM),
-                            currentFilter(),
-                        ),
+                    scheduleFetch(
+                        OpenPtvCameraState(MELBOURNE_CBD, INITIAL_ZOOM),
+                        currentFilter(),
                     )
                     // Permission denied — make sure neither tracker is still running from a prior
                     // grant within the same VM lifetime.
@@ -227,7 +233,19 @@ class NearbyViewModel
                     _uiState.value = current.copy(camera = camera)
                 NearbyUiState.PermissionUnasked -> Unit
             }
-            pinFetchTriggers.tryEmit(PinFetchTrigger(camera, currentFilter()))
+            scheduleFetch(camera, currentFilter())
+        }
+
+        /**
+         * Called from MapLibre's camera-move-started listener through the [OpenPtvMap] callback.
+         * Cancels any in-flight pin fetch — issue #109. The debounce delay won't have elapsed yet
+         * for a typical drag-start, so the cancel is mostly defensive against the "fast pan,
+         * then a long network round-trip lands mid-drag" case. Pins on screen are unaffected
+         * because the LRU cache (#108) holds the previously-rendered set.
+         */
+        fun onCameraMoveStarted() {
+            fetchJob?.cancel()
+            fetchJob = null
         }
 
         /**
@@ -242,7 +260,7 @@ class NearbyViewModel
          *
          * Filter changes immediately re-fire the pin fetch with the new filter set. A debounce
          * still applies, so a user who taps three chips in rapid succession only fires one
-         * request. The previous in-flight fetch (under `collectLatest`) is cancelled.
+         * request. [scheduleFetch] cancels the previous [fetchJob] so the latest filter wins.
          *
          * Reads the filter directly from `_uiState.value` (rather than a captured local) so the
          * "no-op when only one selected" check is consistent with the latest state — protects
@@ -265,9 +283,24 @@ class NearbyViewModel
             // because the routeType wasn't really in/out). Skip the re-emit so the debounce
             // pipeline doesn't fire a redundant fetch.
             if (nextFilter == current) return
+            // Filter changed — purge cached stops so the map doesn't keep showing pins from the
+            // previous filter (e.g. bus pins still visible after a "trams only" tap). Cheaper
+            // than keying the cache by `(stopId, filter)`: the user has explicitly asked for a
+            // different set, the previous fetches no longer match user intent. Drop the rendered
+            // pin list too so the stale set isn't visible during the debounce window.
+            stopCache.clear()
             updateFilter(nextFilter)
+            clearRenderedPins()
             currentCamera()?.let { camera ->
-                pinFetchTriggers.tryEmit(PinFetchTrigger(camera, nextFilter))
+                scheduleFetch(camera, nextFilter)
+            }
+        }
+
+        private fun clearRenderedPins() {
+            when (val state = _uiState.value) {
+                is NearbyUiState.Loaded -> _uiState.value = state.copy(pins = emptyList())
+                is NearbyUiState.PermissionDenied -> _uiState.value = state.copy(pins = emptyList())
+                NearbyUiState.PermissionUnasked -> Unit
             }
         }
 
@@ -304,42 +337,60 @@ class NearbyViewModel
                 )
         }
 
-        @OptIn(FlowPreview::class)
-        private fun wireCameraDebounce() {
-            viewModelScope.launch {
-                pinFetchTriggers
-                    .debounce(CAMERA_IDLE_DEBOUNCE_MS)
-                    // `collectLatest` cancels an in-flight fetch if the user pans (or toggles a
-                    // filter) again mid-call. Avoids a slow fetch landing on top of a fresher
-                    // one and overwriting the pins the user is currently looking at.
-                    .collectLatest { trigger ->
-                        val radius = radiusForZoom(trigger.camera.zoom)
-                        val result =
-                            nearbyStopsRepository.stopsNear(
-                                coordinates = trigger.camera.centre,
-                                radiusMeters = radius,
-                                routeTypes = trigger.filter,
-                            )
-                        val pins =
-                            when (result) {
-                                is Result.Success -> result.data
-                                is Result.Error,
-                                Result.Loading,
-                                -> emptyList()
-                            }
-                        when (val current = _uiState.value) {
-                            is NearbyUiState.Loaded ->
-                                _uiState.value =
-                                    current.copy(
-                                        pins = pins,
-                                        showEmptyHint = result is Result.Success && pins.isEmpty(),
-                                    )
-                            is NearbyUiState.PermissionDenied ->
-                                _uiState.value = current.copy(pins = pins)
-                            NearbyUiState.PermissionUnasked -> Unit
+        /**
+         * Schedule a debounced pin fetch. Cancels the previous [fetchJob] (which either was still
+         * in its `delay` window or already mid-network — `collectLatest`-style cancellation either
+         * way) and launches a fresh job that waits [CAMERA_IDLE_DEBOUNCE_MS] before calling
+         * [NearbyStopsRepository.stopsNear]. A rapid sequence of camera idles therefore collapses
+         * to a single fetch (the last one wins), and an [onCameraMoveStarted] from MapLibre can
+         * cancel the in-flight job outright via [fetchJob].`cancel()`.
+         */
+        private fun scheduleFetch(
+            camera: OpenPtvCameraState,
+            filter: Set<RouteType>,
+        ) {
+            fetchJob?.cancel()
+            fetchJob =
+                viewModelScope.launch {
+                    delay(CAMERA_IDLE_DEBOUNCE_MS)
+                    val radius = radiusForZoom(camera.zoom)
+                    val result =
+                        nearbyStopsRepository.stopsNear(
+                            coordinates = camera.centre,
+                            radiusMeters = radius,
+                            routeTypes = filter,
+                        )
+                    // Fold the fresh stops into the LRU cache and render the merged set.
+                    // The user sees previously-fetched pins persist as they pan back into a
+                    // region; the fresh fetch refreshes data for the current viewport.
+                    // We keep every cached stop in `pins` (no viewport bbox filter) — MapLibre
+                    // clusters them and the per-pin overhead is negligible at the 2000-stop
+                    // bound, so the extra complexity of a bbox filter isn't worth it.
+                    val fresh =
+                        when (result) {
+                            is Result.Success -> result.data
+                            is Result.Error,
+                            Result.Loading,
+                            -> emptyList()
                         }
+                    stopCache.putAll(fresh)
+                    val pins = stopCache.snapshot()
+                    when (val current = _uiState.value) {
+                        is NearbyUiState.Loaded ->
+                            _uiState.value =
+                                current.copy(
+                                    pins = pins,
+                                    // The hint fires when the fetch succeeded AND the cache is
+                                    // still empty after merging — i.e. the user has never seen
+                                    // a stop in this session. Once any stop is cached, the
+                                    // hint stays off because the map isn't empty anymore.
+                                    showEmptyHint = result is Result.Success && pins.isEmpty(),
+                                )
+                        is NearbyUiState.PermissionDenied ->
+                            _uiState.value = current.copy(pins = pins)
+                        NearbyUiState.PermissionUnasked -> Unit
                     }
-            }
+                }
         }
 
         /**
@@ -442,11 +493,6 @@ class NearbyViewModel
             return radius.coerceIn(RADIUS_BASE_METERS, MAX_RADIUS_METERS)
         }
 
-        private data class PinFetchTrigger(
-            val camera: OpenPtvCameraState,
-            val filter: Set<RouteType>,
-        )
-
         internal companion object {
             /** Melbourne CBD centroid — Flinders Street area. Default camera when no fix. */
             internal val MELBOURNE_CBD: Coordinates = Coordinates(lat = -37.8136, lng = 144.9631)
@@ -480,5 +526,49 @@ class NearbyViewModel
              * camera-idle event but smaller than a deliberate pan.
              */
             internal const val FOLLOW_LEASH_METERS: Double = 50.0
+
+            /**
+             * Cap on the LRU stop cache. Sized so an hour of pan/zoom across central Melbourne
+             * wouldn't evict — a single screen-width of dense CBD fetches a few hundred stops,
+             * a typical pan accumulates well under this number. Far below memory pressure: each
+             * `Stop` is a handful of strings + two doubles (~150 bytes), so 2000 entries is
+             * ~300 KB.
+             */
+            internal const val MAX_CACHED_STOPS: Int = 2000
         }
     }
+
+/**
+ * Tiny insertion-order LRU keyed by [StopId]. A re-insert (i.e. a stop returned by a fresh fetch
+ * we've already seen) bumps its recency by removing-then-re-adding under the same key. Eviction
+ * fires synchronously on [putAll] / [put] once the size exceeds the bound.
+ *
+ * Not thread-safe — only touched from the ViewModel's coroutine scope (single Dispatcher.Main).
+ * If that changes, wrap accesses in a Mutex; for now the cost of synchronisation is unjustified.
+ */
+internal class LruStopCache(private val maxSize: Int) {
+    private val backing: LinkedHashMap<StopId, Stop> = LinkedHashMap()
+
+    fun putAll(stops: Collection<Stop>) {
+        stops.forEach(::put)
+    }
+
+    fun put(stop: Stop) {
+        // Remove-then-add bumps recency for a stop we've already cached. LinkedHashMap with
+        // `accessOrder = true` would also work, but we'd still need the explicit eviction.
+        backing.remove(stop.id)
+        backing[stop.id] = stop
+        while (backing.size > maxSize) {
+            val eldest = backing.keys.iterator().next()
+            backing.remove(eldest)
+        }
+    }
+
+    fun clear() {
+        backing.clear()
+    }
+
+    fun snapshot(): List<Stop> = backing.values.toList()
+
+    fun size(): Int = backing.size
+}
