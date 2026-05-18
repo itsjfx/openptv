@@ -52,6 +52,7 @@ class FavouritesScreenTest {
             FavouritesRoute(
                 onOpenStopDetail = { _, _, _, _ -> },
                 onOpenSearch = { },
+                onOpenSettings = { },
             )
         }
 
@@ -109,6 +110,7 @@ class FavouritesScreenTest {
                     captured = listOf(stopId, routeTypeCode, focusRouteId, focusDirectionId)
                 },
                 onOpenSearch = { /* no-op */ },
+                onOpenSettings = { /* no-op */ },
             )
         }
 
@@ -150,6 +152,7 @@ class FavouritesScreenTest {
             FavouritesRoute(
                 onOpenStopDetail = { _, _, _, _ -> },
                 onOpenSearch = { },
+                onOpenSettings = { },
             )
         }
 
@@ -188,6 +191,7 @@ class FavouritesScreenTest {
             FavouritesRoute(
                 onOpenStopDetail = { _, _, _, _ -> },
                 onOpenSearch = { },
+                onOpenSettings = { },
             )
         }
 
@@ -220,6 +224,27 @@ class FavouritesScreenTest {
             favouritesRepository.current.isNotEmpty()
         }
         assertThat(favouritesRepository.current).hasSize(1)
+    }
+
+    @Test
+    fun settingsGear_tapFiresOnOpenSettings() {
+        // Issue #111 — the top-left gear replaces the old Settings bottom-nav tab. Tapping it
+        // hoists through `onOpenSettings`, which the app composition root wires to a destination
+        // push. The empty state is sufficient: the gear lives in the TopAppBar above the empty
+        // state and the loaded state alike, so we don't need to seed any rows.
+        var opened = false
+        composeTestRule.setContent {
+            FavouritesRoute(
+                onOpenStopDetail = { _, _, _, _ -> },
+                onOpenSearch = { },
+                onOpenSettings = { opened = true },
+            )
+        }
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(TestTagSettingsGear).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeTestRule.onNodeWithTag(TestTagSettingsGear).performClick()
+        assertThat(opened).isTrue()
     }
 
     private companion object {

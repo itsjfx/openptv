@@ -1,5 +1,6 @@
 package ac.jfx.openptv.feature.search
 
+import ac.jfx.openptv.core.designsystem.ScreenHeading
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.feature.search.R
@@ -14,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -40,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 @Composable
 fun SearchScreen(
     onStopSelected: (Stop) -> Unit = {},
+    onOpenSettings: () -> Unit = {},
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     val query by viewModel.query.collectAsStateWithLifecycle()
@@ -49,6 +52,7 @@ fun SearchScreen(
         uiState = uiState,
         onQueryChanged = viewModel::onQueryChanged,
         onStopSelected = onStopSelected,
+        onOpenSettings = onOpenSettings,
     )
 }
 
@@ -59,55 +63,70 @@ internal fun SearchScreenContent(
     uiState: SearchUiState,
     onQueryChanged: (String) -> Unit,
     onStopSelected: (Stop) -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(stringResource(R.string.feature_search_title)) })
+            // Small TopAppBar — gear lives in the compact icon row under the status bar, hero
+            // heading is rendered in the body via [ScreenHeading] (ReadYou layout, issue #111
+            // review).
+            TopAppBar(
+                title = {},
+                navigationIcon = {
+                    SettingsGearButton(onClick = onOpenSettings)
+                },
+            )
         },
     ) { padding ->
         Column(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(padding)
-                    .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(padding),
         ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChanged,
+            ScreenHeading(text = stringResource(R.string.feature_search_title))
+            Column(
                 modifier =
                     Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp)
-                        .testTag(TestTagQueryField),
-                label = { Text(stringResource(R.string.feature_search_field_label)) },
-                singleLine = true,
-                keyboardOptions =
-                    androidx.compose.foundation.text.KeyboardOptions(
-                        imeAction = ImeAction.Search,
-                    ),
-            )
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChanged,
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .testTag(TestTagQueryField),
+                    label = { Text(stringResource(R.string.feature_search_field_label)) },
+                    singleLine = true,
+                    keyboardOptions =
+                        androidx.compose.foundation.text.KeyboardOptions(
+                            imeAction = ImeAction.Search,
+                        ),
+                )
 
-            when (val state = uiState) {
-                SearchUiState.Idle ->
-                    CenteredMessage(
-                        text = stringResource(R.string.feature_search_idle_hint),
-                    )
-                SearchUiState.Loading -> CenteredLoader()
-                SearchUiState.Empty ->
-                    CenteredMessage(
-                        text = stringResource(R.string.feature_search_empty),
-                    )
-                is SearchUiState.Results ->
-                    StopList(
-                        stops = state.stops,
-                        // Phase 02 surfaced a snackbar here as a placeholder navigation target.
-                        // Phase 03 wires the real destination via the `onStopSelected` hoist —
-                        // the app composition root pushes `AppNavKey.StopDetail`.
-                        onStopSelected = onStopSelected,
-                    )
-                is SearchUiState.Error -> CenteredMessage(text = state.reason)
+                when (val state = uiState) {
+                    SearchUiState.Idle ->
+                        CenteredMessage(
+                            text = stringResource(R.string.feature_search_idle_hint),
+                        )
+                    SearchUiState.Loading -> CenteredLoader()
+                    SearchUiState.Empty ->
+                        CenteredMessage(
+                            text = stringResource(R.string.feature_search_empty),
+                        )
+                    is SearchUiState.Results ->
+                        StopList(
+                            stops = state.stops,
+                            // Phase 02 surfaced a snackbar here as a placeholder navigation target.
+                            // Phase 03 wires the real destination via the `onStopSelected` hoist —
+                            // the app composition root pushes `AppNavKey.StopDetail`.
+                            onStopSelected = onStopSelected,
+                        )
+                    is SearchUiState.Error -> CenteredMessage(text = state.reason)
+                }
             }
         }
 
@@ -200,5 +219,28 @@ private fun RouteType.label(): String =
         RouteType.Unknown -> stringResource(R.string.feature_search_route_type_unknown)
     }
 
+/**
+ * Top-left settings gear — see the equivalent doc on `:feature:favourites`. Pushed as a
+ * destination by the app composition root so system back returns to whichever main screen
+ * launched it (issue #111).
+ */
+@Composable
+private fun SettingsGearButton(onClick: () -> Unit) {
+    val description = stringResource(R.string.feature_search_open_settings)
+    IconButton(
+        onClick = onClick,
+        modifier =
+            Modifier
+                .testTag(TestTagSettingsGear)
+                .semantics { contentDescription = description },
+    ) {
+        Text(
+            text = "⚙",
+            style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
 internal const val TestTagQueryField: String = "search-query-field"
 internal const val TestTagResults: String = "search-results-list"
+internal const val TestTagSettingsGear: String = "search-settings-gear"

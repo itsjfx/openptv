@@ -13,7 +13,9 @@ import ac.jfx.openptv.feature.settings.SettingsRoute
 import ac.jfx.openptv.feature.setup.SetupScreen
 import ac.jfx.openptv.feature.stopdetail.StopDetailRoute
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -78,6 +80,7 @@ private fun MainNav() {
                                 ),
                             )
                         },
+                        onOpenSettings = { backStack.add(AppNavKey.Settings) },
                     )
                 }
                 entry<AppNavKey.Search> {
@@ -90,6 +93,7 @@ private fun MainNav() {
                                 ),
                             )
                         },
+                        onOpenSettings = { backStack.add(AppNavKey.Settings) },
                     )
                 }
                 entry<AppNavKey.Favourites> {
@@ -105,6 +109,7 @@ private fun MainNav() {
                             )
                         },
                         onOpenSearch = { backStack.add(AppNavKey.Search) },
+                        onOpenSettings = { backStack.add(AppNavKey.Settings) },
                     )
                 }
                 entry<AppNavKey.Nearby> {
@@ -117,6 +122,7 @@ private fun MainNav() {
                                 ),
                             )
                         },
+                        onOpenSettings = { backStack.add(AppNavKey.Settings) },
                     )
                 }
                 entry<AppNavKey.StopDetail> { key ->
@@ -135,10 +141,15 @@ private fun MainNav() {
 }
 
 /**
- * Bottom-nav scaffold hosting the three top-level tabs: Favourites (default), Search, Settings.
+ * Bottom-nav scaffold hosting the three top-level tabs: Favourites (default), Nearby, Search.
  * Each tab swaps the content under the [Scaffold] without pushing a back-stack entry, so the
  * system back button still pops out of the gate (consistent with the Material 3 bottom-nav
  * pattern).
+ *
+ * Settings used to be a fourth tab but moved behind a top-left gear on each of the three main
+ * screens in issue #111 — tapping the gear pushes [AppNavKey.Settings] as a destination so system
+ * back returns to whichever main screen launched it. [onOpenSettings] is the hook the gear
+ * fires.
  *
  * `selectedTab` is saved via `rememberSaveable` so a configuration change (rotation, dark-mode
  * flip) keeps the user on the same tab; cold-launch always lands on Favourites because the issue
@@ -152,6 +163,7 @@ private fun MainNav() {
 @Composable
 private fun HomeScaffold(
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusRouteId: Int, focusDirectionId: Int) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Favourites) }
 
@@ -179,6 +191,11 @@ private fun HomeScaffold(
                 }
             }
         },
+        // Only consume the navigation-bar inset here so the bottom-nav sits above the system bar.
+        // The status-bar inset is left to the inner Scaffolds in each tab so their `TopAppBar`s
+        // pad against the status bar exactly once. Without this, the inner Scaffold double-pads
+        // and the gear lands ~28 dp lower than the ReadYou layout (issue #111 review).
+        contentWindowInsets = WindowInsets.navigationBars,
         modifier = Modifier.testTag(TestTagHomeScaffold),
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -190,29 +207,31 @@ private fun HomeScaffold(
                         // Search tab rather than pushing a destination, so the user stays inside
                         // the bottom-nav surface.
                         onOpenSearch = { selectedTab = HomeTab.Search },
+                        onOpenSettings = onOpenSettings,
                     )
                 HomeTab.Nearby ->
                     NearbyRoute(
                         onOpenStopDetail = { stopId, routeTypeCode ->
                             onOpenStopDetail(stopId, routeTypeCode, -1, -1)
                         },
+                        onOpenSettings = onOpenSettings,
                     )
                 HomeTab.Search ->
                     SearchScreen(
                         onStopSelected = { stop ->
                             onOpenStopDetail(stop.id.value, stop.routeType.toCode(), -1, -1)
                         },
+                        onOpenSettings = onOpenSettings,
                     )
-                HomeTab.Settings -> SettingsRoute()
             }
         }
     }
 }
 
 // Bottom-nav tab order: Favourites (default surface), Nearby (Phase 05 — map-based discovery),
-// Search (text discovery), Settings. Nearby slots between Favourites and Search because both
-// Nearby and Search are "find a stop" surfaces — Nearby by geography, Search by name — and
-// reviewers can tap-cycle between them without crossing Settings. `cc @itsjfx` to confirm.
+// Search (text discovery). Settings moved behind a top-left gear on each screen in issue #111.
+// Nearby slots between Favourites and Search because both Nearby and Search are "find a stop"
+// surfaces — Nearby by geography, Search by name — and reviewers can tap-cycle between them.
 private enum class HomeTab(
     val glyph: String,
     val labelRes: Int,
@@ -222,7 +241,6 @@ private enum class HomeTab(
     Favourites("★", R.string.bottom_nav_favourites, "Favourites tab", TestTagTabFavourites),
     Nearby("🗺", R.string.bottom_nav_nearby, "Nearby tab", TestTagTabNearby),
     Search("⌕", R.string.bottom_nav_search, "Search tab", TestTagTabSearch),
-    Settings("⚙", R.string.bottom_nav_settings, "Settings tab", TestTagTabSettings),
 }
 
 @Composable
@@ -244,7 +262,6 @@ internal const val TestTagHomeScaffold: String = "home-scaffold"
 internal const val TestTagTabFavourites: String = "home-tab-favourites"
 internal const val TestTagTabNearby: String = "home-tab-nearby"
 internal const val TestTagTabSearch: String = "home-tab-search"
-internal const val TestTagTabSettings: String = "home-tab-settings"
 
 /**
  * Maps the `:core:datastore` user-preference theme enum to the `:core:designsystem`

@@ -14,10 +14,13 @@ import ac.jfx.openptv.core.testing.StopMother
 import ac.jfx.openptv.uitesthiltmanifest.HiltComponentActivity
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import com.google.common.truth.Truth.assertThat
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import org.junit.Before
@@ -147,6 +150,23 @@ class SearchScreenTest {
         composeTestRule
             .onNodeWithText("network", substring = true)
             .assertIsDisplayed()
+    }
+
+    /**
+     * Issue #111 — the top-left gear replaces the old Settings bottom-nav tab. Tapping it hoists
+     * through `onOpenSettings`, which the app composition root wires to a destination push.
+     */
+    @Test
+    fun settingsGear_tapFiresOnOpenSettings() {
+        var opened = false
+        composeTestRule.setContent {
+            SearchScreen(onOpenSettings = { opened = true })
+        }
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule.onAllNodesWithTag(TestTagSettingsGear).fetchSemanticsNodes().isNotEmpty()
+        }
+        composeTestRule.onNodeWithTag(TestTagSettingsGear).performClick()
+        assertThat(opened).isTrue()
     }
 
     private companion object {

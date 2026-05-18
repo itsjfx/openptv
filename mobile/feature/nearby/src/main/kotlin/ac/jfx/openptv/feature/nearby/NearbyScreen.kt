@@ -3,6 +3,7 @@ package ac.jfx.openptv.feature.nearby
 import ac.jfx.openptv.core.common.DistanceFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.designsystem.LocationPermissionRationale
+import ac.jfx.openptv.core.designsystem.ScreenHeading
 import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.Route
@@ -36,6 +37,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
@@ -44,7 +46,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberStandardBottomSheetState
@@ -80,6 +81,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 @Composable
 fun NearbyRoute(
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int) -> Unit,
+    onOpenSettings: () -> Unit,
     viewModel: NearbyViewModel = hiltViewModel(),
     map: OpenPtvMap = hiltViewModel<NearbyMapHolder>().map,
     initialiser: OpenPtvMapInitialiser = hiltViewModel<NearbyMapHolder>().initialiser,
@@ -145,6 +147,7 @@ fun NearbyRoute(
             viewModel.onSheetDismissed()
             onOpenStopDetail(stop.id.value, stop.routeType.toCode())
         },
+        onOpenSettings = onOpenSettings,
         onOpenAppSettings = {
             val intent =
                 Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
@@ -193,6 +196,7 @@ internal fun NearbyScreen(
     onFollowMeClicked: () -> Unit,
     onRouteTypeFilterToggled: (RouteType) -> Unit,
     onViewStop: (Stop) -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
     rationaleDismissed: Boolean,
     onRationaleDismiss: () -> Unit,
@@ -224,102 +228,115 @@ internal fun NearbyScreen(
 
     Scaffold(
         topBar = {
+            // Small TopAppBar — gear lives in the compact icon row under the status bar, hero
+            // heading is rendered in the body via [ScreenHeading] (ReadYou layout, issue #111
+            // review).
             TopAppBar(
-                title = { Text(stringResource(R.string.feature_nearby_title)) },
-                colors = TopAppBarDefaults.topAppBarColors(),
+                title = {},
+                navigationIcon = {
+                    SettingsGearButton(onClick = onOpenSettings)
+                },
             )
         },
         modifier = Modifier.testTag(TestTagRoot),
     ) { padding ->
-        BottomSheetScaffold(
-            scaffoldState = scaffoldState,
-            sheetPeekHeight = SheetPeekHeight,
-            sheetContent = {
-                NearbyStopsList(
-                    rows = nearbyRows,
-                    distanceFormatter = distanceFormatter,
-                    onRowClicked = onPinClicked,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = SheetMaxHeight)
-                            .testTag(TestTagNearbyList),
-                )
-            },
+        Column(
             modifier =
                 Modifier
                     .fillMaxSize()
                     .padding(padding),
-        ) { innerPadding ->
-            Box(
+        ) {
+            ScreenHeading(text = stringResource(R.string.feature_nearby_title))
+            BottomSheetScaffold(
+                scaffoldState = scaffoldState,
+                sheetPeekHeight = SheetPeekHeight,
+                sheetContent = {
+                    NearbyStopsList(
+                        rows = nearbyRows,
+                        distanceFormatter = distanceFormatter,
+                        onRowClicked = onPinClicked,
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = SheetMaxHeight)
+                                .testTag(TestTagNearbyList),
+                    )
+                },
                 modifier =
                     Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding),
-            ) {
-                // Underlying map — always present. The variant decides whether overlays show.
-                val camera = uiState.cameraOrCbd()
-                map.Render(
-                    camera = camera,
-                    userLocation = userLocation,
-                    userBearing = userBearing,
-                    pins = filteredPins,
-                    isDark = isDark,
-                    onCameraIdle = onCameraIdle,
-                    onCameraMoveStarted = onCameraMoveStarted,
-                    onPinClicked = onPinClicked,
-                    modifier = Modifier.fillMaxSize().testTag(TestTagMap),
-                )
-
-                // Filter chip row pinned to the top of the map content.
-                RouteTypeFilterRow(
-                    selected = uiState.routeTypeFilter,
-                    onToggle = onRouteTypeFilterToggled,
+                        .weight(1f)
+                        .fillMaxWidth(),
+            ) { innerPadding ->
+                Box(
                     modifier =
                         Modifier
-                            .align(Alignment.TopCenter)
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 8.dp)
-                            .testTag(TestTagFilterRow),
-                )
+                            .fillMaxSize()
+                            .padding(innerPadding),
+                ) {
+                    // Underlying map — always present. The variant decides whether overlays show.
+                    val camera = uiState.cameraOrCbd()
+                    map.Render(
+                        camera = camera,
+                        userLocation = userLocation,
+                        userBearing = userBearing,
+                        pins = filteredPins,
+                        isDark = isDark,
+                        onCameraIdle = onCameraIdle,
+                        onCameraMoveStarted = onCameraMoveStarted,
+                        onPinClicked = onPinClicked,
+                        modifier = Modifier.fillMaxSize().testTag(TestTagMap),
+                    )
 
-                // Permission banner (denied state) — sits below the chip row so both are visible.
-                if (uiState is NearbyUiState.PermissionDenied) {
-                    PermissionDeniedBanner(
-                        onOpenSettings = onOpenAppSettings,
+                    // Filter chip row pinned to the top of the map content.
+                    RouteTypeFilterRow(
+                        selected = uiState.routeTypeFilter,
+                        onToggle = onRouteTypeFilterToggled,
                         modifier =
                             Modifier
                                 .align(Alignment.TopCenter)
                                 .fillMaxWidth()
-                                .padding(top = 64.dp, start = 16.dp, end = 16.dp)
-                                .testTag(TestTagPermissionDeniedBanner),
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                                .testTag(TestTagFilterRow),
                     )
-                }
 
-                // Empty-state hint over the map when a fetch returned no pins for the region
-                if (uiState is NearbyUiState.Loaded && uiState.showEmptyHint) {
-                    EmptyStateHint(
-                        modifier =
-                            Modifier
-                                .align(Alignment.Center)
-                                .padding(32.dp)
-                                .testTag(TestTagEmptyHint),
-                    )
-                }
+                    // Permission banner (denied state) — sits below the chip row so both are visible.
+                    if (uiState is NearbyUiState.PermissionDenied) {
+                        PermissionDeniedBanner(
+                            onOpenSettings = onOpenAppSettings,
+                            modifier =
+                                Modifier
+                                    .align(Alignment.TopCenter)
+                                    .fillMaxWidth()
+                                    .padding(top = 64.dp, start = 16.dp, end = 16.dp)
+                                    .testTag(TestTagPermissionDeniedBanner),
+                        )
+                    }
 
-                // Follow-me FAB — only useful when there's a user location to centre on. Sits
-                // above the bottom sheet's peek surface so it doesn't disappear behind the
-                // sheet header.
-                if (uiState is NearbyUiState.Loaded && uiState.userLocation != null) {
-                    FloatingActionButton(
-                        onClick = onFollowMeClicked,
-                        modifier =
-                            Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(16.dp)
-                                .testTag(TestTagFollowMeFab),
-                    ) {
-                        Text("⌖", style = MaterialTheme.typography.titleLarge)
+                    // Empty-state hint over the map when a fetch returned no pins for the region
+                    if (uiState is NearbyUiState.Loaded && uiState.showEmptyHint) {
+                        EmptyStateHint(
+                            modifier =
+                                Modifier
+                                    .align(Alignment.Center)
+                                    .padding(32.dp)
+                                    .testTag(TestTagEmptyHint),
+                        )
+                    }
+
+                    // Follow-me FAB — only useful when there's a user location to centre on. Sits
+                    // above the bottom sheet's peek surface so it doesn't disappear behind the
+                    // sheet header.
+                    if (uiState is NearbyUiState.Loaded && uiState.userLocation != null) {
+                        FloatingActionButton(
+                            onClick = onFollowMeClicked,
+                            modifier =
+                                Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(16.dp)
+                                    .testTag(TestTagFollowMeFab),
+                        ) {
+                            Text("⌖", style = MaterialTheme.typography.titleLarge)
+                        }
                     }
                 }
             }
@@ -835,6 +852,27 @@ private fun RouteType.glyph(): String =
     }
 
 /**
+ * Top-left settings gear — see equivalent doc on `:feature:favourites`. Pushed as a destination
+ * by the app composition root so system back returns to whichever main screen launched it.
+ */
+@Composable
+private fun SettingsGearButton(onClick: () -> Unit) {
+    val description = stringResource(R.string.feature_nearby_open_settings)
+    IconButton(
+        onClick = onClick,
+        modifier =
+            Modifier
+                .testTag(TestTagSettingsGear)
+                .semantics { contentDescription = description },
+    ) {
+        Text(
+            text = "⚙",
+            style = MaterialTheme.typography.titleLarge,
+        )
+    }
+}
+
+/**
  * Estimate luminance from an `argb` color. Material 3's `ColorScheme.surface` is the host theme's
  * primary background; a low-luminance value means we're in dark mode. We do this rather than
  * reading a `LocalThemeMode` because `:feature:nearby` doesn't depend on `:core:datastore` and
@@ -868,6 +906,7 @@ internal const val TestTagNearbyList: String = "nearby-list"
 internal const val TestTagNearbyListHeader: String = "nearby-list-header"
 internal const val TestTagNearbyListItems: String = "nearby-list-items"
 internal const val TestTagNearbyListEmpty: String = "nearby-list-empty"
+internal const val TestTagSettingsGear: String = "nearby-settings-gear"
 
 internal fun filterChipTestTag(routeType: RouteType): String = "nearby-filter-chip-${routeType.name.lowercase()}"
 
