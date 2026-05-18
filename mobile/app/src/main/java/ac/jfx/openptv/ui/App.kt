@@ -125,11 +125,10 @@ private fun MainNav() {
                         routeType = RouteType.fromCode(key.routeTypeCode),
                         focusRouteId = key.focusRouteId,
                         focusDirectionId = key.focusDirectionId,
-                        onBack = { backStack.removeLastOrNull() },
                     )
                 }
                 entry<AppNavKey.Settings> {
-                    SettingsRoute(onBack = { backStack.removeLastOrNull() })
+                    SettingsRoute()
                 }
             },
     )
@@ -204,12 +203,7 @@ private fun HomeScaffold(
                             onOpenStopDetail(stop.id.value, stop.routeType.toCode(), -1, -1)
                         },
                     )
-                HomeTab.Settings ->
-                    SettingsRoute(
-                        // Back inside Settings just flips the tab back to Favourites because the
-                        // user is inside a bottom-nav surface with no real "back" target.
-                        onBack = { selectedTab = HomeTab.Favourites },
-                    )
+                HomeTab.Settings -> SettingsRoute()
             }
         }
     }

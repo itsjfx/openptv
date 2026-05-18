@@ -81,7 +81,7 @@ class SettingsScreenTest {
     fun tappingLightRow_writesLightToDataStore() {
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -97,7 +97,7 @@ class SettingsScreenTest {
     fun tappingDarkRow_writesDarkToDataStore() {
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -116,7 +116,7 @@ class SettingsScreenTest {
 
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -132,7 +132,7 @@ class SettingsScreenTest {
     fun appearanceSectionHeaderIsDisplayed() {
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -151,7 +151,7 @@ class SettingsScreenTest {
         // the row's visible affordance matches the real platform behaviour.
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -192,7 +192,7 @@ class SettingsScreenTest {
     fun serverRow_showsCurrentBackendUrl() {
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -207,7 +207,7 @@ class SettingsScreenTest {
     fun tappingServerRow_opensDialogWithBothChoices() {
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -224,7 +224,7 @@ class SettingsScreenTest {
 
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -278,7 +278,7 @@ class SettingsScreenTest {
     fun tappingTwentyFourHourRow_writesTwentyFourHourToDataStore() {
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -294,7 +294,7 @@ class SettingsScreenTest {
     fun tappingTwelveHourRow_writesTwelveHourToDataStore() {
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 
@@ -312,7 +312,7 @@ class SettingsScreenTest {
 
         composeTestRule.setContent {
             SettingsProvider(userPreferences = userPreferences) {
-                SettingsRoute(onBack = {})
+                SettingsRoute()
             }
         }
 

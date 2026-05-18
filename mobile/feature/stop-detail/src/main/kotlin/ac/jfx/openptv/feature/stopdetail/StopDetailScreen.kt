@@ -85,7 +85,6 @@ import kotlinx.datetime.toLocalDateTime
 fun StopDetailRoute(
     stopId: StopId,
     routeType: RouteType,
-    onBack: () -> Unit,
     focusRouteId: Int? = null,
     focusDirectionId: Int? = null,
     onDepartureClicked: (Departure) -> Unit = {},
@@ -121,7 +120,6 @@ fun StopDetailRoute(
 
     StopDetailScreenContent(
         uiState = uiState,
-        onBack = onBack,
         onRefresh = viewModel::refresh,
         onRetry = viewModel::retryHeader,
         onDepartureClicked = onDepartureClicked,
@@ -136,7 +134,6 @@ fun StopDetailRoute(
 @Composable
 internal fun StopDetailScreenContent(
     uiState: StopDetailUiState,
-    onBack: () -> Unit,
     onRefresh: () -> Unit,
     onRetry: () -> Unit,
     onDepartureClicked: (Departure) -> Unit,
@@ -193,13 +190,6 @@ internal fun StopDetailScreenContent(
                             },
                         maxLines = 1,
                     )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        // Material icons aren't pulled into this module to keep the dep surface
-                        // tight; a glyph stand-in keeps the back affordance.
-                        Text(text = "‹", style = MaterialTheme.typography.headlineMedium)
-                    }
                 },
                 // Favourite affordance moved into the per-route `GroupHeader` (issue #34). The
                 // favourites unit is `(stopId, routeId, directionId)` — a service — not a whole
