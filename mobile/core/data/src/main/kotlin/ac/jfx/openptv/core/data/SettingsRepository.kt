@@ -43,8 +43,19 @@ interface SettingsRepository {
     suspend fun setApiKey(apiKey: String)
 
     /**
-     * First-run completion: store the chosen URL and flip [AppSettings.setupCompleted] to true
-     * in a single transaction so the nav graph never observes a half-finished setup.
+     * First-run completion: persist the full server choice and flip [AppSettings.setupCompleted]
+     * to true in a single transaction so the nav graph never observes a half-finished setup.
+     *
+     *  - Proxy modes (default or custom): pass [directMode] = `false`, [url] = the chosen
+     *    proxy URL, and empty [devId] / [apiKey].
+     *  - Direct PTV mode: pass [directMode] = `true`, [devId] / [apiKey] = the user-supplied
+     *    credentials, and [url] = the bundled default proxy URL (so flipping back later still
+     *    works without re-typing).
      */
-    suspend fun completeSetup(url: String)
+    suspend fun completeSetup(
+        url: String,
+        directMode: Boolean = false,
+        devId: String = "",
+        apiKey: String = "",
+    )
 }

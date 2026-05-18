@@ -55,6 +55,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -465,9 +466,8 @@ private fun ServerRow(
 
 /**
  * Picker dialog. Three radio rows (Default / Custom / Direct PTV) plus conditional input
- * fields. The `Save` button is disabled until [ServerPickerState.canSave] is `true` — same
- * validation rule the onboarding `SetupUiState.canContinue` uses for the proxy choices, plus
- * a "both credentials non-blank" gate for Direct PTV.
+ * fields, delegated to [ServerPickerContent] so the first-run setup screen (`:app`'s
+ * `SetupScreen`) renders the same picker inline.
  *
  * Initial state is computed inside `remember` keyed on [serverConfig] so re-opening the dialog
  * after a save reflects the just-saved value: if direct mode is on, the dialog opens on the
@@ -517,89 +517,24 @@ private fun ServerPickerDialog(
             // Dialog body can grow tall once the Direct PTV blurb + fields are visible, so
             // wrap in a vertical scroll. The radio rows themselves stay reachable on phones
             // shorter than the dialog's max content height.
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                ServerChoiceRow(
-                    selected = state.choice == ServerChoice.Default,
-                    titleRes = R.string.feature_settings_server_default_title,
-                    bodyRes = R.string.feature_settings_server_default_body,
-                    detail = state.defaultUrl,
-                    onClick = { state = state.copy(choice = ServerChoice.Default) },
-                    testTag = TestTagServerDefaultChoice,
-                )
-                ServerChoiceRow(
-                    selected = state.choice == ServerChoice.Custom,
-                    titleRes = R.string.feature_settings_server_custom_title,
-                    bodyRes = R.string.feature_settings_server_custom_body,
-                    detail = null,
-                    onClick = { state = state.copy(choice = ServerChoice.Custom) },
-                    testTag = TestTagServerCustomChoice,
-                )
-                if (state.choice == ServerChoice.Custom) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = state.customUrl,
-                        onValueChange = { state = state.copy(customUrl = it) },
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag(TestTagServerCustomUrlField),
-                        label = { Text(stringResource(R.string.feature_settings_server_custom_field_label)) },
-                        placeholder = { Text(stringResource(R.string.feature_settings_server_custom_field_placeholder)) },
-                        supportingText = { Text(stringResource(R.string.feature_settings_server_custom_field_helper)) },
-                        singleLine = true,
-                    )
-                }
-                DirectPtvChoiceRow(
-                    selected = state.choice == ServerChoice.DirectPtv,
-                    onClick = { state = state.copy(choice = ServerChoice.DirectPtv) },
-                )
-                if (state.choice == ServerChoice.DirectPtv) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = state.devId,
-                        onValueChange = { state = state.copy(devId = it) },
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag(TestTagDirectModeDevIdField),
-                        label = { Text(stringResource(R.string.feature_settings_server_direct_devid_label)) },
-                        singleLine = true,
-                        keyboardOptions =
-                            KeyboardOptions(
-                                capitalization = KeyboardCapitalization.None,
-                                autoCorrectEnabled = false,
-                            ),
-                    )
-                    OutlinedTextField(
-                        value = state.apiKey,
-                        onValueChange = { state = state.copy(apiKey = it) },
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp)
-                                .testTag(TestTagDirectModeApiKeyField),
-                        label = { Text(stringResource(R.string.feature_settings_server_direct_apikey_label)) },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions =
-                            KeyboardOptions(
-                                capitalization = KeyboardCapitalization.None,
-                                autoCorrectEnabled = false,
-                            ),
-                    )
-                    Text(
-                        text = stringResource(R.string.feature_settings_server_direct_helper),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-            }
+            ServerPickerContent(
+                state = state,
+                onStateChange = { state = it },
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            )
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(state) },
-                enabled = state.canSave,
+                // Always tappable. If the chosen option isn't committable we flip the
+                // validation flag so the picker paints the offending fields red rather than
+                // silently disabling Save — Material 3 required-field UX.
+                onClick = {
+                    if (state.canSave) {
+                        onSave(state)
+                    } else {
+                        state = state.copy(showValidationErrors = true)
+                    }
+                },
                 modifier = Modifier.testTag(TestTagServerDialogSave),
             ) {
                 Text(stringResource(R.string.feature_settings_server_dialog_save))
@@ -614,6 +549,146 @@ private fun ServerPickerDialog(
             }
         },
     )
+}
+
+/**
+ * Three-radio server picker body, used by both the Settings dialog and the first-run setup
+ * screen (`:app`'s `SetupScreen`). Stateless: the caller owns the [ServerPickerState] and
+ * receives every keystroke / radio tap via [onStateChange].
+ *
+ * Layout is a plain [Column] — the caller picks the container (the Settings side wraps it
+ * in a `verticalScroll` inside the dialog body; the setup screen drops it inline into the
+ * scrollable column it already owns). The rows render in the same order on both surfaces —
+ * Default, Custom (with conditional URL field), Direct PTV (with conditional credential fields
+ * and helper text) — so the affordance reads identically wherever the picker shows up.
+ *
+ * Test tags (`TestTagServer*Choice`, `TestTagServerCustomUrlField`, `TestTagDirectMode*Field`)
+ * are stable across surfaces, so feature tests that drove the dialog still drive the setup
+ * screen unchanged.
+ */
+@Composable
+fun ServerPickerContent(
+    state: ServerPickerState,
+    onStateChange: (ServerPickerState) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        ServerChoiceRow(
+            selected = state.choice == ServerChoice.Default,
+            titleRes = R.string.feature_settings_server_default_title,
+            bodyRes = R.string.feature_settings_server_default_body,
+            detail = null,
+            onClick = { onStateChange(state.copy(choice = ServerChoice.Default)) },
+            testTag = TestTagServerDefaultChoice,
+        )
+        ServerChoiceRow(
+            selected = state.choice == ServerChoice.Custom,
+            titleRes = R.string.feature_settings_server_custom_title,
+            bodyRes = R.string.feature_settings_server_custom_body,
+            detail = null,
+            onClick = { onStateChange(state.copy(choice = ServerChoice.Custom)) },
+            testTag = TestTagServerCustomChoice,
+        )
+        if (state.choice == ServerChoice.Custom) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = state.customUrl,
+                // Clear the validation flag on any keystroke so the field stops painting red
+                // while the user is fixing it. Material 3 convention: error state is cleared
+                // as soon as the user starts addressing it.
+                onValueChange = {
+                    onStateChange(state.copy(customUrl = it, showValidationErrors = false))
+                },
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTagServerCustomUrlField),
+                label = {
+                    RequiredFieldLabel(R.string.feature_settings_server_custom_field_label)
+                },
+                placeholder = { Text(stringResource(R.string.feature_settings_server_custom_field_placeholder)) },
+                isError = state.customUrlError,
+                supportingText = {
+                    Text(
+                        text =
+                            if (state.customUrlError) {
+                                stringResource(R.string.feature_settings_server_required_error)
+                            } else {
+                                stringResource(R.string.feature_settings_server_custom_field_helper)
+                            },
+                    )
+                },
+                singleLine = true,
+            )
+        }
+        DirectPtvChoiceRow(
+            selected = state.choice == ServerChoice.DirectPtv,
+            onClick = { onStateChange(state.copy(choice = ServerChoice.DirectPtv)) },
+        )
+        if (state.choice == ServerChoice.DirectPtv) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = state.devId,
+                onValueChange = {
+                    onStateChange(state.copy(devId = it, showValidationErrors = false))
+                },
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTagDirectModeDevIdField),
+                label = {
+                    RequiredFieldLabel(R.string.feature_settings_server_direct_devid_label)
+                },
+                isError = state.devIdError,
+                supportingText =
+                    if (state.devIdError) {
+                        { Text(stringResource(R.string.feature_settings_server_required_error)) }
+                    } else {
+                        null
+                    },
+                singleLine = true,
+                keyboardOptions =
+                    KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                    ),
+            )
+            OutlinedTextField(
+                value = state.apiKey,
+                onValueChange = {
+                    onStateChange(state.copy(apiKey = it, showValidationErrors = false))
+                },
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .testTag(TestTagDirectModeApiKeyField),
+                label = {
+                    RequiredFieldLabel(R.string.feature_settings_server_direct_apikey_label)
+                },
+                isError = state.apiKeyError,
+                supportingText =
+                    if (state.apiKeyError) {
+                        { Text(stringResource(R.string.feature_settings_server_required_error)) }
+                    } else {
+                        null
+                    },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions =
+                    KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                    ),
+            )
+            Text(
+                text = stringResource(R.string.feature_settings_server_direct_helper),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
 }
 
 @Composable
@@ -699,10 +774,30 @@ private fun DirectPtvChoiceRow(
 }
 
 /**
+ * `OutlinedTextField` label for a required field — appends a Material 3-styled "*" in the
+ * error colour after the resolved label string. Inlined here rather than promoted to
+ * `:core:designsystem` because it's only used by the three required text fields in this picker
+ * and the Material spec for "required" is a single coloured asterisk, not a richer affordance.
+ */
+@Composable
+private fun RequiredFieldLabel(stringRes: Int) {
+    val label = stringResource(stringRes)
+    Text(
+        text =
+            buildAnnotatedString {
+                append(label)
+                withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
+                    append(" *")
+                }
+            },
+    )
+}
+
+/**
  * Build the Direct PTV blurb with two tappable spans. We rely on `indexOf` against the resolved
  * string rather than carrying span markers in `strings.xml`, because formatted-string spans in
  * Android resources don't survive translation tooling well and the source-of-truth substrings
- * (the email + the docs URL) are stable per the string-resource comment.
+ * (the email + the "see here" anchor) are stable per the string-resource comment.
  */
 @Composable
 private fun ptvApiKeyBlurb(): AnnotatedString {
@@ -711,6 +806,7 @@ private fun ptvApiKeyBlurb(): AnnotatedString {
     val emailSubject = stringResource(R.string.feature_settings_ptv_email_subject)
     val emailBody = stringResource(R.string.feature_settings_ptv_email_body)
     val docsUrl = stringResource(R.string.feature_settings_ptv_docs_url)
+    val docsAnchor = "see here"
     val mailto =
         "mailto:$email?subject=${URLEncoder.encode(emailSubject, Charsets.UTF_8.name())}" +
             "&body=${URLEncoder.encode(emailBody, Charsets.UTF_8.name())}"
@@ -726,16 +822,16 @@ private fun ptvApiKeyBlurb(): AnnotatedString {
 
     return buildAnnotatedString {
         val emailIdx = body.indexOf(email)
-        val docsIdx = body.indexOf(docsUrl)
+        val docsIdx = body.indexOf(docsAnchor)
 
-        // Three substrings can land in any order — append them in document order so the
+        // Two substrings can land in any order — append them in document order so the
         // surrounding `body` text reads exactly as written. Defence in depth: if either
         // substring is missing (translation accidentally dropped it), fall back to the raw
         // body without crashing.
         val anchors =
             listOfNotNull(
                 if (emailIdx >= 0) emailIdx to (emailIdx + email.length to mailto) else null,
-                if (docsIdx >= 0) docsIdx to (docsIdx + docsUrl.length to docsUrl) else null,
+                if (docsIdx >= 0) docsIdx to (docsIdx + docsAnchor.length to docsUrl) else null,
             ).sortedBy { it.first }
 
         if (anchors.isEmpty()) {
