@@ -116,8 +116,19 @@ internal fun SetupScreenContent(
             }
 
             Button(
-                onClick = onContinue,
-                enabled = state.canContinue,
+                // Tappable as soon as consent is accepted. Validation-on-tap then flips the
+                // picker's error flag (mirrors the Settings dialog Save behaviour) so blank
+                // required fields paint red instead of silently disabling Continue. Consent is
+                // a hard prerequisite — not a typo-able field — so the button stays disabled
+                // until that's ticked.
+                onClick = {
+                    if (state.canContinue) {
+                        onContinue()
+                    } else {
+                        onPickerStateChange(state.pickerState.copy(showValidationErrors = true))
+                    }
+                },
+                enabled = state.consentAccepted,
                 modifier =
                     Modifier
                         .fillMaxWidth()

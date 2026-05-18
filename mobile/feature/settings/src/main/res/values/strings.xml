@@ -53,7 +53,8 @@
     <string name="feature_settings_server_direct_body">Provide your own API key from Public Transport Victoria so OpenPTV can make direct calls to the PTV API. Email APIKeyRequest@ptv.vic.gov.au with the subject "PTV Timetable API – request for key" (see here). It may take a week for PTV to process your request.</string>
     <string name="feature_settings_server_direct_devid_label">PTV user ID</string>
     <string name="feature_settings_server_direct_apikey_label">PTV API key</string>
-    <string name="feature_settings_server_direct_helper">Stored on this device only. Both fields are required.</string>
+    <string name="feature_settings_server_direct_helper">Stored on this device only.</string>
+    <string name="feature_settings_server_required_error">Required</string>
     <string name="feature_settings_server_dialog_save">Save</string>
     <string name="feature_settings_server_dialog_cancel">Cancel</string>
 

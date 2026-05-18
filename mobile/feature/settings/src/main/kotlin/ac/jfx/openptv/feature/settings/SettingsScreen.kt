@@ -55,6 +55,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -524,8 +525,16 @@ private fun ServerPickerDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(state) },
-                enabled = state.canSave,
+                // Always tappable. If the chosen option isn't committable we flip the
+                // validation flag so the picker paints the offending fields red rather than
+                // silently disabling Save — Material 3 required-field UX.
+                onClick = {
+                    if (state.canSave) {
+                        onSave(state)
+                    } else {
+                        state = state.copy(showValidationErrors = true)
+                    }
+                },
                 modifier = Modifier.testTag(TestTagServerDialogSave),
             ) {
                 Text(stringResource(R.string.feature_settings_server_dialog_save))
@@ -584,14 +593,31 @@ fun ServerPickerContent(
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = state.customUrl,
-                onValueChange = { onStateChange(state.copy(customUrl = it)) },
+                // Clear the validation flag on any keystroke so the field stops painting red
+                // while the user is fixing it. Material 3 convention: error state is cleared
+                // as soon as the user starts addressing it.
+                onValueChange = {
+                    onStateChange(state.copy(customUrl = it, showValidationErrors = false))
+                },
                 modifier =
                     Modifier
                         .fillMaxWidth()
                         .testTag(TestTagServerCustomUrlField),
-                label = { Text(stringResource(R.string.feature_settings_server_custom_field_label)) },
+                label = {
+                    RequiredFieldLabel(R.string.feature_settings_server_custom_field_label)
+                },
                 placeholder = { Text(stringResource(R.string.feature_settings_server_custom_field_placeholder)) },
-                supportingText = { Text(stringResource(R.string.feature_settings_server_custom_field_helper)) },
+                isError = state.customUrlError,
+                supportingText = {
+                    Text(
+                        text =
+                            if (state.customUrlError) {
+                                stringResource(R.string.feature_settings_server_required_error)
+                            } else {
+                                stringResource(R.string.feature_settings_server_custom_field_helper)
+                            },
+                    )
+                },
                 singleLine = true,
             )
         }
@@ -603,12 +629,23 @@ fun ServerPickerContent(
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = state.devId,
-                onValueChange = { onStateChange(state.copy(devId = it)) },
+                onValueChange = {
+                    onStateChange(state.copy(devId = it, showValidationErrors = false))
+                },
                 modifier =
                     Modifier
                         .fillMaxWidth()
                         .testTag(TestTagDirectModeDevIdField),
-                label = { Text(stringResource(R.string.feature_settings_server_direct_devid_label)) },
+                label = {
+                    RequiredFieldLabel(R.string.feature_settings_server_direct_devid_label)
+                },
+                isError = state.devIdError,
+                supportingText =
+                    if (state.devIdError) {
+                        { Text(stringResource(R.string.feature_settings_server_required_error)) }
+                    } else {
+                        null
+                    },
                 singleLine = true,
                 keyboardOptions =
                     KeyboardOptions(
@@ -618,13 +655,24 @@ fun ServerPickerContent(
             )
             OutlinedTextField(
                 value = state.apiKey,
-                onValueChange = { onStateChange(state.copy(apiKey = it)) },
+                onValueChange = {
+                    onStateChange(state.copy(apiKey = it, showValidationErrors = false))
+                },
                 modifier =
                     Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp)
                         .testTag(TestTagDirectModeApiKeyField),
-                label = { Text(stringResource(R.string.feature_settings_server_direct_apikey_label)) },
+                label = {
+                    RequiredFieldLabel(R.string.feature_settings_server_direct_apikey_label)
+                },
+                isError = state.apiKeyError,
+                supportingText =
+                    if (state.apiKeyError) {
+                        { Text(stringResource(R.string.feature_settings_server_required_error)) }
+                    } else {
+                        null
+                    },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions =
@@ -723,6 +771,26 @@ private fun DirectPtvChoiceRow(
             )
         }
     }
+}
+
+/**
+ * `OutlinedTextField` label for a required field — appends a Material 3-styled "*" in the
+ * error colour after the resolved label string. Inlined here rather than promoted to
+ * `:core:designsystem` because it's only used by the three required text fields in this picker
+ * and the Material spec for "required" is a single coloured asterisk, not a richer affordance.
+ */
+@Composable
+private fun RequiredFieldLabel(stringRes: Int) {
+    val label = stringResource(stringRes)
+    Text(
+        text =
+            buildAnnotatedString {
+                append(label)
+                withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
+                    append(" *")
+                }
+            },
+    )
 }
 
 /**

@@ -32,6 +32,14 @@ data class ServerPickerState(
     val customUrl: String = "",
     val devId: String = "",
     val apiKey: String = "",
+    /**
+     * Flipped to `true` by the screen when the user taps the submit affordance (Settings dialog
+     * "Save" or setup screen "Continue") while [canSave] is `false`. Drives [customUrlError],
+     * [devIdError], and [apiKeyError] so the offending fields paint red with a "Required"
+     * supporting line instead of the previous silent-disable. Cleared back to `false` whenever
+     * the user types into any field (see `ServerPickerContent`'s `onValueChange` callers).
+     */
+    val showValidationErrors: Boolean = false,
 ) {
     /**
      * The proxy URL the picker would write through on Save when [choice] is a proxy choice.
@@ -66,6 +74,21 @@ data class ServerPickerState(
             ServerChoice.Custom -> customUrl.trim().isNotEmpty()
             ServerChoice.DirectPtv -> devId.trim().isNotEmpty() && apiKey.trim().isNotEmpty()
         }
+
+    /**
+     * Per-field error flags consumed by `OutlinedTextField.isError` in `ServerPickerContent`.
+     * Each is `true` iff [showValidationErrors] is on, the field is the one that belongs to the
+     * currently-selected [choice], and the field's value is blank. Computed via `get()` so the
+     * data-class `copy()` still drives all state mutations.
+     */
+    val customUrlError: Boolean
+        get() = showValidationErrors && choice == ServerChoice.Custom && customUrl.trim().isEmpty()
+
+    val devIdError: Boolean
+        get() = showValidationErrors && choice == ServerChoice.DirectPtv && devId.trim().isEmpty()
+
+    val apiKeyError: Boolean
+        get() = showValidationErrors && choice == ServerChoice.DirectPtv && apiKey.trim().isEmpty()
 }
 
 /**
