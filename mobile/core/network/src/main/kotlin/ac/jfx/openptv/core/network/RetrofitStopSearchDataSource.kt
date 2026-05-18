@@ -9,10 +9,10 @@ import javax.inject.Inject
  * Retrofit-backed [StopSearchDataSource]. Lives in `:core:network` because that's the only place
  * `BackendApiService` (also internal) is visible.
  *
- * The base URL comes from injected [BackendUrlProvider] (production impl reads from
- * `SettingsRepository` in `:core:data`; tests pass a lambda). Reading per call means the user's
- * URL change on the Settings screen is honoured on the very next request — no app restart, no
- * Retrofit rebuild.
+ * The absolute URL is composed by injecting [PtvUrlResolver] (production impl reads from
+ * `SettingsRepository` in `:core:data`; tests pass a lambda). The resolver picks proxy-mode vs
+ * direct-mode signing per call so a Settings-screen edit takes effect on the very next request
+ * — no app restart, no Retrofit rebuild.
  *
  * URL-encoding the search term protects against terms containing `/` or `?` reaching the wire
  * untouched and against a misbehaving terminal-comma-on-end.
@@ -21,11 +21,11 @@ internal class RetrofitStopSearchDataSource
     @Inject
     constructor(
         private val api: BackendApiService,
-        private val backendUrl: BackendUrlProvider,
+        private val urlResolver: PtvUrlResolver,
     ) : StopSearchDataSource {
         override suspend fun searchStops(term: String): List<Stop> {
-            val baseUrl = backendUrl.backendBaseUrl()
             val encodedTerm = URLEncoder.encode(term, Charsets.UTF_8.name())
-            return api.searchStops("${baseUrl}search/$encodedTerm").toDomain()
+            val url = urlResolver.resolve("search/$encodedTerm")
+            return api.searchStops(url).toDomain()
         }
     }

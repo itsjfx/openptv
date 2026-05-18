@@ -200,42 +200,23 @@ class SettingsViewModelTest {
         }
 
     // ------------------------------------------------------------------------
-    // Server URL — the surface added in #81.
+    // Server config — added in #81, extended in #102 / PR #113 feedback so the picker dialog
+    // covers proxy + direct-PTV modes from a single seam.
     // ------------------------------------------------------------------------
 
     @Test
-    fun `currentBackendUrl emits the seeded URL`() =
+    fun `serverConfigState emits the seeded URL and direct-mode defaults`() =
         runTest {
             settingsRepository.seed(
                 AppSettings(backendBaseUrl = "http://seeded.local/api/v3/", setupCompleted = true),
             )
 
-            viewModel.currentBackendUrl.test {
-                assertThat(awaitItem()).isEqualTo("http://seeded.local/api/v3/")
-                cancelAndIgnoreRemainingEvents()
-            }
-        }
-
-    @Test
-    fun `setBackendBaseUrl persists the new URL via SettingsRepository`() =
-        runTest {
-            viewModel.setBackendBaseUrl("http://new.local/api/v3/")
-
-            assertThat(settingsRepository.settings.first().backendBaseUrl)
-                .isEqualTo("http://new.local/api/v3/")
-        }
-
-    @Test
-    fun `setBackendBaseUrl updates re-emit through currentBackendUrl`() =
-        runTest {
-            settingsRepository.seed(
-                AppSettings(backendBaseUrl = "http://first.local/api/v3/", setupCompleted = true),
-            )
-
-            viewModel.currentBackendUrl.test {
-                assertThat(awaitItem()).isEqualTo("http://first.local/api/v3/")
-                viewModel.setBackendBaseUrl("http://second.local/api/v3/")
-                assertThat(awaitItem()).isEqualTo("http://second.local/api/v3/")
+            viewModel.serverConfigState.test {
+                val state = awaitItem()
+                assertThat(state.backendUrl).isEqualTo("http://seeded.local/api/v3/")
+                assertThat(state.directMode).isFalse()
+                assertThat(state.devId).isEmpty()
+                assertThat(state.apiKey).isEmpty()
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -246,4 +227,99 @@ class SettingsViewModelTest {
         // future change that decouples them gets a compile-time hint at every consumer.
         assertThat(viewModel.defaultBackendUrl).isEqualTo(settingsRepository.defaultBackendBaseUrl)
     }
+
+    @Test
+    fun `saveServerSelection Default persists default URL and clears direct mode`() =
+        runTest {
+            // Pre-seed direct mode on so the test asserts we flip it back off.
+            settingsRepository.seed(
+                AppSettings(
+                    backendBaseUrl = "http://old.local/api/v3/",
+                    setupCompleted = true,
+                    directMode = true,
+                    devId = "OLD",
+                    apiKey = "OLDKEY",
+                ),
+            )
+
+            viewModel.saveServerSelection(
+                ServerPickerState(
+                    defaultUrl = "http://default.local/api/v3/",
+                    currentUrl = "http://old.local/api/v3/",
+                    choice = ServerChoice.Default,
+                ),
+            )
+
+            val after = settingsRepository.settings.first()
+            assertThat(after.directMode).isFalse()
+            assertThat(after.backendBaseUrl).isEqualTo("http://default.local/api/v3/")
+        }
+
+    @Test
+    fun `saveServerSelection Custom persists typed URL and clears direct mode`() =
+        runTest {
+            viewModel.saveServerSelection(
+                ServerPickerState(
+                    defaultUrl = "http://default.local/api/v3/",
+                    currentUrl = "http://default.local/api/v3/",
+                    choice = ServerChoice.Custom,
+                    customUrl = "http://custom.local/api/v3/",
+                ),
+            )
+
+            val after = settingsRepository.settings.first()
+            assertThat(after.directMode).isFalse()
+            assertThat(after.backendBaseUrl).isEqualTo("http://custom.local/api/v3/")
+        }
+
+    @Test
+    fun `saveServerSelection DirectPtv persists credentials and flips direct mode on`() =
+        runTest {
+            settingsRepository.seed(
+                AppSettings(
+                    backendBaseUrl = "http://proxy.local/api/v3/",
+                    setupCompleted = true,
+                ),
+            )
+
+            viewModel.saveServerSelection(
+                ServerPickerState(
+                    defaultUrl = "http://default.local/api/v3/",
+                    currentUrl = "http://proxy.local/api/v3/",
+                    choice = ServerChoice.DirectPtv,
+                    devId = "3000176",
+                    apiKey = "9c132d31-6a30-4cac-8d8b-8a1970834799",
+                ),
+            )
+
+            val after = settingsRepository.settings.first()
+            assertThat(after.directMode).isTrue()
+            assertThat(after.devId).isEqualTo("3000176")
+            assertThat(after.apiKey).isEqualTo("9c132d31-6a30-4cac-8d8b-8a1970834799")
+            // Proxy URL stays as-is so a future flip-back doesn't lose the user's last value.
+            assertThat(after.backendBaseUrl).isEqualTo("http://proxy.local/api/v3/")
+        }
+
+    @Test
+    fun `serverConfigState reflects saveServerSelection writes through the same flow`() =
+        runTest {
+            viewModel.serverConfigState.test {
+                // Drain initial empty state.
+                awaitItem()
+                viewModel.saveServerSelection(
+                    ServerPickerState(
+                        defaultUrl = "http://default.local/api/v3/",
+                        currentUrl = "",
+                        choice = ServerChoice.DirectPtv,
+                        devId = "DEV",
+                        apiKey = "KEY",
+                    ),
+                )
+                val final = expectMostRecentItem()
+                assertThat(final.directMode).isTrue()
+                assertThat(final.devId).isEqualTo("DEV")
+                assertThat(final.apiKey).isEqualTo("KEY")
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 }

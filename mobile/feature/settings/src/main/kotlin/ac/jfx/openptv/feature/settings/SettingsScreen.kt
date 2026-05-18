@@ -16,9 +16,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -43,39 +46,50 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.net.URLEncoder
 
 /**
  * Stateful Hilt-aware entry point. The route owns the ViewModel handle, the composition-local
  * reads (theme mode + dynamic colour, seeded by `SettingsProvider` at the app root) and the
- * `currentBackendUrl` state read off the [SettingsViewModel]. Server URL is plumbed through
- * the ViewModel rather than a composition local because `SettingsRepository` predates the typed
- * preference DSL and exposes its own `Flow` directly — the row subtitle reads the latest URL
- * from the same flow the picker writes through, so a save inside the dialog reflects on the
- * row without an explicit refresh.
+ * `serverConfigState` snapshot read off the [SettingsViewModel]. Server config is plumbed
+ * through the ViewModel rather than a composition local because `SettingsRepository` predates
+ * the typed preference DSL and exposes its own `Flow` directly — the row subtitle reads the
+ * latest URL from the same flow the picker writes through, so a save inside the dialog reflects
+ * on the row without an explicit refresh.
  */
 @Composable
 fun SettingsRoute(
     onBack: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
-    val currentBackendUrl by viewModel.currentBackendUrl.collectAsStateWithLifecycle(
-        initialValue = "",
+    val serverConfig by viewModel.serverConfigState.collectAsStateWithLifecycle(
+        initialValue = ServerConfigState.empty,
     )
     SettingsScreen(
         themeMode = LocalThemeMode.current,
         dynamicColour = LocalDynamicColour.current,
         dynamicColourSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S,
         timeFormat = LocalTimeFormat.current,
-        currentBackendUrl = currentBackendUrl,
+        serverConfig = serverConfig,
         defaultBackendUrl = viewModel.defaultBackendUrl,
         onThemeMode = viewModel::setThemeMode,
         onDynamicColour = viewModel::setDynamicColour,
         onTimeFormat = viewModel::setTimeFormat,
-        onBackendUrl = viewModel::setBackendBaseUrl,
+        onServerSelectionSaved = viewModel::saveServerSelection,
         onBack = onBack,
     )
 }
@@ -91,13 +105,12 @@ fun SettingsRoute(
  *    below the row is disabled and shows "Available on Android 12+" as a subtitle — kept
  *    visible (not hidden) so users get an explanation rather than a missing affordance.
  *
- * And a Server section (added in #81) with:
- *
- *  - **Backend server** — a row showing the currently-active URL as its subtitle. Tapping
- *    opens a picker dialog mirroring the first-run setup choices (default vs custom URL); the
- *    same validation rule (`effectiveUrl.isNotBlank()`) gates the Save button. The dialog
- *    writes through [onBackendUrl] which delegates to `SettingsRepository.setBackendBaseUrl`,
- *    so URL normalisation (trim + trailing slash) stays in one place across both surfaces.
+ * And a Server section (added in #81, extended in #102 / PR #113 feedback) with a single
+ * **Backend server** row showing either the currently-active proxy URL or a "Direct PTV API"
+ * marker as its subtitle. Tapping opens a picker dialog with three radio choices — Default
+ * proxy, Custom proxy, and Direct PTV API (user-supplied dev_id + key). The dialog writes
+ * through [onServerSelectionSaved], which sequences the persists (direct flag + URL + creds)
+ * so the row reflects the chosen mode on the next emit.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,12 +119,12 @@ fun SettingsScreen(
     dynamicColour: DynamicColourPreference,
     dynamicColourSupported: Boolean,
     timeFormat: TimeFormatPreference,
-    currentBackendUrl: String,
+    serverConfig: ServerConfigState,
     defaultBackendUrl: String,
     onThemeMode: (ThemeModePreference) -> Unit,
     onDynamicColour: (DynamicColourPreference) -> Unit,
     onTimeFormat: (TimeFormatPreference) -> Unit,
-    onBackendUrl: (String) -> Unit,
+    onServerSelectionSaved: (ServerPickerState) -> Unit,
     onBack: () -> Unit,
 ) {
     var showServerDialog by rememberSaveable { mutableStateOf(false) }
@@ -140,7 +153,12 @@ fun SettingsScreen(
             modifier =
                 Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    .padding(padding)
+                    // Wrap in a vertical scroll so shorter devices can still reach every row
+                    // once the dialog's TextField surfaces are open. Plain Column (not
+                    // LazyColumn) is fine here: the row count is fixed and small, and
+                    // LazyColumn's overhead would be wasted.
+                    .verticalScroll(rememberScrollState()),
         ) {
             SectionHeader(text = stringResource(R.string.feature_settings_appearance_section))
             ThemeModeSection(
@@ -161,7 +179,7 @@ fun SettingsScreen(
 
             SectionHeader(text = stringResource(R.string.feature_settings_server_section))
             ServerRow(
-                currentUrl = currentBackendUrl,
+                serverConfig = serverConfig,
                 onClick = { showServerDialog = true },
             )
         }
@@ -169,10 +187,10 @@ fun SettingsScreen(
 
     if (showServerDialog) {
         ServerPickerDialog(
-            currentUrl = currentBackendUrl,
+            serverConfig = serverConfig,
             defaultUrl = defaultBackendUrl,
-            onSave = { url ->
-                onBackendUrl(url)
+            onSave = { state ->
+                onServerSelectionSaved(state)
                 showServerDialog = false
             },
             onDismiss = { showServerDialog = false },
@@ -404,13 +422,14 @@ private fun DynamicColourSection(
 }
 
 /**
- * Settings row showing the currently-active backend URL. Plain `clickable` (not `selectable` /
- * `toggleable`) because tapping opens a dialog rather than committing a value — TalkBack
- * announces this as a button.
+ * Settings row showing the currently-active server connection. Plain `clickable` (not
+ * `selectable` / `toggleable`) because tapping opens a dialog rather than committing a value —
+ * TalkBack announces this as a button. The subtitle reflects the chosen mode: a "Direct PTV
+ * API" marker when the user is signing on-device, otherwise the proxy URL.
  */
 @Composable
 private fun ServerRow(
-    currentUrl: String,
+    serverConfig: ServerConfigState,
     onClick: () -> Unit,
 ) {
     Row(
@@ -427,13 +446,16 @@ private fun ServerRow(
                 text = stringResource(R.string.feature_settings_server_label),
                 style = MaterialTheme.typography.bodyLarge,
             )
-            // The active URL appears as the subtitle so users can see what they're hitting
-            // without opening the dialog. Empty for one frame on first composition while the
-            // ViewModel's StateFlow seeds — kept blank rather than showing a placeholder so a
-            // restart-persistence smoke test reads cleanly.
-            if (currentUrl.isNotEmpty()) {
+            val subtitle =
+                when {
+                    serverConfig.directMode ->
+                        stringResource(R.string.feature_settings_server_subtitle_direct)
+                    serverConfig.backendUrl.isNotEmpty() -> serverConfig.backendUrl
+                    else -> null
+                }
+            if (subtitle != null) {
                 Text(
-                    text = currentUrl,
+                    text = subtitle,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -443,33 +465,40 @@ private fun ServerRow(
 }
 
 /**
- * Picker dialog. Two radio rows (Default / Custom) plus a conditional URL field. The `Save`
- * button is disabled until [ServerPickerState.canSave] is `true` — same validation rule the
- * onboarding `SetupUiState.canContinue` uses (minus consent, which only applies on first run).
+ * Picker dialog. Three radio rows (Default / Custom / Direct PTV) plus conditional input
+ * fields, delegated to [ServerPickerContent] so the first-run setup screen (`:app`'s
+ * `SetupScreen`) renders the same picker inline.
  *
- * Initial state is computed inside `remember` keyed on [currentUrl] so re-opening the dialog
- * after a save reflects the just-saved value: if it matches the default URL the dialog opens
- * on the Default row; otherwise it opens on Custom with the field pre-filled with the user's
- * last URL.
+ * Initial state is computed inside `remember` keyed on [serverConfig] so re-opening the dialog
+ * after a save reflects the just-saved value: if direct mode is on, the dialog opens on the
+ * Direct PTV row with the persisted credentials. Otherwise, if the URL matches the bundled
+ * default it opens on Default; else on Custom with the field pre-filled.
  */
 @Composable
 private fun ServerPickerDialog(
-    currentUrl: String,
+    serverConfig: ServerConfigState,
     defaultUrl: String,
-    onSave: (String) -> Unit,
+    onSave: (ServerPickerState) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var state by remember(currentUrl, defaultUrl) {
-        // If the persisted URL matches the bundled default, open on Default with an empty
-        // custom field. Otherwise open on Custom with the field pre-filled — re-opening the
-        // dialog after a custom save shouldn't blow away what the user previously typed.
-        val isOnDefault = currentUrl.isBlank() || currentUrl == defaultUrl
+    var state by remember(serverConfig, defaultUrl) {
+        val initialChoice =
+            when {
+                serverConfig.directMode -> ServerChoice.DirectPtv
+                serverConfig.backendUrl.isBlank() || serverConfig.backendUrl == defaultUrl ->
+                    ServerChoice.Default
+                else -> ServerChoice.Custom
+            }
+        val initialCustomUrl =
+            if (initialChoice == ServerChoice.Custom) serverConfig.backendUrl else ""
         mutableStateOf(
             ServerPickerState(
                 defaultUrl = defaultUrl,
-                currentUrl = currentUrl,
-                choice = if (isOnDefault) ServerChoice.Default else ServerChoice.Custom,
-                customUrl = if (isOnDefault) "" else currentUrl,
+                currentUrl = serverConfig.backendUrl,
+                choice = initialChoice,
+                customUrl = initialCustomUrl,
+                devId = serverConfig.devId,
+                apiKey = serverConfig.apiKey,
             ),
         )
     }
@@ -485,44 +514,27 @@ private fun ServerPickerDialog(
         properties = DialogProperties(dismissOnClickOutside = false),
         title = { Text(stringResource(R.string.feature_settings_server_dialog_title)) },
         text = {
-            Column {
-                ServerChoiceRow(
-                    selected = state.choice == ServerChoice.Default,
-                    titleRes = R.string.feature_settings_server_default_title,
-                    bodyRes = R.string.feature_settings_server_default_body,
-                    detail = state.defaultUrl,
-                    onClick = { state = state.copy(choice = ServerChoice.Default) },
-                    testTag = TestTagServerDefaultChoice,
-                )
-                ServerChoiceRow(
-                    selected = state.choice == ServerChoice.Custom,
-                    titleRes = R.string.feature_settings_server_custom_title,
-                    bodyRes = R.string.feature_settings_server_custom_body,
-                    detail = null,
-                    onClick = { state = state.copy(choice = ServerChoice.Custom) },
-                    testTag = TestTagServerCustomChoice,
-                )
-                if (state.choice == ServerChoice.Custom) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = state.customUrl,
-                        onValueChange = { state = state.copy(customUrl = it) },
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .testTag(TestTagServerCustomUrlField),
-                        label = { Text(stringResource(R.string.feature_settings_server_custom_field_label)) },
-                        placeholder = { Text(stringResource(R.string.feature_settings_server_custom_field_placeholder)) },
-                        supportingText = { Text(stringResource(R.string.feature_settings_server_custom_field_helper)) },
-                        singleLine = true,
-                    )
-                }
-            }
+            // Dialog body can grow tall once the Direct PTV blurb + fields are visible, so
+            // wrap in a vertical scroll. The radio rows themselves stay reachable on phones
+            // shorter than the dialog's max content height.
+            ServerPickerContent(
+                state = state,
+                onStateChange = { state = it },
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+            )
         },
         confirmButton = {
             TextButton(
-                onClick = { onSave(state.effectiveUrl) },
-                enabled = state.canSave,
+                // Always tappable. If the chosen option isn't committable we flip the
+                // validation flag so the picker paints the offending fields red rather than
+                // silently disabling Save — Material 3 required-field UX.
+                onClick = {
+                    if (state.canSave) {
+                        onSave(state)
+                    } else {
+                        state = state.copy(showValidationErrors = true)
+                    }
+                },
                 modifier = Modifier.testTag(TestTagServerDialogSave),
             ) {
                 Text(stringResource(R.string.feature_settings_server_dialog_save))
@@ -537,6 +549,146 @@ private fun ServerPickerDialog(
             }
         },
     )
+}
+
+/**
+ * Three-radio server picker body, used by both the Settings dialog and the first-run setup
+ * screen (`:app`'s `SetupScreen`). Stateless: the caller owns the [ServerPickerState] and
+ * receives every keystroke / radio tap via [onStateChange].
+ *
+ * Layout is a plain [Column] — the caller picks the container (the Settings side wraps it
+ * in a `verticalScroll` inside the dialog body; the setup screen drops it inline into the
+ * scrollable column it already owns). The rows render in the same order on both surfaces —
+ * Default, Custom (with conditional URL field), Direct PTV (with conditional credential fields
+ * and helper text) — so the affordance reads identically wherever the picker shows up.
+ *
+ * Test tags (`TestTagServer*Choice`, `TestTagServerCustomUrlField`, `TestTagDirectMode*Field`)
+ * are stable across surfaces, so feature tests that drove the dialog still drive the setup
+ * screen unchanged.
+ */
+@Composable
+fun ServerPickerContent(
+    state: ServerPickerState,
+    onStateChange: (ServerPickerState) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        ServerChoiceRow(
+            selected = state.choice == ServerChoice.Default,
+            titleRes = R.string.feature_settings_server_default_title,
+            bodyRes = R.string.feature_settings_server_default_body,
+            detail = null,
+            onClick = { onStateChange(state.copy(choice = ServerChoice.Default)) },
+            testTag = TestTagServerDefaultChoice,
+        )
+        ServerChoiceRow(
+            selected = state.choice == ServerChoice.Custom,
+            titleRes = R.string.feature_settings_server_custom_title,
+            bodyRes = R.string.feature_settings_server_custom_body,
+            detail = null,
+            onClick = { onStateChange(state.copy(choice = ServerChoice.Custom)) },
+            testTag = TestTagServerCustomChoice,
+        )
+        if (state.choice == ServerChoice.Custom) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = state.customUrl,
+                // Clear the validation flag on any keystroke so the field stops painting red
+                // while the user is fixing it. Material 3 convention: error state is cleared
+                // as soon as the user starts addressing it.
+                onValueChange = {
+                    onStateChange(state.copy(customUrl = it, showValidationErrors = false))
+                },
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTagServerCustomUrlField),
+                label = {
+                    RequiredFieldLabel(R.string.feature_settings_server_custom_field_label)
+                },
+                placeholder = { Text(stringResource(R.string.feature_settings_server_custom_field_placeholder)) },
+                isError = state.customUrlError,
+                supportingText = {
+                    Text(
+                        text =
+                            if (state.customUrlError) {
+                                stringResource(R.string.feature_settings_server_required_error)
+                            } else {
+                                stringResource(R.string.feature_settings_server_custom_field_helper)
+                            },
+                    )
+                },
+                singleLine = true,
+            )
+        }
+        DirectPtvChoiceRow(
+            selected = state.choice == ServerChoice.DirectPtv,
+            onClick = { onStateChange(state.copy(choice = ServerChoice.DirectPtv)) },
+        )
+        if (state.choice == ServerChoice.DirectPtv) {
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = state.devId,
+                onValueChange = {
+                    onStateChange(state.copy(devId = it, showValidationErrors = false))
+                },
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .testTag(TestTagDirectModeDevIdField),
+                label = {
+                    RequiredFieldLabel(R.string.feature_settings_server_direct_devid_label)
+                },
+                isError = state.devIdError,
+                supportingText =
+                    if (state.devIdError) {
+                        { Text(stringResource(R.string.feature_settings_server_required_error)) }
+                    } else {
+                        null
+                    },
+                singleLine = true,
+                keyboardOptions =
+                    KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                    ),
+            )
+            OutlinedTextField(
+                value = state.apiKey,
+                onValueChange = {
+                    onStateChange(state.copy(apiKey = it, showValidationErrors = false))
+                },
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .testTag(TestTagDirectModeApiKeyField),
+                label = {
+                    RequiredFieldLabel(R.string.feature_settings_server_direct_apikey_label)
+                },
+                isError = state.apiKeyError,
+                supportingText =
+                    if (state.apiKeyError) {
+                        { Text(stringResource(R.string.feature_settings_server_required_error)) }
+                    } else {
+                        null
+                    },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions =
+                    KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        autoCorrectEnabled = false,
+                    ),
+            )
+            Text(
+                text = stringResource(R.string.feature_settings_server_direct_helper),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        }
+    }
 }
 
 @Composable
@@ -580,6 +732,126 @@ private fun ServerChoiceRow(
     }
 }
 
+/**
+ * Direct PTV radio row. Same affordance as [ServerChoiceRow] but the body is built as an
+ * [AnnotatedString] so the email address and docs URL inside the copy render as tappable
+ * [LinkAnnotation]s. The radio row itself stays a `selectable` so TalkBack still announces
+ * it as a radio option — only the substring annotations carry separate click semantics, which
+ * Compose routes through `LocalUriHandler` without touching the row's click.
+ */
+@Composable
+private fun DirectPtvChoiceRow(
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val body = ptvApiKeyBlurb()
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .selectable(
+                    selected = selected,
+                    onClick = onClick,
+                    role = Role.RadioButton,
+                )
+                .testTag(TestTagServerDirectChoice)
+                .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        RadioButton(selected = selected, onClick = null)
+        Spacer(modifier = Modifier.padding(start = 8.dp))
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = stringResource(R.string.feature_settings_server_direct_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = body,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+/**
+ * `OutlinedTextField` label for a required field — appends a Material 3-styled "*" in the
+ * error colour after the resolved label string. Inlined here rather than promoted to
+ * `:core:designsystem` because it's only used by the three required text fields in this picker
+ * and the Material spec for "required" is a single coloured asterisk, not a richer affordance.
+ */
+@Composable
+private fun RequiredFieldLabel(stringRes: Int) {
+    val label = stringResource(stringRes)
+    Text(
+        text =
+            buildAnnotatedString {
+                append(label)
+                withStyle(SpanStyle(color = MaterialTheme.colorScheme.error)) {
+                    append(" *")
+                }
+            },
+    )
+}
+
+/**
+ * Build the Direct PTV blurb with two tappable spans. We rely on `indexOf` against the resolved
+ * string rather than carrying span markers in `strings.xml`, because formatted-string spans in
+ * Android resources don't survive translation tooling well and the source-of-truth substrings
+ * (the email + the "see here" anchor) are stable per the string-resource comment.
+ */
+@Composable
+private fun ptvApiKeyBlurb(): AnnotatedString {
+    val body = stringResource(R.string.feature_settings_server_direct_body)
+    val email = stringResource(R.string.feature_settings_ptv_email)
+    val emailSubject = stringResource(R.string.feature_settings_ptv_email_subject)
+    val emailBody = stringResource(R.string.feature_settings_ptv_email_body)
+    val docsUrl = stringResource(R.string.feature_settings_ptv_docs_url)
+    val docsAnchor = "see here"
+    val mailto =
+        "mailto:$email?subject=${URLEncoder.encode(emailSubject, Charsets.UTF_8.name())}" +
+            "&body=${URLEncoder.encode(emailBody, Charsets.UTF_8.name())}"
+
+    val linkStyle =
+        TextLinkStyles(
+            style =
+                SpanStyle(
+                    color = MaterialTheme.colorScheme.primary,
+                    textDecoration = TextDecoration.Underline,
+                ),
+        )
+
+    return buildAnnotatedString {
+        val emailIdx = body.indexOf(email)
+        val docsIdx = body.indexOf(docsAnchor)
+
+        // Two substrings can land in any order — append them in document order so the
+        // surrounding `body` text reads exactly as written. Defence in depth: if either
+        // substring is missing (translation accidentally dropped it), fall back to the raw
+        // body without crashing.
+        val anchors =
+            listOfNotNull(
+                if (emailIdx >= 0) emailIdx to (emailIdx + email.length to mailto) else null,
+                if (docsIdx >= 0) docsIdx to (docsIdx + docsAnchor.length to docsUrl) else null,
+            ).sortedBy { it.first }
+
+        if (anchors.isEmpty()) {
+            append(body)
+            return@buildAnnotatedString
+        }
+
+        var cursor = 0
+        for ((start, endAndUrl) in anchors) {
+            val (end, url) = endAndUrl
+            if (start > cursor) append(body.substring(cursor, start))
+            withLink(LinkAnnotation.Url(url = url, styles = linkStyle)) {
+                append(body.substring(start, end))
+            }
+            cursor = end
+        }
+        if (cursor < body.length) append(body.substring(cursor))
+    }
+}
+
 internal const val TestTagRoot: String = "settings-root"
 internal const val TestTagThemeGroup: String = "settings-theme-group"
 internal const val TestTagThemeSystem: String = "settings-theme-system"
@@ -595,6 +867,9 @@ internal const val TestTagServerRow: String = "settings-server-row"
 internal const val TestTagServerDialog: String = "settings-server-dialog"
 internal const val TestTagServerDefaultChoice: String = "settings-server-default-choice"
 internal const val TestTagServerCustomChoice: String = "settings-server-custom-choice"
+internal const val TestTagServerDirectChoice: String = "settings-server-direct-choice"
 internal const val TestTagServerCustomUrlField: String = "settings-server-custom-url-field"
 internal const val TestTagServerDialogSave: String = "settings-server-dialog-save"
 internal const val TestTagServerDialogCancel: String = "settings-server-dialog-cancel"
+internal const val TestTagDirectModeDevIdField: String = "settings-direct-mode-devid"
+internal const val TestTagDirectModeApiKeyField: String = "settings-direct-mode-apikey"

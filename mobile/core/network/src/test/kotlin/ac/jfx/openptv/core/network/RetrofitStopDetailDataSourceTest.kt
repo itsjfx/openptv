@@ -43,7 +43,7 @@ class RetrofitStopDetailDataSourceTest {
         dataSource =
             RetrofitStopDetailDataSource(
                 api = service,
-                backendUrl = BackendUrlProvider { baseUrl },
+                urlResolver = PtvUrlResolver { path -> "$baseUrl$path" },
             )
     }
 

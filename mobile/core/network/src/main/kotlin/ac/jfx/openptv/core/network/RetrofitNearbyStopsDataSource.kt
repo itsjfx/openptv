@@ -8,8 +8,8 @@ import javax.inject.Inject
 
 /**
  * Retrofit-backed [NearbyStopsDataSource]. URL composition mirrors [RetrofitStopDetailDataSource]:
- * the base URL comes from the injected [BackendUrlProvider] (production reads
- * `SettingsRepository`, tests pass a lambda), and the absolute URL goes to Retrofit via `@Url`.
+ * the absolute URL comes from the injected [PtvUrlResolver] (production reads
+ * `SettingsRepository`, tests pass a lambda).
  *
  * PTV's path is `stops/location/{lat},{lng}` — the comma sits between two doubles, which Retrofit
  * URL-encodes when passed through `@Path` but leaves alone when passed through `@Url`. We compose
@@ -28,14 +28,13 @@ internal class RetrofitNearbyStopsDataSource
     @Inject
     constructor(
         private val api: BackendApiService,
-        private val backendUrl: BackendUrlProvider,
+        private val urlResolver: PtvUrlResolver,
     ) : NearbyStopsDataSource {
         override suspend fun stopsNear(
             coordinates: Coordinates,
             radiusMeters: Int,
             routeTypes: Set<RouteType>,
         ): List<Stop> {
-            val base = backendUrl.backendBaseUrl()
             val lat = "%.6f".format(coordinates.lat)
             val lng = "%.6f".format(coordinates.lng)
             val routeTypeQuery =
@@ -43,7 +42,7 @@ internal class RetrofitNearbyStopsDataSource
                     .map { it.toPtvCode() }
                     .toSortedSet()
                     .joinToString(separator = "") { "&route_types=$it" }
-            val url = "${base}stops/location/$lat,$lng?max_distance=$radiusMeters$routeTypeQuery"
-            return api.stopsNearLocation(url).toDomain()
+            val path = "stops/location/$lat,$lng?max_distance=$radiusMeters$routeTypeQuery"
+            return api.stopsNearLocation(urlResolver.resolve(path)).toDomain()
         }
     }

@@ -10,7 +10,7 @@ import javax.inject.Inject
 
 /**
  * Default impl. Delegates wire-level concerns to [NearbyStopsDataSource] (which knows about
- * Retrofit/OkHttp and resolves the configured base URL itself via `BackendUrlProvider`) and maps
+ * Retrofit/OkHttp and resolves the absolute URL itself via `PtvUrlResolver`) and maps
  * domain failures into [Result.Error].
  *
  * Cancellation contract mirrors [StopSearchRepositoryImpl]: [CancellationException] propagates so

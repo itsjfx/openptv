@@ -1,6 +1,6 @@
 package ac.jfx.openptv.core.data
 
-import ac.jfx.openptv.core.network.BackendUrlProvider
+import ac.jfx.openptv.core.network.PtvUrlResolver
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -13,8 +13,8 @@ import javax.inject.Singleton
  *
  * Bindings owned here:
  * - `StopSearchRepository` -> `StopSearchRepositoryImpl` (impl lives in this module).
- * - `BackendUrlProvider` -> `SettingsBackendUrlProvider` (impl reads `SettingsRepository`,
- *   which lives in this module too — `:core:network` only declares the interface).
+ * - `PtvUrlResolver` -> `SettingsPtvUrlResolver` (impl reads `SettingsRepository` to pick
+ *   proxy mode vs direct-with-signing per call). `:core:network` only declares the interface.
  *
  * Not owned here: `SettingsRepository` itself. That binding is wired by `:app` alongside the
  * DataStore-backed impl until `:core:datastore` lands (issue #11).
@@ -58,7 +58,7 @@ abstract class DataModule {
 
     @Binds
     @Singleton
-    internal abstract fun bindBackendUrlProvider(
-        impl: SettingsBackendUrlProvider,
-    ): BackendUrlProvider
+    internal abstract fun bindPtvUrlResolver(
+        impl: SettingsPtvUrlResolver,
+    ): PtvUrlResolver
 }

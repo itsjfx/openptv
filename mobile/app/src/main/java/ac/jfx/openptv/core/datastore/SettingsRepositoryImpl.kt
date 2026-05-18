@@ -23,6 +23,9 @@ import javax.inject.Singleton
  *   That value is only used as a seed for the setup screen — no requests fire until the user
  *   accepts.
  * - `setupCompleted` defaults to `false` so the first launch always shows the setup flow.
+ * - `directMode` defaults to `false` so existing installs keep using the proxy. When the user
+ *   flips it on, the network layer signs requests with [AppSettings.devId] /
+ *   [AppSettings.apiKey] and bypasses the proxy URL.
  */
 @Singleton
 internal class SettingsRepositoryImpl
@@ -35,6 +38,9 @@ internal class SettingsRepositoryImpl
                 AppSettings(
                     backendBaseUrl = prefs[KEY_BACKEND_BASE_URL] ?: BuildConfig.BACKEND_BASE_URL,
                     setupCompleted = prefs[KEY_SETUP_COMPLETED] == true,
+                    directMode = prefs[KEY_DIRECT_MODE] == true,
+                    devId = prefs[KEY_DEV_ID].orEmpty(),
+                    apiKey = prefs[KEY_API_KEY].orEmpty(),
                 )
             }
 
@@ -44,9 +50,34 @@ internal class SettingsRepositoryImpl
             dataStore.edit { prefs -> prefs[KEY_BACKEND_BASE_URL] = url.normalised() }
         }
 
-        override suspend fun completeSetup(url: String) {
+        override suspend fun setDirectMode(enabled: Boolean) {
+            dataStore.edit { prefs -> prefs[KEY_DIRECT_MODE] = enabled }
+        }
+
+        override suspend fun setDevId(devId: String) {
+            dataStore.edit { prefs -> prefs[KEY_DEV_ID] = devId.trim() }
+        }
+
+        override suspend fun setApiKey(apiKey: String) {
+            // Don't trim the key — it's HMAC-input bytes; trimming could silently change the
+            // signature for users who paste a key with intentional surrounding whitespace.
+            dataStore.edit { prefs -> prefs[KEY_API_KEY] = apiKey }
+        }
+
+        override suspend fun completeSetup(
+            url: String,
+            directMode: Boolean,
+            devId: String,
+            apiKey: String,
+        ) {
             dataStore.edit { prefs ->
                 prefs[KEY_BACKEND_BASE_URL] = url.normalised()
+                prefs[KEY_DIRECT_MODE] = directMode
+                prefs[KEY_DEV_ID] = devId.trim()
+                // Don't trim the api key — it's HMAC-input bytes; trimming could silently
+                // change the signature for users who paste a key with intentional surrounding
+                // whitespace. Mirrors `setApiKey` above.
+                prefs[KEY_API_KEY] = apiKey
                 prefs[KEY_SETUP_COMPLETED] = true
             }
         }
@@ -54,6 +85,9 @@ internal class SettingsRepositoryImpl
         private companion object {
             val KEY_BACKEND_BASE_URL = stringPreferencesKey("backend_base_url")
             val KEY_SETUP_COMPLETED = booleanPreferencesKey("setup_completed")
+            val KEY_DIRECT_MODE = booleanPreferencesKey("direct_mode")
+            val KEY_DEV_ID = stringPreferencesKey("ptv_dev_id")
+            val KEY_API_KEY = stringPreferencesKey("ptv_api_key")
         }
     }
 

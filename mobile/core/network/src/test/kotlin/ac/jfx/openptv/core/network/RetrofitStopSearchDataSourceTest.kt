@@ -20,9 +20,9 @@ import retrofit2.converter.kotlinx.serialization.asConverterFactory
  * only be constructed within this module (`BackendApiService` is `internal`). The repository-end
  * coverage (Result error wrapping) lives in `:core:data`.
  *
- * `BackendUrlProvider` is injected as a `fun interface` lambda that returns the [MockWebServer]
- * URL — exactly the seam the production graph uses, just sourced from a test fixture instead of
- * `SettingsRepository`.
+ * `PtvUrlResolver` is injected as a `fun interface` lambda that concats the [MockWebServer]
+ * base with the path — exactly the seam the production graph uses, just sourced from a test
+ * fixture instead of `SettingsRepository`.
  */
 class RetrofitStopSearchDataSourceTest {
     private lateinit var server: MockWebServer
@@ -43,7 +43,7 @@ class RetrofitStopSearchDataSourceTest {
         dataSource =
             RetrofitStopSearchDataSource(
                 api = service,
-                backendUrl = BackendUrlProvider { baseUrl },
+                urlResolver = PtvUrlResolver { path -> "$baseUrl$path" },
             )
     }
 

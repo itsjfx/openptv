@@ -8,7 +8,7 @@ import javax.inject.Inject
 
 /**
  * Default impl. Delegates wire-level concerns to [StopSearchDataSource] (which knows about
- * Retrofit/OkHttp and resolves the configured base URL itself via `BackendUrlProvider`) and maps
+ * Retrofit/OkHttp and resolves the absolute URL itself via `PtvUrlResolver`) and maps
  * domain failures into [Result.Error].
  *
  * Cancellation must propagate (otherwise a stale coroutine ignores its parent being torn down),

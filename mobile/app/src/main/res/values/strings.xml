@@ -15,16 +15,11 @@
     <!-- Stop search strings live in :feature:search/.../strings.xml.
          Settings (theme mode + dynamic colour) strings live in :feature:settings. -->
 
-    <!-- First-run setup -->
+    <!-- First-run setup. The three radio rows + their bodies + the custom URL / direct-PTV
+         field labels are shared with the Settings server-picker dialog and live in
+         `:feature:settings/res/values/strings.xml` under the `feature_settings_server_*` prefix.
+         Only the title, intro, and Continue CTA are :app-local. -->
     <string name="setup_title">Choose your server</string>
-    <string name="setup_intro">OpenPTV needs to know which backend to talk to. Pick the bundled default, or point the app at your own self-hosted proxy. No requests are sent until you accept.</string>
-    <string name="setup_default_title">Use the default server</string>
-    <string name="setup_default_body">Bundled URL, suitable for emulator development and the hosted release.</string>
-    <string name="setup_custom_title">Use a custom server</string>
-    <string name="setup_custom_body">Run your own proxy and point the app at it. The address is stored on this device only.</string>
-    <string name="setup_custom_field_label">Backend URL</string>
-    <string name="setup_custom_field_placeholder">http://192.168.1.10:8080/api/v3/</string>
-    <string name="setup_custom_field_helper">Include scheme, host, port, and the /api/v3/ path. A trailing slash will be added automatically.</string>
-    <string name="setup_consent_label">I understand requests will be sent to the server above.</string>
-    <string name="setup_continue">Accept &amp; continue</string>
+    <string name="setup_intro">OpenPTV needs to know which backend to talk to. Pick a server below.</string>
+    <string name="setup_continue">Continue</string>
 </resources>

@@ -9,7 +9,7 @@ import javax.inject.Inject
 
 /**
  * Retrofit-backed [DepartureDataSource]. URL composition mirrors the other data sources in this
- * module: base URL from [BackendUrlProvider], absolute URL via `@Url`.
+ * module: absolute URL from [PtvUrlResolver] (proxy or signed-direct-PTV picked per call).
  *
  * Per the phase doc the picked `expand` set is `Run,Direction,Route,Disruption` — enough for the
  * mapper to resolve direction names client-side without dragging the full PTV response shape
@@ -26,7 +26,7 @@ internal class RetrofitDepartureDataSource
     @Inject
     constructor(
         private val api: BackendApiService,
-        private val backendUrl: BackendUrlProvider,
+        private val urlResolver: PtvUrlResolver,
     ) : DepartureDataSource {
         override suspend fun getDepartures(
             stopId: StopId,
@@ -35,14 +35,14 @@ internal class RetrofitDepartureDataSource
             maxResults: Int?,
             lookBackwards: Boolean?,
         ): List<Departure> {
-            val base = backendUrl.backendBaseUrl()
             val typeCode = routeType.toPtvCode()
-            val baseUrl =
-                "${base}departures/route_type/$typeCode/stop/${stopId.value}" +
+            val basePath =
+                "departures/route_type/$typeCode/stop/${stopId.value}" +
                     "?expand=Run&expand=Direction&expand=Route&expand=Disruption"
             val dateParam = dateUtc?.let { "&date_utc=$it" }.orEmpty()
             val maxParam = maxResults?.let { "&max_results=$it" }.orEmpty()
             val lookBackwardsParam = lookBackwards?.let { "&look_backwards=$it" }.orEmpty()
-            return api.getDepartures("$baseUrl$dateParam$maxParam$lookBackwardsParam").toDomain()
+            val path = "$basePath$dateParam$maxParam$lookBackwardsParam"
+            return api.getDepartures(urlResolver.resolve(path)).toDomain()
         }
     }

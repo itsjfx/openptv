@@ -43,11 +43,11 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
-            // Talk to the Go proxy running on the developer's host. `10.0.2.2` is the loopback
-            // alias the Android emulator exposes for the host; on a physical device this
-            // requires reverse-tethering (`adb reverse tcp:8080 tcp:8080`) or pointing at a
-            // LAN-reachable host.
-            buildConfigField("String", "BACKEND_BASE_URL", "\"http://10.0.2.2:8080/api/v3/\"")
+            // Same maintainer-operated proxy as release so the picker's "Default" radio
+            // resolves to one URL regardless of variant. Developers running a local Go
+            // proxy point the Custom field at `http://10.0.2.2:8080/api/v3/` (emulator
+            // loopback) or `adb reverse tcp:8080 tcp:8080` on a physical device.
+            buildConfigField("String", "BACKEND_BASE_URL", "\"https://ptv.jfx.ac/api/v3/\"")
         }
         release {
             isMinifyEnabled = true
@@ -56,9 +56,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Placeholder until the hosted backend is up. HTTPS only — release builds do
-            // not allow cleartext.
-            buildConfigField("String", "BACKEND_BASE_URL", "\"https://api.openptv.app/api/v3/\"")
+            // Maintainer-operated proxy. HTTPS only — release builds do not allow cleartext.
+            buildConfigField("String", "BACKEND_BASE_URL", "\"https://ptv.jfx.ac/api/v3/\"")
         }
     }
 
