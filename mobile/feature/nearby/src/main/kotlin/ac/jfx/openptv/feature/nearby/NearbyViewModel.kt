@@ -139,6 +139,22 @@ class NearbyViewModel
         private var pendingFocus: Coordinates? = null
 
         /**
+         * Expected centre of the next [onCameraIdle] after a programmatic camera write (issue
+         * #123 / PR #139 follow-up). The "already-granted on arrival + show on map" path races
+         * MapLibre's async style-load: the focus camera lands in VM state before the map view
+         * has animated to it, so the first `onCameraIdle` MapLibre fires carries the pre-focus
+         * frame (user-location / CBD) and would clobber the focus camera back to the stale value
+         * — the user ends up looking at their own location instead of the requested stop.
+         *
+         * We stash the focus coord here whenever we move the camera programmatically; the next
+         * [onCameraIdle] is dropped unless its centre is within [PROGRAMMATIC_IDLE_TOLERANCE_METERS]
+         * of the expected coord. The first idle that lands on the expected coord clears the slot
+         * and normal idle handling resumes — so the suppression is one-shot and a subsequent
+         * user-driven pan is honoured as usual.
+         */
+        private var pendingProgrammaticCenter: Coordinates? = null
+
+        /**
          * LRU cache of every stop the user has fetched this session. Solves the disappear/reappear
          * problem: panning into a region we've fetched before keeps those pins on-screen
          * immediately, instead of dropping them until the next fetch lands.
@@ -179,6 +195,7 @@ class NearbyViewModel
                     // focus pair, not on the state transition).
                     val focus = pendingFocus
                     pendingFocus = null
+                    pendingProgrammaticCenter = focus
                     val initialCamera =
                         if (focus != null) {
                             OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
@@ -217,6 +234,7 @@ class NearbyViewModel
                     // permission was refused.
                     val focus = pendingFocus
                     pendingFocus = null
+                    pendingProgrammaticCenter = focus
                     val initialCamera =
                         if (focus != null) {
                             OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
@@ -286,6 +304,16 @@ class NearbyViewModel
 
         /** Called from MapLibre's camera-idle listener through the [OpenPtvMap] callback. */
         fun onCameraIdle(camera: OpenPtvCameraState) {
+            val expected = pendingProgrammaticCenter
+            if (expected != null) {
+                if (camera.centre.distanceTo(expected) > PROGRAMMATIC_IDLE_TOLERANCE_METERS) {
+                    // Stale frame from MapLibre's async setup window — drop it so it doesn't
+                    // clobber the focus camera back to the pre-animation viewport. Keep the slot
+                    // armed; the post-animation idle on the expected coord will clear it.
+                    return
+                }
+                pendingProgrammaticCenter = null
+            }
             val current = _uiState.value
             when (current) {
                 is NearbyUiState.Loaded -> {
@@ -313,6 +341,10 @@ class NearbyViewModel
         fun onCameraMoveStarted() {
             fetchJob?.cancel()
             fetchJob = null
+            // A user-driven move (or any non-programmatic gesture) ends the suppression window —
+            // whatever idle lands next is the user's pan, not the stale pre-animation frame, so
+            // accept it on arrival.
+            pendingProgrammaticCenter = null
         }
 
         /**
@@ -447,6 +479,7 @@ class NearbyViewModel
                     return
                 }
             }
+            pendingProgrammaticCenter = coordinates
             scheduleFetch(camera, filter)
         }
 
@@ -657,6 +690,15 @@ class NearbyViewModel
              * camera-idle event but smaller than a deliberate pan.
              */
             internal const val FOLLOW_LEASH_METERS: Double = 50.0
+
+            /**
+             * Tolerance for matching an `onCameraIdle` against [pendingProgrammaticCenter]
+             * (issue #123 / PR #139 follow-up). MapLibre's animate-to settles to within a few
+             * metres of the requested centre; a stale pre-animation frame is hundreds of metres
+             * to kilometres away. Picked tight enough to reject the stale frame and loose enough
+             * to absorb settling jitter.
+             */
+            internal const val PROGRAMMATIC_IDLE_TOLERANCE_METERS: Double = 25.0
 
             /**
              * Cap on the LRU stop cache. Sized so an hour of pan/zoom across central Melbourne

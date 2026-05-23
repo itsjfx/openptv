@@ -1326,6 +1326,67 @@ class NearbyViewModelTest {
         }
 
     @Test
+    fun `already-granted on arrival — stale onCameraIdle after focus does not clobber the focus camera`() =
+        runTest(dispatcher) {
+            // Regression for PR #139: when permission is already granted (cold-start with prior
+            // grant), `NearbyRoute`'s pre-grant LaunchedEffect fires `onPermissionResult(true)`
+            // synchronously, then the focus LaunchedEffect fires `focusOn(stop)`. MapLibre's
+            // async style/map setup hasn't finished animating to the focus coord yet, so the
+            // first `onCameraIdle` it fires carries the pre-focus frame (user-location / CBD).
+            // Without the suppression, that stale idle clobbers VM camera state and the
+            // `mapReady`-gated camera effect re-animates back to CBD instead of the stop.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+
+            // Sequence mirrors the already-granted-on-arrival path in NearbyRoute.
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            val richmondStop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmondStop)
+            advanceUntilIdle()
+
+            // Stale frame from MapLibre's setup window — the centre is still on the user's
+            // location, not the focused stop. The VM must drop this and keep the focus camera.
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = flinders, zoom = 14.0))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(richmondStop)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+            assertThat(loaded.isFollowingUser).isFalse()
+        }
+
+    @Test
+    fun `onCameraIdle suppression is one-shot — subsequent user-driven idles update the camera`() =
+        runTest(dispatcher) {
+            // Belt-and-braces: the suppression must clear after the post-animation idle on the
+            // expected coord, otherwise a user panning away from the focused stop would be
+            // ignored forever.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val richmondStop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmondStop)
+            advanceUntilIdle()
+
+            // Post-animation idle lands on the focus coord — clears the suppression slot.
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = richmondStop, zoom = NearbyViewModel.FOCUS_ZOOM))
+            advanceUntilIdle()
+
+            // User pans elsewhere. The next idle MUST update the VM camera as normal.
+            val newCentre = Coordinates(lat = -37.8500, lng = 145.0000)
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = newCentre, zoom = 13.0))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(newCentre)
+        }
+
+    @Test
     fun `simulated app restart — fresh VM picks up the previous toggle`() =
         runTest(dispatcher) {
             // End-to-end shape of the user-visible behaviour: toggle, "restart" (build a fresh
