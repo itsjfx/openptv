@@ -9,6 +9,7 @@ import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
+import ac.jfx.openptv.core.model.StopId
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -90,6 +91,12 @@ fun NearbyRoute(
     // on whatever camera the VM already holds, unchanged from the existing behaviour).
     focusLat: Double? = null,
     focusLon: Double? = null,
+    // #139 review: optional `(stopId, routeTypeCode)` companion to the focus coords. When non-null
+    // the ViewModel also auto-opens the stop's bottom-sheet preview as if the user had tapped the
+    // pin, so "show on map" lands with the camera centred AND the preview visible. Null in every
+    // other entry path (the tab variant, deep-linkless re-entry) leaves auto-select off.
+    focusStopId: Int? = null,
+    focusStopRouteTypeCode: Int? = null,
     viewModel: NearbyViewModel = hiltViewModel(),
     map: OpenPtvMap = hiltViewModel<NearbyMapHolder>().map,
     initialiser: OpenPtvMapInitialiser = hiltViewModel<NearbyMapHolder>().initialiser,
@@ -103,13 +110,21 @@ fun NearbyRoute(
         initialiser.init()
     }
 
-    // Issue #123: one-shot camera focus. Keyed on the `(focusLat, focusLon)` pair so the effect
-    // only re-runs when the user re-navigates with a different stop — a configuration change
-    // (rotation, dark-mode flip) keys identically and the effect doesn't re-fire, which preserves
-    // any pan the user has made since arriving. Skipped on the tab variant (both nulls).
-    LaunchedEffect(focusLat, focusLon) {
+    // Issue #123: one-shot camera focus. Keyed on the full focus tuple so the effect only re-runs
+    // when the user re-navigates with a different stop — a configuration change (rotation,
+    // dark-mode flip) keys identically and the effect doesn't re-fire, which preserves any pan
+    // the user has made since arriving. Skipped on the tab variant (both nulls). When the
+    // optional `(focusStopId, focusStopRouteTypeCode)` pair is also supplied the ViewModel
+    // auto-opens the bottom-sheet preview for the stop (#139 review).
+    LaunchedEffect(focusLat, focusLon, focusStopId, focusStopRouteTypeCode) {
         if (focusLat != null && focusLon != null) {
-            viewModel.focusOn(Coordinates(lat = focusLat, lng = focusLon))
+            val selectId = focusStopId?.let(::StopId)
+            val selectRouteType = focusStopRouteTypeCode?.let(RouteType.Companion::fromCode)
+            viewModel.focusOn(
+                coordinates = Coordinates(lat = focusLat, lng = focusLon),
+                selectStopId = selectId,
+                selectRouteType = selectRouteType,
+            )
         }
     }
 

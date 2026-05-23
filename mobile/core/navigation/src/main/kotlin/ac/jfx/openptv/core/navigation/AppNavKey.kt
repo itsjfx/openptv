@@ -42,14 +42,24 @@ sealed interface AppNavKey : NavKey {
      * were looking at. Default null preserves the "open Nearby on whatever camera the VM already
      * holds" behaviour for every existing call site (the bottom-nav tab, deep-linkless re-entry).
      *
-     * Carrying the focus as primitive doubles keeps the key trivially `Bundle`-able across process
-     * death — same trade as [StopDetail]. The Nearby ViewModel converts these into the domain
-     * [`ac.jfx.openptv.core.model.Coordinates`] at the boundary.
+     * `focusStopId` / `focusStopRouteTypeCode` are the optional companion to the lat/lon — when
+     * set, the Nearby screen also auto-selects the stop (i.e. opens the same bottom-sheet preview
+     * that a pin tap would) so the user lands with the stop already highlighted instead of just
+     * the camera centred (#139 review). The pair is consumed by the same one-shot consumer that
+     * applies the camera focus — both halves of the request travel together. Default null leaves
+     * the select-on-arrive behaviour off so the bottom-nav tab is unaffected.
+     *
+     * Carrying the focus as primitive doubles + ints keeps the key trivially `Bundle`-able across
+     * process death — same trade as [StopDetail]. The Nearby ViewModel converts these into the
+     * domain [`ac.jfx.openptv.core.model.Coordinates`] / [`ac.jfx.openptv.core.model.StopId`] /
+     * [`ac.jfx.openptv.core.model.RouteType`] at the boundary.
      */
     @Serializable
     data class Nearby(
         val focusLat: Double? = null,
         val focusLon: Double? = null,
+        val focusStopId: Int? = null,
+        val focusStopRouteTypeCode: Int? = null,
     ) : AppNavKey
 
     /**
