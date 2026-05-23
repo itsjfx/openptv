@@ -6,9 +6,7 @@ import ac.jfx.openptv.core.data.FavouritesRepository
 import ac.jfx.openptv.core.domain.LoadNextDepartureUseCase
 import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ReorderFavouritesUseCase
-import ac.jfx.openptv.core.model.DirectionId
-import ac.jfx.openptv.core.model.FavouriteRouteAtStop
-import ac.jfx.openptv.core.model.RouteId
+import ac.jfx.openptv.core.model.FavouriteDestinationAtStop
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.model.routeDisplayLabel
 import androidx.lifecycle.ViewModel
@@ -34,30 +32,13 @@ import javax.inject.Inject
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * ViewModel for the favourites screen. Owns four pieces of state:
+ * ViewModel for the favourites screen. Owns:
  *
- *  1. The favourites flow projected into a sorted-by-position list of [FavouriteRow]s for the
- *     screen.
- *  2. A per-favourite "next departure" cache — keyed by `(stopId, routeId, directionId)` — driven
- *     by a 60 s tick while RESUMED (mirrors stop-detail). Each tick fans out N parallel reads
- *     bounded by `Semaphore(4)` per the phase-04 spec.
+ *  1. The favourites flow projected into a sorted-by-position list of [FavouriteRow]s.
+ *  2. A per-favourite "next departure" cache — keyed by `(stopId, destinationKey)` — driven by a
+ *     60 s tick while RESUMED. Each tick fans out N parallel reads bounded by `Semaphore(4)`.
  *  3. The transient [PendingUndo] bookkeeping for delete-with-undo.
- *  4. UI affordances: edit-mode toggle (issue #78), pull-to-refresh `isRefreshing` flag (issue
- *     #78).
- *
- * **Polling lifetime**: [startObserving] / [stopObserving] follow the same shape as
- * `:feature:stop-detail`'s `StopDetailViewModel` so the screen can wrap them in
- * `repeatOnLifecycle(RESUMED)`. The tick runs on `Dispatchers.IO` because each fan-out cycle does
- * up to `N` HTTP reads.
- *
- * **Sort**: rows always render in `position ASC` (manual / repository order). The persisted
- * `FavouritesSortPreference` is no longer surfaced (#78 removed the sort buttons); sort logic
- * was deleted with it. The preference key still exists in datastore for backward compatibility
- * but the screen ignores it.
- *
- * **Undo**: on delete the VM stashes the row + its position in [PendingUndo] and calls
- * `repository.remove`. Tap-undo re-`add`s the favourite — at the tail of the list, because the
- * repository doesn't support insert-at-index today.
+ *  4. Edit-mode toggle + pull-to-refresh flag.
  */
 @HiltViewModel
 @Suppress("LongParameterList") // composes several use cases / formatters — split adds no clarity
@@ -70,44 +51,22 @@ class FavouritesViewModel
         private val favouritesRepository: FavouritesRepository,
         private val timeFormatter: RelativeTimeFormatter,
     ) : ViewModel() {
-        /**
-         * Cache of next-departure state per favourite. Mutated by the tick coroutine; the screen
-         * reads it indirectly via the projection that merges this with the favourites list.
-         */
         private val nextDepartures: MutableStateFlow<Map<FavouriteKey, NextDepartureState>> =
             MutableStateFlow(emptyMap())
 
-        /** Transient pending-undo state. Cleared when the user taps undo or the snackbar times out. */
         private val pendingUndo: MutableStateFlow<PendingUndo?> = MutableStateFlow(null)
 
-        /** Toggle for the edit-mode UI affordance (#78). True means drag handles + delete buttons appear. */
         private val editMode: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
-        /** Pull-to-refresh indicator (#78). Flips while [refresh] is in flight. */
         private val isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
-        /** Tracks the active 60 s polling job so `startObserving` is idempotent. */
         private var tickJob: Job? = null
 
-        /**
-         * Projected screen state. Combines:
-         *   - favourites flow (the SSOT for the list),
-         *   - current next-departure cache,
-         *   - pending undo state,
-         *   - edit-mode toggle,
-         *   - refreshing flag.
-         *
-         * `stateIn` with `Eagerly` so the UI sees [FavouritesUiState.Loading] on first frame and a
-         * real list as soon as the repository emits, even if the screen subscribed late.
-         */
         val uiState: StateFlow<FavouritesUiState> =
             combine(
-                // `observeFavourites` is a `Flow` not a `StateFlow` — it may not have emitted yet
-                // when this combine first subscribes. `onStart { emit(emptyList()) }` is the
-                // smallest hammer that lets the combined projection produce a real
-                // `FavouritesUiState` immediately, instead of staying in `Loading` until every
-                // upstream has fired. Production sees the real list a frame later when the
-                // repository's Room-backed flow emits.
+                // `onStart` so the combined projection produces a real `FavouritesUiState`
+                // immediately on first subscription, instead of staying in `Loading` until
+                // every upstream has fired.
                 observeFavourites().onStart { emit(emptyList()) },
                 nextDepartures,
                 pendingUndo,
@@ -127,14 +86,6 @@ class FavouritesViewModel
                 initialValue = FavouritesUiState.Loading,
             )
 
-        /**
-         * Kick off the 60 s "next departure per favourite" polling tick. Called from the UI inside
-         * `repeatOnLifecycle(RESUMED)` so the tick pauses when the screen is backgrounded.
-         * Idempotent — re-entry while a previous job is active cancels the previous one.
-         *
-         * The first iteration runs immediately so the user sees a real label as soon as the first
-         * fetch lands (rather than waiting 60 s after Resume).
-         */
         fun startObserving() {
             tickJob?.cancel()
             tickJob =
@@ -151,11 +102,6 @@ class FavouritesViewModel
             tickJob = null
         }
 
-        /**
-         * Pull-to-refresh handler (#78). Flips [isRefreshing] true, kicks off a single fan-out
-         * cycle, then flips back. Doesn't disturb the running tick — the tick keeps its own
-         * cadence and a manual refresh just runs an extra cycle in parallel.
-         */
         fun refresh() {
             viewModelScope.launch {
                 isRefreshing.value = true
@@ -167,34 +113,23 @@ class FavouritesViewModel
             }
         }
 
-        /** Toggle the edit-mode affordance (#78). Idempotent on [value] equal to current. */
         fun setEditMode(value: Boolean) {
             editMode.value = value
         }
 
-        /** Convenience for the toolbar button. */
         fun toggleEditMode() {
             editMode.value = !editMode.value
         }
 
-        /**
-         * Apply a drag-reorder. The UI hands in the new row order (every row in the list — same
-         * shape as the repository's `reorder` contract). Persisted in one transaction.
-         */
         fun onReorder(orderedKeys: List<FavouriteKey>) {
             viewModelScope.launch {
                 reorderFavourites(
-                    orderedIds =
-                        orderedKeys.map { Triple(it.stopId, it.routeId, it.directionId) },
+                    orderedKeys =
+                        orderedKeys.map { it.stopId to it.destinationKey },
                 )
             }
         }
 
-        /**
-         * Delete a row — remove from the repository, stash the pending undo so the snackbar
-         * can show. The screen calls [onUndoDelete] if the user taps undo, or [clearPendingUndo]
-         * once the snackbar times out.
-         */
         fun onSwipeDelete(key: FavouriteKey) {
             val current = uiState.value as? FavouritesUiState.Loaded ?: return
             val row = current.rows.firstOrNull { it.key == key } ?: return
@@ -202,19 +137,11 @@ class FavouritesViewModel
             viewModelScope.launch {
                 favouritesRepository.remove(
                     stopId = StopId(key.stopId),
-                    routeId = RouteId(key.routeId),
-                    directionId = DirectionId(key.directionId),
+                    destinationKey = key.destinationKey,
                 )
             }
         }
 
-        /**
-         * Restore a deleted favourite. Re-`add`s through the repository — the favourite lands
-         * at the tail of the list (the repository assigns `max(position) + 1`). Restoring at the
-         * original index requires the repository to support insert-at-index, which is a follow-up;
-         * for now the simpler tail-insert is good enough for the user's "I tapped delete by
-         * mistake" flow.
-         */
         fun onUndoDelete() {
             val undo = pendingUndo.value ?: return
             val row = undo.row
@@ -222,37 +149,23 @@ class FavouritesViewModel
             viewModelScope.launch {
                 favouritesRepository.add(
                     stopId = StopId(row.key.stopId),
+                    destinationKey = row.key.destinationKey,
                     routeType = row.routeType,
-                    routeId = RouteId(row.key.routeId),
-                    directionId = DirectionId(row.key.directionId),
                     stopName = row.stopName,
                     stopSuburb = row.stopSuburb,
-                    routeNumber = row.routeNumber,
-                    routeName = row.routeName,
-                    directionName = row.directionName,
+                    destinationName = row.destinationName,
                     lat = row.lat,
                     lng = row.lng,
                 )
             }
         }
 
-        /** Called by the snackbar's dismiss callback once the undo window elapses. */
         fun clearPendingUndo() {
             pendingUndo.value = null
         }
 
-        /**
-         * Run one fan-out cycle of "next departure per favourite". Bounded by [PARALLEL_FETCH_LIMIT]
-         * concurrent reads via a [Semaphore]. The favourites list is read once at the start of the
-         * cycle; if the list changes mid-cycle, the next tick picks up the new state — we don't
-         * try to be clever about partial mid-cycle invalidation.
-         *
-         * On per-favourite error: keep the previous [NextDepartureState.Loaded] if one exists
-         * (avoid flicker on a transient miss); fall back to [NextDepartureState.Error] only if no
-         * stale Loaded is available.
-         */
         private suspend fun refreshNextDepartures() {
-            val favourites: List<FavouriteRouteAtStop> =
+            val favourites: List<FavouriteDestinationAtStop> =
                 withTimeoutOrNull(SNAPSHOT_TIMEOUT_MILLIS) {
                     observeFavourites().first()
                 } ?: emptyList()
@@ -266,11 +179,6 @@ class FavouritesViewModel
                 coroutineScope {
                     favourites
                         .map { fav ->
-                            // No explicit dispatcher switch — the per-stop departures repository
-                            // does its own withContext(Dispatchers.IO) at the network boundary. Keep
-                            // the fan-out on the calling dispatcher so unit tests with a
-                            // `StandardTestDispatcher` can advance it deterministically with
-                            // `advanceUntilIdle`.
                             async {
                                 semaphore.withPermit {
                                     val key = fav.toKey()
@@ -286,15 +194,14 @@ class FavouritesViewModel
         }
 
         private suspend fun fetchOne(
-            favourite: FavouriteRouteAtStop,
+            favourite: FavouriteDestinationAtStop,
             previous: NextDepartureState?,
         ): NextDepartureState {
             val result =
                 loadNextDeparture(
                     stopId = favourite.stopId,
                     routeType = favourite.routeType,
-                    routeId = favourite.routeId,
-                    directionId = favourite.directionId,
+                    destinationKey = favourite.destinationKey,
                 )
             return when (result) {
                 is Result.Success -> {
@@ -310,6 +217,14 @@ class FavouritesViewModel
                                 ),
                             scheduledUtc = dep.scheduledDepartureUtc,
                             estimatedUtc = dep.estimatedDepartureUtc,
+                            routeBadge =
+                                routeDisplayLabel(
+                                    routeType = favourite.routeType,
+                                    routeNumber = "",
+                                    routeName = "",
+                                    routeId = dep.routeId,
+                                ),
+                            routeName = dep.direction.name,
                         )
                     }
                 }
@@ -322,16 +237,13 @@ class FavouritesViewModel
         }
 
         private fun projectState(
-            favourites: List<FavouriteRouteAtStop>,
+            favourites: List<FavouriteDestinationAtStop>,
             nexts: Map<FavouriteKey, NextDepartureState>,
             undo: PendingUndo?,
             editMode: Boolean,
             isRefreshing: Boolean,
         ): FavouritesUiState {
             if (favourites.isEmpty()) {
-                // An active undo means the user just deleted the last row — keep the screen in
-                // Loaded so the snackbar can still render with a meaningful row count of zero.
-                // Empty otherwise.
                 return if (undo != null) {
                     FavouritesUiState.Loaded(
                         rows = emptyList(),
@@ -355,26 +267,16 @@ class FavouritesViewModel
             )
         }
 
-        private fun FavouriteRouteAtStop.toKey(): FavouriteKey =
-            FavouriteKey(
-                stopId = stopId.value,
-                routeId = routeId.value,
-                directionId = directionId.value,
-            )
+        private fun FavouriteDestinationAtStop.toKey(): FavouriteKey =
+            FavouriteKey(stopId = stopId.value, destinationKey = destinationKey)
 
-        private fun FavouriteRouteAtStop.toRow(next: NextDepartureState): FavouriteRow =
+        private fun FavouriteDestinationAtStop.toRow(next: NextDepartureState): FavouriteRow =
             FavouriteRow(
                 key = toKey(),
                 routeType = routeType,
                 stopName = stopName,
                 stopSuburb = stopSuburb,
-                // Pre-bake the badge label using `route_type` so trams/buses get the number
-                // and trains/V-Line get the line name (issue #88). The cached row already
-                // carries both fields; the shared helper handles fallback to "#<id>" when
-                // PTV returned both blank.
-                routeNumber = routeDisplayLabel(routeType, routeNumber, routeName, routeId),
-                routeName = routeName,
-                directionName = directionName,
+                destinationName = destinationName,
                 nextDeparture = next,
                 position = position,
                 lat = lat,
@@ -382,13 +284,10 @@ class FavouritesViewModel
             )
 
         private companion object {
-            /** Phase-04 spec: bound the per-tick fan-out to four concurrent reads. */
             private const val PARALLEL_FETCH_LIMIT: Int = 4
 
-            /** 60 s tick interval. Mirrors stop-detail's polling cadence. */
             private val TICK_INTERVAL_MILLIS: Long = 60.seconds.inWholeMilliseconds
 
-            /** Cap on the per-tick `Flow.first()` read so a stalled collector doesn't wedge the tick. */
             private const val SNAPSHOT_TIMEOUT_MILLIS: Long = 2_000
         }
     }

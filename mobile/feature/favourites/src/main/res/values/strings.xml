@@ -6,7 +6,7 @@
     <string name="feature_favourites_title">Favourites</string>
 
     <!-- Empty state -->
-    <string name="feature_favourites_empty">Star a route at a stop to favourite it.</string>
+    <string name="feature_favourites_empty">Star a destination at a stop to favourite it.</string>
     <string name="feature_favourites_empty_cta">Search for a stop</string>
 
     <!-- Edit mode (issue #78) -->
@@ -24,8 +24,11 @@
     <string name="feature_favourites_removed">Removed</string>
     <string name="feature_favourites_undo">Undo</string>
 
-    <!-- Row content description: stop, suburb, route number, direction, next departure phrase -->
-    <string name="feature_favourites_row_content_description">%1$s, %2$s. Route %3$s to %4$s. Next departure %5$s.</string>
+    <!-- "to {destinationName}" secondary line on the row. -->
+    <string name="feature_favourites_to_destination">to %1$s</string>
+
+    <!-- Row content description: stop, suburb, destination, next departure phrase -->
+    <string name="feature_favourites_row_content_description">%1$s, %2$s. To %3$s. Next departure %4$s.</string>
 
     <!-- Bottom-nav glyph stand-ins (no Material Icons dep) -->
     <string name="feature_favourites_tab_label">Favourites</string>

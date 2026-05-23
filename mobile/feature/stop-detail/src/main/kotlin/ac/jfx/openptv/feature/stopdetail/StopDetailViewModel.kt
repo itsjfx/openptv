@@ -8,12 +8,12 @@ import ac.jfx.openptv.core.domain.ObserveDeparturesUseCase
 import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ToggleFavouriteUseCase
 import ac.jfx.openptv.core.model.Departure
-import ac.jfx.openptv.core.model.Direction
 import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopDetail
 import ac.jfx.openptv.core.model.StopId
+import ac.jfx.openptv.core.model.toDestinationKey
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
@@ -60,16 +60,13 @@ class StopDetailViewModel
         @Assisted("stopId") private val stopIdValue: Int,
         @Assisted("routeTypeCode") private val routeTypeCode: Int,
         /**
-         * Optional pinned route — when both `focusRouteId` and `focusDirectionId` are non-null the
-         * matching `(routeId, directionId)` group is hoisted to the top of the `Loaded` departures
-         * list, with every other route still rendered underneath. Wired in by the favourites
-         * tap-through (issue #78, refining #35): the issue calls for showing the full stop with
-         * the favourite's route pinned, not a filtered view. Negative sentinel `-1` stands in for
-         * `null` over the assisted boundary because Dagger assisted-inject doesn't generate
-         * nullable primitive bindings cleanly — the ViewModel lifts back to a real `Int?` here.
+         * Optional pinned destination — when non-blank, the matching destination block is hoisted
+         * to the top of the `Loaded` departures list, with every other group still rendered
+         * underneath. Wired in by the favourites tap-through (issue #137). Empty-string sentinel
+         * stands in for `null` over the assisted boundary because Dagger assisted-inject doesn't
+         * generate nullable bindings cleanly — the ViewModel lifts back to a real `String?` below.
          */
-        @Assisted("focusRouteId") private val focusRouteIdValue: Int,
-        @Assisted("focusDirectionId") private val focusDirectionIdValue: Int,
+        @Assisted("focusDestinationKey") private val focusDestinationKeyValue: String,
         private val getStopDetail: GetStopDetailUseCase,
         private val observeDepartures: ObserveDeparturesUseCase,
         private val loadMoreDepartures: LoadMoreDeparturesUseCase,
@@ -86,37 +83,28 @@ class StopDetailViewModel
         private val routeType: RouteType = RouteType.fromCode(routeTypeCode)
 
         /**
-         * The favourite-tap-through pin (issue #78) is still expressed as a specific
-         * (routeId, directionId) — favourites haven't changed shape. But groups are now keyed by
-         * destination (issue #87), so the pin is resolved at projection time by checking whether
-         * any of the group's departures match the focus tuple.
+         * The favourite-tap-through pin (issue #137) is a destination key. Empty string means
+         * "no focus" (the sentinel for the assisted-inject `String` arg). When set, the matching
+         * group is hoisted to the top of the projected list.
          */
-        private val focusTuple: FocusTuple? =
-            if (focusRouteIdValue >= 0 && focusDirectionIdValue >= 0) {
-                FocusTuple(routeId = focusRouteIdValue, directionId = focusDirectionIdValue)
-            } else {
-                null
-            }
+        private val focusDestinationKey: String? = focusDestinationKeyValue.takeIf { it.isNotBlank() }
 
         /**
          * Assisted-injection factory. Takes raw `Int`s rather than the domain value classes
          * ([StopId], [RouteType]) because Dagger's assisted-inject codegen doesn't currently
-         * deal with the mangled JVM names that Kotlin value classes use as method parameters
-         * (the symptom is `not a valid name: create-…` at KSP time). Boxing to the value class
-         * happens at the ViewModel boundary instead — same effect, no name-mangling.
+         * deal with the mangled JVM names that Kotlin value classes use as method parameters.
          *
-         * `focusRouteId` / `focusDirectionId` use `-1` as the sentinel for "no filter" because
-         * the same nullable-primitive limitation applies — assisted-inject doesn't generate a
-         * `Int?` parameter; the ViewModel converts the sentinel back into the real `null` (see
-         * `focusTuple` above).
+         * `focusDestinationKey` uses empty string as the sentinel for "no filter" because the
+         * nullable-primitive limitation also applies to references via assisted-inject; the
+         * ViewModel converts the sentinel back into the real `null` (see `focusDestinationKey`
+         * above).
          */
         @AssistedFactory
         interface Factory {
             fun create(
                 @Assisted("stopId") stopId: Int,
                 @Assisted("routeTypeCode") routeTypeCode: Int,
-                @Assisted("focusRouteId") focusRouteId: Int,
-                @Assisted("focusDirectionId") focusDirectionId: Int,
+                @Assisted("focusDestinationKey") focusDestinationKey: String,
             ): StopDetailViewModel
         }
 
@@ -153,16 +141,11 @@ class StopDetailViewModel
         private val expandedGroups: MutableSet<GroupKey> = mutableSetOf()
 
         /**
-         * Snapshot of every `(routeId, directionId)` triple at the current stop the user has
-         * favourited. Updated by the favourites flow; consumed when [rebuildGroups] projects each
-         * `Group.isFavourite`. Kept as an in-memory `Set` so the per-group lookup is O(1) and the
-         * cost of a favourites emission is one set rebuild rather than one DAO query per group.
-         *
-         * Stored as `(routeId, directionId)` tuples — not `GroupKey` — because favourites remain
-         * per-route even though [Group]s are now destination-keyed (issue #87). A single-route
-         * group whose only route is favourited shows the filled star; multi-route groups hide it.
+         * Snapshot of every destination key at the current stop the user has favourited. Updated
+         * by the favourites flow; consumed when [rebuildGroups] projects each `Group.isFavourite`.
+         * O(1) lookup keeps the per-tick cost flat.
          */
-        private var favouriteTuples: Set<FocusTuple> = emptySet()
+        private var favouriteDestinationKeys: Set<String> = emptySet()
 
         init {
             loadHeader()
@@ -251,24 +234,24 @@ class StopDetailViewModel
         }
 
         /**
-         * Subscribe to the global favourites flow and project it down to "which `(routeId,
-         * directionId)` triples at *this* stop are favourited". Updates [favouriteKeys] and
-         * re-runs [rebuildGroups] so the star fill state in the UI reflects external mutations
-         * (favourites screen, widget) immediately.
+         * Subscribe to the global favourites flow and project it down to "which destination keys
+         * at *this* stop are favourited". Updates [favouriteDestinationKeys] and re-runs
+         * [rebuildGroups] so the star fill state in the UI reflects external mutations (favourites
+         * screen, widget) immediately.
          *
          * Scoped to [viewModelScope] rather than the per-Resume [observeJob] because favourites
          * are a small in-memory flow — there's no battery cost to keeping the collector alive
-         * across the screen's Pause cycles, and not tearing down means we don't miss a star-state
-         * change made on another screen while this one is backgrounded.
+         * across Pause cycles, and not tearing down means we don't miss a star-state change made
+         * on another screen while this one is backgrounded.
          */
         private fun observeFavouritesAtThisStop() {
             viewModelScope.launch {
                 observeFavourites().collect { favourites ->
-                    favouriteTuples =
+                    favouriteDestinationKeys =
                         favourites
                             .asSequence()
                             .filter { it.stopId == stopId }
-                            .map { FocusTuple(routeId = it.routeId.value, directionId = it.directionId.value) }
+                            .map { it.destinationKey }
                             .toSet()
                     _uiState.update { current -> current.rebuildGroups() }
                 }
@@ -276,38 +259,18 @@ class StopDetailViewModel
         }
 
         /**
-         * Toggle the favourited state of the `(routeId, directionId)` group at this stop. The
-         * call relies on the header being loaded (so we have a [StopDetail.stop] to enrich the
-         * favourite with display fields) and on at least one departure existing in the group (so
-         * we have a [Direction] name to cache). Both preconditions hold whenever the star
-         * affordance is visible — the star is rendered inside a `GroupHeader`, which only exists
-         * once a group has been built from a successful departures emission.
+         * Toggle the favourited state of a destination at this stop. Relies on the header being
+         * loaded so we have a [StopDetail.stop] to enrich the favourite's cached display fields.
+         * No-op if the header hasn't resolved.
          *
-         * No-op if either precondition isn't met — silently dropping the tap is the right call
-         * because the affordance shouldn't be reachable in those cases.
+         * `destinationName` is the original-casing label (e.g. "City"); the use case normalises
+         * it into the lowercase destination key.
          */
-        fun toggleFavourite(
-            routeId: RouteId,
-            direction: Direction,
-        ) {
+        fun toggleFavourite(destinationName: String) {
             val header = _uiState.value.header as? HeaderState.Loaded ?: return
             val stop = header.detail.stop
-            // Prefer the projection from `servingRoutes` when present — gives us a real route
-            // number + name to cache. When the header response omits the route (PTV occasionally
-            // returns an empty `routes` block for tram stops with high churn), fall back to a
-            // synthetic projection built from the route id + this stop's mode so the favourite
-            // still persists. The favourites screen renders a `#N` placeholder for these and
-            // refreshes the display fields on the next re-favourite.
-            val route =
-                header.detail.servingRoutes.firstOrNull { it.id == routeId }
-                    ?: Route(
-                        id = routeId,
-                        number = "",
-                        name = "",
-                        routeType = stop.routeType,
-                    )
             viewModelScope.launch {
-                toggleFavourite(stop = stop, route = route, direction = direction)
+                toggleFavourite(stop = stop, destinationName = destinationName)
             }
         }
 
@@ -450,12 +413,12 @@ class StopDetailViewModel
             // one block even if PTV ever returns inconsistent casing across feeds. The display
             // label uses the first row's original casing — PTV is consistent in practice, this
             // is belt-and-braces.
-            val grouped = this.groupBy { GroupKey(destination = it.direction.name.lowercase()) }
+            val grouped = this.groupBy { GroupKey(destination = it.direction.name.toDestinationKey()) }
             val groups =
                 grouped.map { (key, departures) ->
                     val sortedDepartures = departures.sortedBy { it.effectiveDepartureUtc() }
                     val displayDestination = sortedDepartures.first().direction.name
-                    val containsFocus = focusTuple != null && departures.any { it.matches(focusTuple) }
+                    val containsFocus = focusDestinationKey != null && focusDestinationKey == key.destination
                     // Distinct routes in this destination block, ordered by their earliest
                     // upcoming departure so the "next train to City" line is the first badge.
                     // Synthesise a placeholder `Route` when the departure references a routeId the
@@ -477,19 +440,10 @@ class StopDetailViewModel
                                         routeType = routeType,
                                     )
                             }
-                    // Favourite affordance only applies when the block represents a single route
-                    // + single direction tuple. Multi-route blocks (Richmond "City") have no
-                    // single tuple to toggle and the star is suppressed in the UI.
-                    val singleRoute = sortedDepartures.distinctRouteAndDirection()
-                    val target = singleRoute?.let { FavouriteTarget(routeId = it.first, direction = it.second) }
-                    val isFavourite =
-                        singleRoute != null &&
-                            favouriteTuples.contains(
-                                FocusTuple(
-                                    routeId = singleRoute.first.value,
-                                    directionId = singleRoute.second.id.value,
-                                ),
-                            )
+                    // Favourite is destination-keyed (issue #137), so single-route and multi-route
+                    // blocks both expose a star — the favourite covers every route the user sees
+                    // feeding the destination at this stop.
+                    val isFavourite = favouriteDestinationKeys.contains(key.destination)
                     Group(
                         key = key,
                         routes = groupRoutes,
@@ -499,47 +453,33 @@ class StopDetailViewModel
                         expanded = expandedGroups.contains(key),
                         isFavourite = isFavourite,
                         isPinned = containsFocus,
-                        favouriteTarget = target,
                     )
                 }
             // Issue #90: the pinned destination is no longer auto-expanded. Tapping a favourite
             // only hoists its block to the top — the visible row count matches the other groups,
             // and the user can still tap the chevron to expand it themselves.
             //
-            // Issue #100: all favourited groups (`isFavourite == true`) pin above non-favourited
-            // groups. Within the favourite band the focus tuple — the favourite the user tapped to
-            // arrive here (`isPinned`) — sits at index 0 above other favourites; remaining
-            // favourites order deterministically by `(routeId asc, directionId asc)` on the group's
-            // `favouriteTarget` so multi-launch from the same favourites list looks identical every
-            // time. Non-favourited groups keep their existing earliest-departure ordering below.
+            // Issue #100 + #137: all favourited groups (`isFavourite == true`) pin above
+            // non-favourited groups. Within the favourite band the focus destination — the
+            // favourite the user tapped to arrive here (`isPinned`) — sits at index 0 above other
+            // favourites; remaining favourites order deterministically by destination key so
+            // multi-launch from the same favourites list looks identical every time.
+            // Non-favourited groups keep their existing earliest-departure ordering below.
             //
             // The "favourite section" key is the conjunction `isFavourite || isPinned`: `isPinned`
             // covers the corner case where the user opens the stop via a favourite but the
-            // favourites flow hasn't emitted yet, so `favouriteTuples` is still empty for that
-            // group. The focus group still hoists to position 0 regardless.
+            // favourites flow hasn't emitted yet, so `favouriteDestinationKeys` is still empty for
+            // that group. The focus group still hoists to position 0 regardless.
             return groups.sortedWith(
                 compareByDescending<Group> { it.isFavourite || it.isPinned }
                     .thenByDescending { it.isPinned }
-                    .thenBy { it.favouriteTarget?.routeId?.value ?: Int.MAX_VALUE }
-                    .thenBy { it.favouriteTarget?.direction?.id?.value ?: Int.MAX_VALUE }
+                    // Within the favourite cohort, tiebreak by destination key so launches from
+                    // the favourites screen always see the same order. Non-favourite groups fall
+                    // through to the earliest-departure tiebreaker via the empty-string key.
+                    .thenBy { if (it.isFavourite || it.isPinned) it.key.destination else "" }
                     .thenBy { it.departures.first().effectiveDepartureUtc() },
             )
         }
-
-        /**
-         * If every departure in this list belongs to the same `(routeId, directionId)` tuple,
-         * return that tuple — the group represents a single route. Returns null when the list
-         * spans multiple routes (the Richmond → City case) so the caller can suppress the
-         * single-target favourite affordance.
-         */
-        private fun List<Departure>.distinctRouteAndDirection(): Pair<RouteId, Direction>? {
-            val first = firstOrNull() ?: return null
-            val sameRoute = all { it.routeId == first.routeId && it.direction.id == first.direction.id }
-            return if (sameRoute) first.routeId to first.direction else null
-        }
-
-        private fun Departure.matches(tuple: FocusTuple): Boolean =
-            routeId.value == tuple.routeId && direction.id.value == tuple.directionId
 
         private fun Throwable.toUserFacingReason(): String =
             when (this) {
@@ -563,10 +503,3 @@ class StopDetailViewModel
 
 /** Best-known departure instant — real-time prediction wins, falls back to the timetable. */
 internal fun Departure.effectiveDepartureUtc() = estimatedDepartureUtc ?: scheduledDepartureUtc
-
-/**
- * A specific route+direction at this stop. Used internally to track the pinned focus tuple
- * (issue #78) and favourited tuples (issue #34) without coupling either to the destination-keyed
- * [GroupKey] used for display (issue #87).
- */
-internal data class FocusTuple(val routeId: Int, val directionId: Int)
