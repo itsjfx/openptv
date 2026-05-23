@@ -578,8 +578,12 @@ class StopDetailViewModelTest {
         }
 
     @Test
-    fun `toggleExpand flips the group expanded flag and triggers a loadMore page fetch`() =
+    fun `toggleExpand flips the expanded flag and does not auto-fetch a page (issue 126)`() =
         runTest(dispatcher) {
+            // Issue #126: expanding a group is a pure UI toggle now. The previous behaviour
+            // auto-fired loadMore on first expand, which acted as a probe page the user
+            // experienced as a wasted preload. The explicit "Load more" button is the only thing
+            // that fetches new pages now.
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel = newViewModel()
             advanceUntilIdle()
@@ -594,7 +598,27 @@ class StopDetailViewModelTest {
                 (viewModel.uiState.value.departures as DeparturesState.Loaded)
                     .groups.first().key
 
-            // Enqueue a page so the loadMore lands deterministically.
+            viewModel.toggleExpand(key)
+            advanceUntilIdle()
+
+            val after = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(after.groups.first().expanded).isTrue()
+            assertThat(departureRepository.loadMoreCalls).isEmpty()
+        }
+
+    @Test
+    fun `loadMore tap anchors the page request at the latest known departure (issue 126)`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val head = listOf(DepartureMother.aDeparture().withRunRef("HEAD-1").build())
+            departureRepository.emitSuccess(head)
+            advanceUntilIdle()
+
             val pageRow =
                 DepartureMother.aDeparture()
                     .withRunRef("PAGE-1")
@@ -603,20 +627,16 @@ class StopDetailViewModelTest {
                     .build()
             departureRepository.enqueueLoadMoreSuccess(listOf(pageRow))
 
-            viewModel.toggleExpand(key)
+            viewModel.loadMore()
             advanceUntilIdle()
 
-            val after = viewModel.uiState.value.departures as DeparturesState.Loaded
-            assertThat(after.groups.first().expanded).isTrue()
             assertThat(departureRepository.loadMoreCalls).hasSize(1)
             val call = departureRepository.loadMoreCalls.single()
             assertThat(call.maxResults).isEqualTo(PAGE_SIZE)
-            // Anchor is the latest known departure (the head row, since the page hadn't landed
-            // when the call was placed). `effectiveDepartureUtc` prefers the live estimate.
             val head1 = head.first()
             val expectedAnchor = head1.estimatedDepartureUtc ?: head1.scheduledDepartureUtc
             assertThat(call.after).isEqualTo(expectedAnchor)
-            // The page row is now merged into the group.
+            val after = viewModel.uiState.value.departures as DeparturesState.Loaded
             val runRefs = after.groups.flatMap { it.departures }.map { it.runRef.value }
             assertThat(runRefs).containsAtLeast("HEAD-1", "PAGE-1")
         }
@@ -698,6 +718,176 @@ class StopDetailViewModelTest {
             advanceUntilIdle()
 
             assertThat(departureRepository.loadMoreCalls).isEmpty()
+        }
+
+    // ---------- canLoadMore / Load more button (issue #126) ----------
+
+    @Test
+    fun `canLoadMore is true after the initial head poll so the Load more button is shown`() =
+        runTest(dispatcher) {
+            // No pagination call yet — we don't know whether PTV has more entries past the head
+            // poll, so we default to true and let the user fetch if they want more.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().build()))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.canLoadMore).isTrue()
+            assertThat(loaded.isLoadingMore).isFalse()
+        }
+
+    @Test
+    fun `a full page response keeps canLoadMore true so the button stays shown`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("HEAD-1").build()))
+            advanceUntilIdle()
+
+            // A page of exactly PAGE_SIZE rows — by the issue #126 definition, there may be more.
+            val fullPage =
+                (1..PAGE_SIZE).map { i ->
+                    DepartureMother.aDeparture()
+                        .withRunRef("PAGE-$i")
+                        .withScheduledDepartureUtc(Instant.parse("2026-05-14T10:0${i.coerceAtMost(9)}:00Z"))
+                        .withEstimatedDepartureUtc(Instant.parse("2026-05-14T10:0${i.coerceAtMost(9)}:00Z"))
+                        .build()
+                }
+            departureRepository.enqueueLoadMoreSuccess(fullPage)
+
+            viewModel.loadMore()
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.canLoadMore).isTrue()
+            assertThat(loaded.isLoadingMore).isFalse()
+        }
+
+    @Test
+    fun `a short page response flips canLoadMore false so the button hides`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("HEAD-1").build()))
+            advanceUntilIdle()
+
+            // Fewer than PAGE_SIZE — end of data.
+            val shortPage =
+                listOf(
+                    DepartureMother.aDeparture()
+                        .withRunRef("PAGE-1")
+                        .withScheduledDepartureUtc(Instant.parse("2026-05-14T10:00:00Z"))
+                        .withEstimatedDepartureUtc(Instant.parse("2026-05-14T10:00:00Z"))
+                        .build(),
+                )
+            departureRepository.enqueueLoadMoreSuccess(shortPage)
+
+            viewModel.loadMore()
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.canLoadMore).isFalse()
+        }
+
+    @Test
+    fun `an empty page response also flips canLoadMore false`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("HEAD-1").build()))
+            advanceUntilIdle()
+
+            departureRepository.enqueueLoadMoreSuccess(emptyList())
+
+            viewModel.loadMore()
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.canLoadMore).isFalse()
+        }
+
+    @Test
+    fun `canLoadMore false survives subsequent head poll re-emissions`() =
+        runTest(dispatcher) {
+            // After a short page hides the button, the 30 s polling tick re-emits the head poll.
+            // We must not "forget" that we'd already reached the end and flip the button back on.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            val head = listOf(DepartureMother.aDeparture().withRunRef("HEAD-1").build())
+            departureRepository.emitSuccess(head)
+            advanceUntilIdle()
+
+            departureRepository.enqueueLoadMoreSuccess(emptyList())
+            viewModel.loadMore()
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value.departures as DeparturesState.Loaded).canLoadMore).isFalse()
+
+            // Next polling tick — same head row, no change.
+            departureRepository.emitSuccess(head)
+            advanceUntilIdle()
+
+            assertThat((viewModel.uiState.value.departures as DeparturesState.Loaded).canLoadMore).isFalse()
+        }
+
+    @Test
+    fun `isLoadingMore flips true during a loadMore call and back to false when it lands`() =
+        runTest(dispatcher) {
+            // While the fetch is in flight the UI keeps the button visible but shows a spinner /
+            // disabled state. Using turbine here so we can assert the in-flight value between the
+            // call and the resolution.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("HEAD-1").build()))
+            advanceUntilIdle()
+
+            viewModel.uiState.test {
+                // Drain the current Loaded(isLoadingMore=false) snapshot.
+                val before = awaitItem()
+                val beforeLoaded = before.departures as DeparturesState.Loaded
+                assertThat(beforeLoaded.isLoadingMore).isFalse()
+
+                departureRepository.enqueueLoadMoreSuccess(emptyList())
+                viewModel.loadMore()
+
+                // First emission after loadMore: isLoadingMore=true (button shows spinner).
+                val inflight = awaitItem()
+                val inflightLoaded = inflight.departures as DeparturesState.Loaded
+                assertThat(inflightLoaded.isLoadingMore).isTrue()
+
+                advanceUntilIdle()
+                // Resolution: isLoadingMore=false again, and (empty page) canLoadMore flips false.
+                val resolved = awaitItem()
+                val resolvedLoaded = resolved.departures as DeparturesState.Loaded
+                assertThat(resolvedLoaded.isLoadingMore).isFalse()
+                assertThat(resolvedLoaded.canLoadMore).isFalse()
+
+                cancelAndIgnoreRemainingEvents()
+            }
         }
 
     // ---------- favourites (issue #34) ----------

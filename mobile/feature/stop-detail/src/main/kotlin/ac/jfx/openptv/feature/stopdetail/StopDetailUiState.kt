@@ -52,12 +52,21 @@ sealed interface DeparturesState {
      * the routes that contribute to it (multiple at busy interchanges like Richmond where five
      * lines all run to "City") so the UI can render per-row badges without a cross-lookup.
      *
-     * `isLoadingMore` flips true while a paginated fetch (either "show more" or
-     * "scrolled past the bottom") is in flight; the UI uses it to render the tail spinner.
+     * `isLoadingMore` flips true while a paginated fetch is in flight; the UI uses it to show a
+     * spinner on the load-more button without hiding the button itself.
+     *
+     * `canLoadMore` (issue #126) controls visibility of the explicit "Load more" button at the
+     * tail of the list. It starts `true` — we don't know how many entries PTV has past the head
+     * poll until we ask. Each `loadMore` call updates it based on the returned page size: if the
+     * page came back full (= [PAGE_SIZE]) we assume there might be more and keep the button;
+     * if the page was short we hide the button (no more data to fetch). This swaps the
+     * previously-auto-loading endless scroll for an explicit user gesture, and avoids
+     * pre-fetching a probe page just to determine count.
      */
     data class Loaded(
         val groups: List<Group>,
         val isLoadingMore: Boolean = false,
+        val canLoadMore: Boolean = true,
     ) : DeparturesState
 
     /** A successful fetch returned zero upcoming departures — last service of the day. */

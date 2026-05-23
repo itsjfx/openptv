@@ -39,9 +39,12 @@ import java.io.IOException
  *     [androidx.lifecycle.Lifecycle.State.RESUMED] and cancelled when it leaves. The UI driver is
  *     [startObserving] / [stopObserving]; the Compose layer wraps these in `repeatOnLifecycle`.
  *  3. Pull-to-refresh, which forces a new collection cycle ([refresh]).
- *  4. Pagination — per-group expansion ([toggleExpand]) and "scrolled to the tail" ([loadMore]).
- *     Pagination uses a separate read path that appends to the in-memory tail, deduping by
- *     `runRef`. The head poll keeps running underneath so the top of the list stays live.
+ *  4. Pagination — per-group expansion ([toggleExpand]) is a pure visual toggle, and explicit
+ *     "Load more" taps ([loadMore]) fetch the next page. Pagination uses a separate read path
+ *     that appends to the in-memory tail, deduping by `runRef`. The head poll keeps running
+ *     underneath so the top of the list stays live. Issue #126: there is no auto-load-on-scroll
+ *     and no preflight page — the button only fetches when tapped, and a short returned page
+ *     hides the button so we don't probe past the end of the data.
  *
  * `Clock` and `RelativeTimeFormatter` come from Hilt's `SingletonComponent`; `stopId` and
  * `routeType` are assisted so the Compose layer can hand the destination key into the ViewModel
@@ -206,10 +209,10 @@ class StopDetailViewModel
         }
 
         /**
-         * Toggle the per-group expanded state. Expanding for the first time kicks off a
-         * [loadMore] so the user sees more than the head poll provides (the head poll only asks
-         * for [ac.jfx.openptv.core.data.DepartureRepository.INITIAL_PAGE_SIZE_PER_ROUTE] rows
-         * per route).
+         * Toggle the per-group expanded state. Issue #126 — purely a visual toggle now; the
+         * "Load more" button at the bottom of the list is the only thing that fetches new pages.
+         * The previous behaviour auto-fired a [loadMore] on first expand, which the user
+         * experienced as the pre-fetch the screen does "just to determine count".
          */
         fun toggleExpand(key: GroupKey) {
             val nowExpanded = !expandedGroups.contains(key)
@@ -219,15 +222,16 @@ class StopDetailViewModel
                 expandedGroups -= key
             }
             _uiState.update { it.copy(departures = it.departures.applyExpansion()) }
-            if (nowExpanded) {
-                loadMore()
-            }
         }
 
         /**
-         * Request the next page of departures. Called by the UI when the user scrolls past the
-         * tail of the list, and by [toggleExpand] when a group is first opened. Coalesces
-         * concurrent calls — if a page is already in flight, the trigger is a no-op.
+         * Request the next page of departures. Called by the UI when the user taps the explicit
+         * "Load more" button at the tail of the list. Coalesces concurrent taps — if a page is
+         * already in flight, the second trigger is a no-op.
+         *
+         * Issue #126: "is there more" is inferred from the returned page size — a full page (=
+         * [PAGE_SIZE]) leaves the button visible, a short or empty page hides it. We never
+         * pre-fetch a probe page to learn the total count, because PTV doesn't return one.
          */
         fun loadMore() {
             if (loadMoreJob?.isActive == true) return
@@ -236,15 +240,25 @@ class StopDetailViewModel
                 viewModelScope.launch {
                     _uiState.update { it.copy(departures = it.departures.withLoadingMore(true)) }
                     val result = loadMoreDepartures(stopId, routeType, tail, PAGE_SIZE)
-                    when (result) {
-                        is Result.Success -> {
-                            result.data.forEach { dep -> pagedByRunRef[dep.runRef.value] = dep }
+                    val newCanLoadMore: Boolean? =
+                        when (result) {
+                            is Result.Success -> {
+                                result.data.forEach { dep -> pagedByRunRef[dep.runRef.value] = dep }
+                                // A short page (less than what we asked for) means we've reached
+                                // the end of the data PTV has for this stop. Hide the button so
+                                // the user doesn't keep poking it for nothing.
+                                result.data.size >= PAGE_SIZE
+                            }
+                            // Error / Loading: don't touch canLoadMore — the user might retry.
+                            // The head poll will eventually recover state.
+                            is Result.Error, Result.Loading -> null
                         }
-                        is Result.Error, Result.Loading -> { /* swallow — head poll will recover */ }
-                    }
                     _uiState.update { current ->
                         current.copy(
-                            departures = current.departures.withLoadingMore(false),
+                            departures =
+                                current.departures
+                                    .withLoadingMore(false)
+                                    .let { d -> if (newCanLoadMore != null) d.withCanLoadMore(newCanLoadMore) else d },
                         ).rebuildGroups()
                     }
                 }
@@ -334,9 +348,18 @@ class StopDetailViewModel
                     lastHeadPoll = result.data
                     val merged = mergeDepartures(headPoll = result.data)
                     val groups = merged.toGroupedList(currentHeader = header)
+                    // Issue #126: preserve the previous canLoadMore across head poll re-emissions.
+                    // The polling tick can't know whether there's more data past what was paginated
+                    // in — only [loadMore] can. If a previous page came back short we stay
+                    // canLoadMore=false; otherwise we default to true (we haven't tried a page yet).
+                    val previousCanLoadMore = (departures as? DeparturesState.Loaded)?.canLoadMore ?: true
                     copy(
                         departures =
-                            if (groups.isEmpty()) DeparturesState.Empty else DeparturesState.Loaded(groups),
+                            if (groups.isEmpty()) {
+                                DeparturesState.Empty
+                            } else {
+                                DeparturesState.Loaded(groups = groups, canLoadMore = previousCanLoadMore)
+                            },
                         isRefreshing = false,
                         asOf = clock.now(),
                     )
@@ -386,6 +409,12 @@ class StopDetailViewModel
                 else -> this
             }
 
+        private fun DeparturesState.withCanLoadMore(value: Boolean): DeparturesState =
+            when (this) {
+                is DeparturesState.Loaded -> copy(canLoadMore = value)
+                else -> this
+            }
+
         /**
          * Recompute the groups list from the current page cache. Called after [loadMore] lands
          * its page and after the header resolves (the route projection is needed to fill in
@@ -400,8 +429,19 @@ class StopDetailViewModel
             }
             val merged = mergeDepartures(headPoll = lastHeadPoll)
             val groups = merged.toGroupedList(currentHeader = header)
+            // Preserve canLoadMore + isLoadingMore across rebuilds so loadMore's writes to those
+            // flags survive favourites/expansion-driven re-projections.
+            val existing = departures as? DeparturesState.Loaded
             val newDepartures =
-                if (groups.isEmpty()) DeparturesState.Empty else DeparturesState.Loaded(groups)
+                if (groups.isEmpty()) {
+                    DeparturesState.Empty
+                } else {
+                    DeparturesState.Loaded(
+                        groups = groups,
+                        isLoadingMore = existing?.isLoadingMore ?: false,
+                        canLoadMore = existing?.canLoadMore ?: true,
+                    )
+                }
             return copy(departures = newDepartures)
         }
 
