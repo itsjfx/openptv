@@ -1221,7 +1221,7 @@ class NearbyViewModelTest {
         }
 
     @Test
-    fun `focusOn in PermissionUnasked is a no-op — overlay still up`() =
+    fun `focusOn in PermissionUnasked leaves visible state unchanged — overlay still up`() =
         runTest(dispatcher) {
             val viewModel = newViewModel()
             // Don't call onPermissionResult — stays in PermissionUnasked.
@@ -1230,9 +1230,99 @@ class NearbyViewModelTest {
             viewModel.focusOn(richmond)
             advanceUntilIdle()
 
-            // Unchanged — the screen's LaunchedEffect will re-fire once permission resolves
-            // and the state transitions out of Unasked.
+            // Visible state is unchanged — the permission overlay is still up and we don't
+            // allocate a phantom Loaded/Denied variant. The focus coordinate is buffered
+            // internally and consumed by onPermissionResult (see the bug-fix test below).
             assertThat(viewModel.uiState.value).isEqualTo(NearbyUiState.PermissionUnasked)
+        }
+
+    @Test
+    fun `focusOn before permission grant — first Loaded state lands centred on the focus coords`() =
+        runTest(dispatcher) {
+            // Regression for PR #139: the stop-detail "show on map" affordance navigates to
+            // Nearby with `(focusLat, focusLon)` baked into the destination args. The screen's
+            // permission-pre-grant LaunchedEffect and the focus LaunchedEffect both fire on the
+            // first composition. If focus runs first (state is still PermissionUnasked) the
+            // request used to be silently dropped because the focus LaunchedEffect is keyed on
+            // the focus pair, not on the state — so it doesn't re-fire when Loaded lands.
+            //
+            // Fix: the VM buffers the focus coord and consumes it the first time it transitions
+            // into Loaded, so the user lands framed on the requested stop instead of their own
+            // location (CBD here).
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+
+            // Focus arrives BEFORE permission resolves — this is the race we're pinning.
+            val universityOfMelbourne = Coordinates(lat = -37.7964, lng = 144.9612)
+            viewModel.focusOn(universityOfMelbourne)
+            // No state change yet — overlay is up.
+            assertThat(viewModel.uiState.value).isEqualTo(NearbyUiState.PermissionUnasked)
+
+            // Permission resolves — the very first Loaded state MUST be centred on the focus
+            // coords, not on the user's last-known fix.
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(universityOfMelbourne)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+            // Follow-me is off — the user named a specific stop, not asked to chase their own
+            // location. Matches the semantics of a direct focusOn call into an already-Loaded
+            // state.
+            assertThat(loaded.isFollowingUser).isFalse()
+            // The fetch fires for the focused viewport — pins are ready without a manual pan.
+            assertThat(nearbyRepo.requestedCalls.last().coordinates).isEqualTo(universityOfMelbourne)
+        }
+
+    @Test
+    fun `focusOn before permission denial — first Denied state lands centred on the focus coords`() =
+        runTest(dispatcher) {
+            // Symmetric to the granted path: even if the user refuses location permission, the
+            // map is still shown and we should honour their "frame on this stop" intent.
+            val viewModel = newViewModel()
+
+            val universityOfMelbourne = Coordinates(lat = -37.7964, lng = 144.9612)
+            viewModel.focusOn(universityOfMelbourne)
+            viewModel.onPermissionResult(granted = false)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            val denied = viewModel.uiState.value as NearbyUiState.PermissionDenied
+            assertThat(denied.camera.centre).isEqualTo(universityOfMelbourne)
+            assertThat(denied.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+        }
+
+    @Test
+    fun `pending focus is consumed exactly once — subsequent permission flips do not refocus`() =
+        runTest(dispatcher) {
+            // Belt-and-braces: a permission revoke + re-grant must NOT refocus on the original
+            // coord — the user has moved on, and the pendingFocus slot is one-shot.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+
+            val universityOfMelbourne = Coordinates(lat = -37.7964, lng = 144.9612)
+            viewModel.focusOn(universityOfMelbourne)
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            // First Loaded was centred on the focus — pending consumed.
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre)
+                .isEqualTo(universityOfMelbourne)
+
+            // User pans elsewhere, then permission gets revoked + re-granted (e.g. flipped via
+            // system settings while the app was backgrounded).
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.8500, 145.0000), 13.0))
+            advanceUntilIdle()
+            viewModel.onPermissionResult(granted = false)
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            // The re-granted Loaded state MUST NOT be centred back on the original focus —
+            // it falls back to the user's last-known fix.
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(flinders)
         }
 
     @Test

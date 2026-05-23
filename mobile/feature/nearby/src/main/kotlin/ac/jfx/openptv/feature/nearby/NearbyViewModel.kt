@@ -126,6 +126,19 @@ class NearbyViewModel
         private var userBearingJob: Job? = null
 
         /**
+         * One-shot focus coordinate (issue #123) buffered when the user navigates in from
+         * stop-detail's "show on map" before the permission flow has resolved. The screen calls
+         * [focusOn] inside a `LaunchedEffect` keyed on the focus pair as soon as it composes — at
+         * that moment the state is typically [NearbyUiState.PermissionUnasked], so the camera
+         * can't be moved yet. We store the coordinate here and consume it on the first transition
+         * into [NearbyUiState.Loaded] / [NearbyUiState.PermissionDenied] so the user lands framed
+         * on the requested stop instead of their own location.
+         *
+         * Cleared as soon as it's applied; subsequent permission flips don't re-focus.
+         */
+        private var pendingFocus: Coordinates? = null
+
+        /**
          * LRU cache of every stop the user has fetched this session. Solves the disappear/reappear
          * problem: panning into a region we've fetched before keeps those pins on-screen
          * immediately, instead of dropping them until the next fetch lands.
@@ -158,18 +171,33 @@ class NearbyViewModel
                 val seedFilter = persistedFilter.await()
                 if (granted) {
                     val fix = locationProvider.lastKnown()
+                    // Issue #123: if the user navigated in from stop-detail's "show on map" while
+                    // the permission overlay was still up, [focusOn] will have stashed the focus
+                    // coordinate. Consume it here so the very first Loaded state lands framed on
+                    // the requested stop — otherwise we'd render the user-location camera first
+                    // and the screen-side LaunchedEffect wouldn't re-fire (it's keyed on the
+                    // focus pair, not on the state transition).
+                    val focus = pendingFocus
+                    pendingFocus = null
                     val initialCamera =
-                        OpenPtvCameraState(
-                            centre = fix ?: MELBOURNE_CBD,
-                            zoom = INITIAL_ZOOM,
-                        )
+                        if (focus != null) {
+                            OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
+                        } else {
+                            OpenPtvCameraState(
+                                centre = fix ?: MELBOURNE_CBD,
+                                zoom = INITIAL_ZOOM,
+                            )
+                        }
                     _uiState.value =
                         NearbyUiState.Loaded(
                             camera = initialCamera,
                             pins = emptyList(),
                             userLocation = fix,
                             userBearing = null,
-                            isFollowingUser = fix != null,
+                            // A pending focus disengages follow-me — the user has named a specific
+                            // stop, not asked to chase their own location. Same semantics as a
+                            // direct [focusOn] call into an already-Loaded state.
+                            isFollowingUser = focus == null && fix != null,
                             pendingSheet = SheetState.Closed,
                             showEmptyHint = false,
                             routeTypeFilter = seedFilter,
@@ -184,16 +212,24 @@ class NearbyViewModel
                     startUserLocationTracking()
                     startUserBearingTracking()
                 } else {
+                    // Same pending-focus consumption on the denied branch — the user can still see
+                    // the map and we honour their "frame on this stop" intent even if location
+                    // permission was refused.
+                    val focus = pendingFocus
+                    pendingFocus = null
+                    val initialCamera =
+                        if (focus != null) {
+                            OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
+                        } else {
+                            OpenPtvCameraState(centre = MELBOURNE_CBD, zoom = INITIAL_ZOOM)
+                        }
                     _uiState.value =
                         NearbyUiState.PermissionDenied(
-                            camera = OpenPtvCameraState(centre = MELBOURNE_CBD, zoom = INITIAL_ZOOM),
+                            camera = initialCamera,
                             pins = emptyList(),
                             routeTypeFilter = seedFilter,
                         )
-                    scheduleFetch(
-                        OpenPtvCameraState(MELBOURNE_CBD, INITIAL_ZOOM),
-                        seedFilter,
-                    )
+                    scheduleFetch(initialCamera, seedFilter)
                     // Permission denied — make sure neither tracker is still running from a prior
                     // grant within the same VM lifetime.
                     userLocationJob?.cancel()
@@ -380,11 +416,16 @@ class NearbyViewModel
          * a configuration change (rotation, dark-mode flip) doesn't re-fire the focus and reset
          * the camera if the user has since panned away.
          *
-         * No-op when the state is still [NearbyUiState.PermissionUnasked] — the permission overlay
-         * is still up and the camera doesn't yet have a meaningful frame to honour. The screen
-         * passes the same focus pair through to the next composition once `Loaded` lands; we
-         * don't drop the request silently in that race because issue #123 is the explicit user
-         * intent to jump to the map.
+         * **PermissionUnasked race fix (PR #139 follow-up).** When the user navigates in from
+         * stop-detail's "show on map", the screen's permission-resolve `LaunchedEffect` and the
+         * focus `LaunchedEffect` fire on the same dispatcher tick. The focus one usually wins
+         * the race — at which point [_uiState] is still [NearbyUiState.PermissionUnasked]. We
+         * can't move the camera yet (the overlay is up and there's no Loaded/Denied variant to
+         * copy into), but we MUST NOT drop the request: the screen's `LaunchedEffect` is keyed
+         * on the focus pair, not on the state, so it doesn't re-fire when Loaded lands. Stash
+         * the coordinate in [pendingFocus] and let [onPermissionResult] consume it when the
+         * permission flow finishes — that produces the very first Loaded camera at the requested
+         * stop, no second hop required.
          */
         fun focusOn(coordinates: Coordinates) {
             val camera = OpenPtvCameraState(centre = coordinates, zoom = FOCUS_ZOOM)
@@ -399,10 +440,10 @@ class NearbyViewModel
                 is NearbyUiState.PermissionDenied ->
                     _uiState.value = current.copy(camera = camera)
                 NearbyUiState.PermissionUnasked -> {
-                    // Permission overlay is still up — the user can't see the map yet. Skip the
-                    // camera update so we don't allocate a phantom Loaded/Denied variant; the
-                    // screen's LaunchedEffect will re-fire focusOn once permission resolves and
-                    // the state transitions out of Unasked.
+                    // Buffer the request — [onPermissionResult] will consume it. The fetch is
+                    // also deferred; without a Loaded state there's nothing to render pins onto
+                    // yet, and the consumer will schedule its own fetch with the focused camera.
+                    pendingFocus = coordinates
                     return
                 }
             }
