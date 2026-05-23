@@ -104,7 +104,23 @@ class LocationManagerLocationProviderTest {
         }
 
     @Test
-    fun `observe emits when a location is simulated`() =
+    fun `observe registers against both GPS and NETWORK providers`() =
+        runTest {
+            // Issue #127 — registering both providers keeps Android's foreground-location
+            // indicator solidly lit and feeds the dot whichever fix lands first.
+            grantCoarsePermission()
+
+            provider.observe().test {
+                assertThat(shadowManager.getLocationUpdateListeners(LocationManager.GPS_PROVIDER))
+                    .hasSize(1)
+                assertThat(shadowManager.getLocationUpdateListeners(LocationManager.NETWORK_PROVIDER))
+                    .hasSize(1)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `observe emits when a NETWORK fix is simulated`() =
         runTest {
             grantCoarsePermission()
 
@@ -123,16 +139,52 @@ class LocationManagerLocationProviderTest {
         }
 
     @Test
-    fun `observe completes when the provider is disabled mid-stream`() =
+    fun `observe emits when a GPS fix is simulated`() =
         runTest {
             grantCoarsePermission()
 
             provider.observe().test {
                 val listener =
+                    shadowManager.getLocationUpdateListeners(LocationManager.GPS_PROVIDER).single()
+                listener.onLocationChanged(fixAt(FED_LAT, FED_LNG))
+                assertThat(awaitItem()).isEqualTo(Coordinates(FED_LAT, FED_LNG))
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `observe stays open when only one provider is disabled mid-stream`() =
+        runTest {
+            // Issue #127 — with both providers registered, dropping one shouldn't kill the dot.
+            grantCoarsePermission()
+
+            provider.observe().test {
+                val networkListener =
                     shadowManager.getLocationUpdateListeners(LocationManager.NETWORK_PROVIDER).single()
-                // Mimic `onProviderDisabled` being called by the system. The impl's listener
-                // closes the flow.
-                listener.onProviderDisabled(LocationManager.NETWORK_PROVIDER)
+                networkListener.onProviderDisabled(LocationManager.NETWORK_PROVIDER)
+                // Flow stays open — GPS is still feeding it. A GPS fix should still arrive.
+                val gpsListener =
+                    shadowManager.getLocationUpdateListeners(LocationManager.GPS_PROVIDER).single()
+                gpsListener.onLocationChanged(fixAt(FED_LAT, FED_LNG))
+                assertThat(awaitItem()).isEqualTo(Coordinates(FED_LAT, FED_LNG))
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `observe completes when every provider is disabled mid-stream`() =
+        runTest {
+            grantCoarsePermission()
+
+            provider.observe().test {
+                val networkListener =
+                    shadowManager.getLocationUpdateListeners(LocationManager.NETWORK_PROVIDER).single()
+                val gpsListener =
+                    shadowManager.getLocationUpdateListeners(LocationManager.GPS_PROVIDER).single()
+                // Mimic `onProviderDisabled` being called by the system for both providers.
+                // Last one out closes the flow.
+                networkListener.onProviderDisabled(LocationManager.NETWORK_PROVIDER)
+                gpsListener.onProviderDisabled(LocationManager.GPS_PROVIDER)
                 awaitComplete()
             }
         }
