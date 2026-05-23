@@ -5,6 +5,7 @@ import ac.jfx.openptv.core.data.test.FakeDepartureRepository
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.testing.DepartureMother
+import ac.jfx.openptv.core.testing.RouteMother
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
@@ -55,7 +56,7 @@ class LoadNextDepartureUseCaseTest {
             assertThat(result).isInstanceOf(Result.Success::class.java)
             val picked = (result as Result.Success).data
             assertThat(picked).isNotNull()
-            assertThat(picked!!.runRef.value).isEqualTo("SOONER")
+            assertThat(picked!!.departure.runRef.value).isEqualTo("SOONER")
         }
 
     @Test
@@ -83,7 +84,58 @@ class LoadNextDepartureUseCaseTest {
             val result = useCase(stopId, routeType, destinationKey)
 
             val picked = (result as Result.Success).data
-            assertThat(picked!!.runRef.value).isEqualTo("CRANBOURNE-NEXT")
+            assertThat(picked!!.departure.runRef.value).isEqualTo("CRANBOURNE-NEXT")
+        }
+
+    @Test
+    fun `joins the matching Route from the response sideload onto the picked departure`() =
+        runTest {
+            // Issue #137 regression: the favourites screen needs the line name ("Cranbourne") to
+            // render the badge, not `#<routeId>`. The use case joins each picked Departure back
+            // to the Route entry in the sideload by routeId.
+            val cran =
+                DepartureMother.aDeparture()
+                    .withRouteId(101).withDirectionName("City").withRunRef("CRA")
+                    .withScheduledDepartureUtc(clock.now() + 4.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 4.minutes)
+                    .build()
+            val cranRoute = RouteMother.aRoute().withId(101).withName("Cranbourne").withRouteType(RouteType.Train).build()
+            val pakRoute = RouteMother.aRoute().withId(102).withName("Pakenham").withRouteType(RouteType.Train).build()
+            val repo =
+                FakeDepartureRepository().apply {
+                    enqueueSuccessWithRoutes(departures = listOf(cran), routes = listOf(cranRoute, pakRoute))
+                }
+            val useCase = LoadNextDepartureUseCase(repo)
+
+            val result = useCase(stopId, routeType, destinationKey)
+
+            val picked = (result as Result.Success).data
+            assertThat(picked!!.route).isNotNull()
+            assertThat(picked.route!!.name).isEqualTo("Cranbourne")
+        }
+
+    @Test
+    fun `route is null when the response omits the sideload row for the picked routeId`() =
+        runTest {
+            // Defensive: PTV should always sideload routes the departures reference, but if a row
+            // is missing the favourites screen falls back to `#<routeId>` via routeDisplayLabel.
+            val dep =
+                DepartureMother.aDeparture()
+                    .withRouteId(101).withDirectionName("City").withRunRef("ORPHAN")
+                    .withScheduledDepartureUtc(clock.now() + 4.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 4.minutes)
+                    .build()
+            val repo =
+                FakeDepartureRepository().apply {
+                    enqueueSuccessWithRoutes(departures = listOf(dep), routes = emptyList())
+                }
+            val useCase = LoadNextDepartureUseCase(repo)
+
+            val result = useCase(stopId, routeType, destinationKey)
+
+            val picked = (result as Result.Success).data
+            assertThat(picked).isNotNull()
+            assertThat(picked!!.route).isNull()
         }
 
     @Test
@@ -109,7 +161,7 @@ class LoadNextDepartureUseCaseTest {
             val result = useCase(stopId, routeType, destinationKey)
 
             val picked = (result as Result.Success).data
-            assertThat(picked!!.runRef.value).isEqualTo("RIGHT-DEST")
+            assertThat(picked!!.departure.runRef.value).isEqualTo("RIGHT-DEST")
         }
 
     @Test
@@ -130,7 +182,7 @@ class LoadNextDepartureUseCaseTest {
             val result = useCase(stopId, routeType, destinationKey)
 
             val picked = (result as Result.Success).data
-            assertThat(picked!!.runRef.value).isEqualTo("MIXED-CASE")
+            assertThat(picked!!.departure.runRef.value).isEqualTo("MIXED-CASE")
         }
 
     @Test

@@ -71,3 +71,15 @@ value class DirectionId(val value: Int)
 data class DepartureFlags(
     val hasDisruption: Boolean = false,
 )
+
+/**
+ * Departures at a stop alongside the [Route] projections PTV sideloads in the same response. The
+ * favourites screen joins each departure's `routeId` back to a [Route] so it can render the line
+ * name on the row badge (issue #137 regression — without this the helper falls back to
+ * `#<routeId>`). Other consumers (stop-detail, nearby) load `servingRoutes` separately via the
+ * stop-detail endpoint and don't need this projection — they only consume [departures].
+ */
+data class DeparturesAtStop(
+    val departures: List<Departure>,
+    val routes: List<Route>,
+)

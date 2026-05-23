@@ -3,6 +3,7 @@ package ac.jfx.openptv.core.data
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.DepartureRepository.Companion.INITIAL_PAGE_SIZE_PER_ROUTE
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.DeparturesAtStop
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.network.DepartureDataSource
@@ -61,7 +62,7 @@ internal class DepartureRepositoryImpl
         override suspend fun getDepartures(
             stopId: StopId,
             routeType: RouteType,
-        ): Result<List<Departure>> =
+        ): Result<DeparturesAtStop> =
             try {
                 Result.Success(
                     dataSource.getDepartures(
@@ -111,7 +112,7 @@ internal class DepartureRepositoryImpl
                         dateUtc = after,
                         maxResults = maxResults,
                         lookBackwards = false,
-                    ),
+                    ).departures,
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -132,7 +133,7 @@ internal class DepartureRepositoryImpl
                         dateUtc = clock.now() - NOW_GRACE,
                         maxResults = INITIAL_PAGE_SIZE_PER_ROUTE,
                         lookBackwards = false,
-                    ),
+                    ).departures,
                 )
             } catch (cancellation: CancellationException) {
                 throw cancellation

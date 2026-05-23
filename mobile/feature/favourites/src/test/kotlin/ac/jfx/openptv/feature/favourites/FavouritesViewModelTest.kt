@@ -9,6 +9,7 @@ import ac.jfx.openptv.core.domain.ReorderFavouritesUseCase
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.testing.DepartureMother
 import ac.jfx.openptv.core.testing.FavouriteDestinationAtStopMother
+import ac.jfx.openptv.core.testing.RouteMother
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -289,10 +290,48 @@ class FavouritesViewModelTest {
         }
 
     @Test
+    fun `train badge shows the line name joined from the routes sideload (issue #137 regression)`() =
+        runTest(dispatcher) {
+            // The regression itself: favouriting a Belgrave train should render "Belgrave" on the
+            // row badge, not "#<routeId>". Before the fix the VM derived the badge from the
+            // departure alone with blank routeName/routeNumber and the helper fell back to the id.
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1071).withDestinationKey("belgrave").withDestinationName("Belgrave")
+                        .withRouteType(RouteType.Train).build(),
+                ),
+            )
+            val belgraveDep =
+                DepartureMother.aDeparture()
+                    .withRouteId(5).withDirectionName("Belgrave").withRunRef("BEL-1")
+                    .withScheduledDepartureUtc(clock.now() + 5.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 5.minutes)
+                    .build()
+            val belgraveRoute = RouteMother.aRoute().withId(5).withName("Belgrave").withRouteType(RouteType.Train).build()
+            departureRepository.enqueueSuccessWithRoutes(
+                departures = listOf(belgraveDep),
+                routes = listOf(belgraveRoute),
+            )
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            runCurrent()
+            runCurrent()
+            viewModel.stopObserving()
+
+            val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
+            val next = loaded.rows.single().nextDeparture as NextDepartureState.Loaded
+            assertThat(next.routeBadge).isEqualTo("Belgrave")
+        }
+
+    @Test
     fun `multi-route destination badge reflects whichever line is actually next`() =
         runTest(dispatcher) {
             // The headline #137 affordance on the favourites screen: at Caulfield → City, the
-            // favourite row shows the badge of the route that's soonest.
+            // favourite row shows the badge of the route that's soonest. The badge text is the
+            // line name joined from the PTV `routes` sideload (issue #137 regression fix).
             favouritesRepository.seed(
                 listOf(
                     FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
@@ -312,7 +351,12 @@ class FavouritesViewModelTest {
                     .withScheduledDepartureUtc(clock.now() + 9.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 9.minutes)
                     .build()
-            departureRepository.enqueueSuccess(listOf(pak, cran))
+            val cranRoute = RouteMother.aRoute().withId(101).withName("Cranbourne").withRouteType(RouteType.Train).build()
+            val pakRoute = RouteMother.aRoute().withId(102).withName("Pakenham").withRouteType(RouteType.Train).build()
+            departureRepository.enqueueSuccessWithRoutes(
+                departures = listOf(pak, cran),
+                routes = listOf(cranRoute, pakRoute),
+            )
 
             val viewModel = newViewModel()
             advanceUntilIdle()
@@ -323,8 +367,8 @@ class FavouritesViewModelTest {
 
             val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
             val next = loaded.rows.single().nextDeparture as NextDepartureState.Loaded
-            // Cranbourne is sooner — its badge wins.
-            assertThat(next.routeBadge).isEqualTo("#101")
+            // Cranbourne is sooner — its line name wins.
+            assertThat(next.routeBadge).isEqualTo("Cranbourne")
         }
 
     @Test

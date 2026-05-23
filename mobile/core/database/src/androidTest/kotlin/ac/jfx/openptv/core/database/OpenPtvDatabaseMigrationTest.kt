@@ -99,12 +99,13 @@ class OpenPtvDatabaseMigrationTest {
         ).use { cursor ->
             val rows = mutableListOf<MigratedRow>()
             while (cursor.moveToNext()) {
-                rows += MigratedRow(
-                    stopId = cursor.getInt(0),
-                    destinationKey = cursor.getString(1),
-                    destinationName = cursor.getString(2),
-                    position = cursor.getInt(3),
-                )
+                rows +=
+                    MigratedRow(
+                        stopId = cursor.getInt(0),
+                        destinationKey = cursor.getString(1),
+                        destinationName = cursor.getString(2),
+                        position = cursor.getInt(3),
+                    )
             }
             assertThat(rows).containsExactly(
                 MigratedRow(CAULFIELD_STOP_ID, "city", "City", 0),
@@ -184,8 +185,19 @@ class OpenPtvDatabaseMigrationTest {
                 "routeName, directionName, lat, lng, position, addedAt) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             arrayOf<Any>(
-                stopId, routeType, routeId, directionId, stopName, stopSuburb, routeNumber,
-                routeName, directionName, lat, lng, position, addedAt,
+                stopId,
+                routeType,
+                routeId,
+                directionId,
+                stopName,
+                stopSuburb,
+                routeNumber,
+                routeName,
+                directionName,
+                lat,
+                lng,
+                position,
+                addedAt,
             ),
         )
     }

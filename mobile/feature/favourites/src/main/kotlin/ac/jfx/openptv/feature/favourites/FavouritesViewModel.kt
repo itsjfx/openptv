@@ -205,10 +205,12 @@ class FavouritesViewModel
                 )
             return when (result) {
                 is Result.Success -> {
-                    val dep = result.data
-                    if (dep == null) {
+                    val next = result.data
+                    if (next == null) {
                         NextDepartureState.Empty
                     } else {
+                        val dep = next.departure
+                        val route = next.route
                         NextDepartureState.Loaded(
                             relativeLabel =
                                 timeFormatter.format(
@@ -217,11 +219,14 @@ class FavouritesViewModel
                                 ),
                             scheduledUtc = dep.scheduledDepartureUtc,
                             estimatedUtc = dep.estimatedDepartureUtc,
+                            // Source the badge from the joined Route so the label is the line name
+                            // ("Belgrave") rather than `#<routeId>` — issue #137 regression. Falls
+                            // back to `#<routeId>` only when PTV omitted the route sideload row.
                             routeBadge =
                                 routeDisplayLabel(
                                     routeType = favourite.routeType,
-                                    routeNumber = "",
-                                    routeName = "",
+                                    routeNumber = route?.number.orEmpty(),
+                                    routeName = route?.name.orEmpty(),
                                     routeId = dep.routeId,
                                 ),
                             routeName = dep.direction.name,

@@ -459,7 +459,10 @@ class StopDetailViewModelTest {
     @Test
     fun `toggleFavourite a second time removes the favourite and flips isFavourite back to false`() =
         runTest(dispatcher) {
-            val route = RouteMother.aRoute().withId(FAVE_ROUTE_ID).withNumber("19").withName("North Coburg").withRouteType(RouteType.Tram).build()
+            val route =
+                RouteMother.aRoute()
+                    .withId(FAVE_ROUTE_ID).withNumber("19").withName("North Coburg")
+                    .withRouteType(RouteType.Tram).build()
             stopDetailRepository.enqueueSuccess(
                 StopDetailMother.aStopDetail().withServingRoutes(listOf(route)).build(),
             )
@@ -490,8 +493,14 @@ class StopDetailViewModelTest {
     @Test
     fun `toggleFavourite affects only the matching destination when two groups are visible`() =
         runTest(dispatcher) {
-            val routeA = RouteMother.aRoute().withId(FAVE_ROUTE_ID).withNumber("19").withName("North Coburg").withRouteType(RouteType.Tram).build()
-            val routeB = RouteMother.aRoute().withId(OTHER_ROUTE_ID).withNumber("96").withName("East Brunswick").withRouteType(RouteType.Tram).build()
+            val routeA =
+                RouteMother.aRoute()
+                    .withId(FAVE_ROUTE_ID).withNumber("19").withName("North Coburg")
+                    .withRouteType(RouteType.Tram).build()
+            val routeB =
+                RouteMother.aRoute()
+                    .withId(OTHER_ROUTE_ID).withNumber("96").withName("East Brunswick")
+                    .withRouteType(RouteType.Tram).build()
             stopDetailRepository.enqueueSuccess(
                 StopDetailMother.aStopDetail().withServingRoutes(listOf(routeA, routeB)).build(),
             )
