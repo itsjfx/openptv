@@ -343,7 +343,18 @@ class StopDetailViewModel
 
         private fun StopDetailUiState.applyDepartureResult(result: Result<List<Departure>>): StopDetailUiState =
             when (result) {
-                is Result.Loading -> copy(departures = DeparturesState.Loading)
+                // Issue #140: don't flip back to the `Loading` skeleton between head-poll ticks.
+                // `observeDepartures` emits `Result.Loading` at the top of every 30 s cycle, and
+                // letting that propagate to `DeparturesState.Loading` would collapse the entire
+                // LazyColumn down to a single skeleton item — wiping the scroll anchor every poll
+                // and snapping the user back to the top of the list. The pull-to-refresh spinner
+                // (`isRefreshing`) covers the "I'm fetching" affordance for explicit refreshes;
+                // background polls stay invisible until the next `Result.Success` lands.
+                is Result.Loading ->
+                    when (departures) {
+                        is DeparturesState.Loaded, DeparturesState.Empty -> this
+                        else -> copy(departures = DeparturesState.Loading)
+                    }
                 is Result.Success -> {
                     lastHeadPoll = result.data
                     val merged = mergeDepartures(headPoll = result.data)

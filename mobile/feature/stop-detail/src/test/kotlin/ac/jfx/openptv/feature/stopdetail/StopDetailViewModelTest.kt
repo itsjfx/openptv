@@ -271,18 +271,43 @@ class StopDetailViewModelTest {
         }
 
     @Test
-    fun `loading emission flips departures back to Loading`() =
+    fun `loading emission keeps the previous Loaded state visible (issue 140)`() =
         runTest(dispatcher) {
+            // Regression for #140: the `observeDepartures` Flow emits `Result.Loading` at the top of
+            // every 30 s poll cycle. Letting that propagate to `DeparturesState.Loading` would
+            // collapse the LazyColumn down to a single skeleton item and wipe the scroll anchor —
+            // the user gets snapped to the top of the list every poll. The ViewModel now ignores
+            // mid-poll Loading emissions once we already have data to show; pull-to-refresh keeps
+            // its own `isRefreshing` affordance for explicit refresh feedback.
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel = newViewModel()
             advanceUntilIdle()
             viewModel.startObserving()
             advanceUntilIdle()
 
-            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().build()))
+            val departures = listOf(DepartureMother.aDeparture().build())
+            departureRepository.emitSuccess(departures)
             advanceUntilIdle()
-            assertThat(viewModel.uiState.value.departures)
-                .isInstanceOf(DeparturesState.Loaded::class.java)
+            val loadedBefore = viewModel.uiState.value.departures
+            assertThat(loadedBefore).isInstanceOf(DeparturesState.Loaded::class.java)
+
+            departureRepository.emit(Result.Loading)
+            advanceUntilIdle()
+            // Loaded state survives the next poll's Loading flash — same instance, no transition.
+            assertThat(viewModel.uiState.value.departures).isEqualTo(loadedBefore)
+        }
+
+    @Test
+    fun `initial loading emission still shows the skeleton when no data has landed yet`() =
+        runTest(dispatcher) {
+            // The Loading-suppression guard added for #140 only kicks in once we have something to
+            // show. Before the first head poll lands, `DeparturesState.Loading` is still the right
+            // state — the screen renders the skeleton until real data arrives.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
 
             departureRepository.emit(Result.Loading)
             advanceUntilIdle()
