@@ -361,6 +361,54 @@ class NearbyViewModel
             }
         }
 
+        /**
+         * One-shot "focus the map on this coordinate" entry point (issue #123). The stop-detail
+         * screen's "show on map" affordance calls this with the stop's `(lat, lon)` so the user
+         * jumps back to the Nearby surface already framed on the stop they were looking at.
+         *
+         * Re-centres at [FOCUS_ZOOM] — slightly tighter than the default initial zoom so the user
+         * lands on the unclustered "individual stops" view with the focused stop visible. Disengages
+         * follow-me: the user has expressed they want to look at a specific spot, not chase their
+         * own location.
+         *
+         * Schedules a fresh pin fetch immediately (rather than waiting for a camera-idle round-trip
+         * from the map view) so the focused viewport's stops are visible without a manual pan. The
+         * call is debounced through [scheduleFetch] for free — the existing 500 ms window is short
+         * enough that the user doesn't notice but cheap insurance against rapid re-entries.
+         *
+         * The screen calls this once per entry via a `LaunchedEffect` keyed on the focus pair, so
+         * a configuration change (rotation, dark-mode flip) doesn't re-fire the focus and reset
+         * the camera if the user has since panned away.
+         *
+         * No-op when the state is still [NearbyUiState.PermissionUnasked] — the permission overlay
+         * is still up and the camera doesn't yet have a meaningful frame to honour. The screen
+         * passes the same focus pair through to the next composition once `Loaded` lands; we
+         * don't drop the request silently in that race because issue #123 is the explicit user
+         * intent to jump to the map.
+         */
+        fun focusOn(coordinates: Coordinates) {
+            val camera = OpenPtvCameraState(centre = coordinates, zoom = FOCUS_ZOOM)
+            val filter = currentFilter()
+            when (val current = _uiState.value) {
+                is NearbyUiState.Loaded ->
+                    _uiState.value =
+                        current.copy(
+                            camera = camera,
+                            isFollowingUser = false,
+                        )
+                is NearbyUiState.PermissionDenied ->
+                    _uiState.value = current.copy(camera = camera)
+                NearbyUiState.PermissionUnasked -> {
+                    // Permission overlay is still up — the user can't see the map yet. Skip the
+                    // camera update so we don't allocate a phantom Loaded/Denied variant; the
+                    // screen's LaunchedEffect will re-fire focusOn once permission resolves and
+                    // the state transitions out of Unasked.
+                    return
+                }
+            }
+            scheduleFetch(camera, filter)
+        }
+
         /** Re-centre the camera on the user's last known fix. */
         fun onFollowMeClicked() {
             val current = _uiState.value as? NearbyUiState.Loaded ?: return
@@ -542,6 +590,13 @@ class NearbyViewModel
 
             /** Follow-me FAB re-centres at a tighter zoom (~street level). */
             internal const val FOLLOW_ME_ZOOM: Double = 15.0
+
+            /**
+             * Zoom for the issue #123 "show stop on map" entry. One step tighter than the initial
+             * zoom — the user has named a specific stop, so we frame closer to it than the broad
+             * "where am I?" entry zoom.
+             */
+            internal const val FOCUS_ZOOM: Double = 16.0
 
             /** Camera-idle debounce, per the issue's acceptance criterion. */
             internal const val CAMERA_IDLE_DEBOUNCE_MS: Long = 500L

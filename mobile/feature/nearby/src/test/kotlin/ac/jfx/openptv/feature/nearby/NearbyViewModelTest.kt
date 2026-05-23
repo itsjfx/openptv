@@ -1150,6 +1150,91 @@ class NearbyViewModelTest {
             assertThat(persisted).isEqualTo(DEFAULT_FILTER - RouteType.Bus)
         }
 
+    // -------------------- focus camera (issue #123) --------------------
+    //
+    // `focusOn(coordinates)` is the one-shot entry the stop-detail "show on map" action calls
+    // via the `AppNavKey.Nearby(focusLat, focusLon)` route. It re-centres the camera at
+    // [FOCUS_ZOOM], disengages follow-me, and schedules a fresh fetch for the new viewport.
+    // The screen calls it once per entry via a `LaunchedEffect` keyed on the focus pair, so the
+    // ViewModel itself doesn't need to guard against multiple calls — each call honours the
+    // most recent coordinate.
+
+    @Test
+    fun `focusOn re-centres camera on the coordinate at street zoom and disengages follow-me`() =
+        runTest(dispatcher) {
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            // Follow-me starts on when a fix is present at grant.
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).isFollowingUser).isTrue()
+
+            val richmond = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmond)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(richmond)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+            // Follow-me is disengaged — the user has named a specific stop, not asked to track
+            // themselves; the dot still renders but the camera no longer chases new fixes.
+            assertThat(loaded.isFollowingUser).isFalse()
+        }
+
+    @Test
+    fun `focusOn schedules a fetch for the focused viewport`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            val richmond = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmond)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // One fresh fetch fired, for the focused coordinate — the user lands with pins
+            // already on screen without needing to manually pan to trigger a refresh.
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
+            assertThat(nearbyRepo.requestedCalls.last().coordinates).isEqualTo(richmond)
+        }
+
+    @Test
+    fun `focusOn from PermissionDenied still re-centres the camera`() =
+        runTest(dispatcher) {
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = false)
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value).isInstanceOf(NearbyUiState.PermissionDenied::class.java)
+
+            val richmond = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmond)
+            advanceUntilIdle()
+
+            val denied = viewModel.uiState.value as NearbyUiState.PermissionDenied
+            assertThat(denied.camera.centre).isEqualTo(richmond)
+            assertThat(denied.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+        }
+
+    @Test
+    fun `focusOn in PermissionUnasked is a no-op — overlay still up`() =
+        runTest(dispatcher) {
+            val viewModel = newViewModel()
+            // Don't call onPermissionResult — stays in PermissionUnasked.
+
+            val richmond = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmond)
+            advanceUntilIdle()
+
+            // Unchanged — the screen's LaunchedEffect will re-fire once permission resolves
+            // and the state transitions out of Unasked.
+            assertThat(viewModel.uiState.value).isEqualTo(NearbyUiState.PermissionUnasked)
+        }
+
     @Test
     fun `simulated app restart — fresh VM picks up the previous toggle`() =
         runTest(dispatcher) {

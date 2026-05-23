@@ -33,12 +33,24 @@ sealed interface AppNavKey : NavKey {
 
     /**
      * Nearby map screen (issue #37). MapLibre + OpenFreeMap tiles, user-location dot, clustered
-     * stop pins. The destination itself takes no args — the user's last camera position is held in
-     * the ViewModel's StateFlow across tab switches (no DataStore for v1; a "remember last view"
-     * cross-launch is a follow-up).
+     * stop pins.
+     *
+     * `focusLat` / `focusLon` are optional one-shot camera-focus hints (issue #123). When both are
+     * non-null the screen centres the map on the coordinate at a street-level zoom the first time
+     * the destination composes after the key changes — the "show this stop on the map" affordance
+     * on stop-detail uses this to jump the user back to the map already framed on the stop they
+     * were looking at. Default null preserves the "open Nearby on whatever camera the VM already
+     * holds" behaviour for every existing call site (the bottom-nav tab, deep-linkless re-entry).
+     *
+     * Carrying the focus as primitive doubles keeps the key trivially `Bundle`-able across process
+     * death — same trade as [StopDetail]. The Nearby ViewModel converts these into the domain
+     * [`ac.jfx.openptv.core.model.Coordinates`] at the boundary.
      */
     @Serializable
-    data object Nearby : AppNavKey
+    data class Nearby(
+        val focusLat: Double? = null,
+        val focusLon: Double? = null,
+    ) : AppNavKey
 
     /**
      * Stop detail destination. Carries the `stopId` and `routeType` raw int values rather than the
