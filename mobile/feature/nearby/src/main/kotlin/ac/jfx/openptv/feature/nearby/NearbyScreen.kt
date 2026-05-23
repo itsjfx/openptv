@@ -28,7 +28,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -209,6 +211,20 @@ internal fun NearbyScreen(
                 ),
         )
 
+    // Hoisted list state for the nearby-stops list so we can drive auto-scroll-to-top from the
+    // sheet state (#130). While the sheet is collapsed/partial the user only sees the top row —
+    // when the underlying list shuffles (we got closer to a different stop) we scroll back to row
+    // 0 so the peek surface always shows the *current* closest stop. When the user has expanded
+    // the sheet we leave their scroll alone (they're browsing further-away stops).
+    val nearbyListState = rememberLazyListState()
+    val topStopKey = nearbyRows.firstOrNull()?.let { "${it.stop.id.value}-${it.stop.routeType.name}" }
+    val sheetValue = scaffoldState.bottomSheetState.currentValue
+    LaunchedEffect(topStopKey, sheetValue) {
+        if (topStopKey != null && shouldScrollToTop(sheetValue)) {
+            nearbyListState.scrollToItem(0)
+        }
+    }
+
     Scaffold(
         topBar = {
             // Small TopAppBar — gear lives in the compact icon row under the status bar, hero
@@ -238,6 +254,7 @@ internal fun NearbyScreen(
                         rows = nearbyRows,
                         distanceFormatter = distanceFormatter,
                         onRowClicked = onPinClicked,
+                        listState = nearbyListState,
                         modifier =
                             Modifier
                                 .fillMaxWidth()
@@ -482,6 +499,7 @@ private fun NearbyStopsList(
     rows: List<NearbyListRow>,
     distanceFormatter: DistanceFormatter,
     onRowClicked: (Stop) -> Unit,
+    listState: LazyListState,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier) {
@@ -521,6 +539,7 @@ private fun NearbyStopsList(
             )
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxWidth().testTag(TestTagNearbyListItems),
             ) {
                 items(items = rows, key = { "${it.stop.id.value}-${it.stop.routeType.name}" }) { row ->
@@ -826,6 +845,25 @@ internal enum class FollowMeFabAction {
     val isPermissionAction: Boolean
         get() = this != Recentre
 }
+
+/**
+ * Whether the nearby-stops list should auto-scroll to row 0 when the underlying rows change
+ * (issue #130). The bottom sheet's collapsed/partial state only exposes the top row in the peek
+ * surface — when the user moves and a different stop becomes closest, the list reorders and the
+ * peek would otherwise show a now-non-top row stuck where the LazyColumn was last scrolled to. We
+ * snap back to 0 in those states.
+ *
+ * When the sheet is fully expanded the user is browsing further-away stops, so we leave the
+ * scroll position alone (re-snapping would yank them away from whatever they were looking at).
+ *
+ * Pure helper so the decision is testable without booting Compose.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+internal fun shouldScrollToTop(sheetValue: SheetValue): Boolean =
+    when (sheetValue) {
+        SheetValue.Expanded -> false
+        SheetValue.PartiallyExpanded, SheetValue.Hidden -> true
+    }
 
 internal fun NearbyUiState.followMeFabAction(): FollowMeFabAction =
     when (this) {
