@@ -26,6 +26,10 @@
         <item quantity="one">Show %d more</item>
         <item quantity="other">Show %d more</item>
     </plurals>
+    <!-- Explicit "Load more" button at the tail of the departures list (issue #126). Replaces
+         the earlier auto-load-on-scroll. Tapping fetches the next page; the button hides itself
+         once a short or empty page comes back. -->
+    <string name="feature_stop_detail_load_more">Load more</string>
     <string name="feature_stop_detail_disruption">Disruption affects this route</string>
     <string name="feature_stop_detail_disruption_snackbar">Disruption details land in Phase 10.</string>
     <string name="feature_stop_detail_serving_routes">Routes serving this stop</string>

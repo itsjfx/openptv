@@ -44,11 +44,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -63,7 +61,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -130,7 +127,7 @@ fun StopDetailRoute(
         onDepartureClicked = onDepartureClicked,
         onToggleExpand = viewModel::toggleExpand,
         onToggleFavourite = viewModel::toggleFavourite,
-        onReachedEnd = viewModel::loadMore,
+        onLoadMore = viewModel::loadMore,
         onShowOnMap = onShowOnMap,
         timeFormatter = viewModel.timeFormatter,
     )
@@ -146,7 +143,7 @@ internal fun StopDetailScreenContent(
     onDepartureClicked: (Departure) -> Unit,
     onToggleExpand: (GroupKey) -> Unit,
     onToggleFavourite: (RouteId, Direction) -> Unit,
-    onReachedEnd: () -> Unit,
+    onLoadMore: () -> Unit,
     onShowOnMap: (latitude: Double, longitude: Double) -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
@@ -155,28 +152,10 @@ internal fun StopDetailScreenContent(
     val disruptionMessage = stringResource(R.string.feature_stop_detail_disruption_snackbar)
     val listState = rememberLazyListState()
 
-    // Pagination trigger — observe the last visible row index and fire `onReachedEnd` when it
-    // gets within END_TRIGGER_BUFFER of the tail. `derivedStateOf` keeps the snapshot subscription
-    // cheap (only fires when the predicate flips). `collectLatest` keeps the trigger from
-    // re-firing in a tight loop while the ViewModel is fulfilling the request.
-    val totalItems by remember { derivedStateOf { listState.layoutInfo.totalItemsCount } }
-    val lastVisibleIndex by remember {
-        derivedStateOf {
-            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        }
-    }
-    LaunchedEffect(onReachedEnd) {
-        snapshotFlow {
-            // Only trigger when the list actually has items and the user is near the end. Skip
-            // the very-small-list case where `totalItems < END_TRIGGER_BUFFER` would always be
-            // true and we'd page-storm at the bottom of a five-row list.
-            val total = totalItems
-            val last = lastVisibleIndex
-            total > END_TRIGGER_BUFFER && last >= total - END_TRIGGER_BUFFER
-        }.collectLatest { atEnd ->
-            if (atEnd) onReachedEnd()
-        }
-    }
+    // Issue #126: no more endless-scroll auto-trigger. The "Load more" button at the tail of the
+    // list is the only thing that fires `onLoadMore` now, and only when the ViewModel says
+    // `canLoadMore` (i.e. the last paginated fetch came back full).
+
     // Compute "today" once outside LazyListScope. The asOf timestamp anchors the calendar so the
     // banner stays correct when tests inject a fixed clock; in production it tracks wall-clock
     // via the head poll's `clock.now()` write.
@@ -265,6 +244,7 @@ internal fun StopDetailScreenContent(
                     onToggleFavourite = onToggleFavourite,
                     onDepartureClicked = onDepartureClicked,
                     onRefresh = onRefresh,
+                    onLoadMore = onLoadMore,
                     onDisruptionClicked = {
                         scope.launch { snackbarHostState.showSnackbar(disruptionMessage) }
                     },
@@ -289,6 +269,7 @@ private fun LazyListScope.departuresSection(
     onToggleFavourite: (RouteId, Direction) -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onRefresh: () -> Unit,
+    onLoadMore: () -> Unit,
     onDisruptionClicked: () -> Unit,
 ) {
     when (state) {
@@ -323,9 +304,16 @@ private fun LazyListScope.departuresSection(
                     onDisruptionClicked = onDisruptionClicked,
                 )
             }
-            if (state.isLoadingMore) {
-                item(key = "load-more-spinner") {
-                    LoadMoreSpinner()
+            // Issue #126: explicit, repeatable "Load more" button at the tail. Renders only when
+            // the ViewModel believes more data may exist (i.e. the most recent page came back
+            // full). While a page is in flight the button stays in place but shows a spinner and
+            // is disabled, so the user gets feedback without the button vanishing under their tap.
+            if (state.canLoadMore) {
+                item(key = "load-more-button") {
+                    LoadMoreButton(
+                        loading = state.isLoadingMore,
+                        onClick = onLoadMore,
+                    )
                 }
             }
         }
@@ -648,17 +636,42 @@ private fun LocalDate.formatHeader(): String {
     return "$day $dayOfMonth $month"
 }
 
+/**
+ * Explicit "Load more" affordance at the tail of the departures list (issue #126). Replaces the
+ * previous auto-load-on-scroll behaviour. The button is disabled and shows a spinner while a
+ * page is in flight, so the user gets immediate feedback on tap without the button vanishing.
+ * `OutlinedButton` keeps the affordance distinct from the primary actions in the top bar — it's
+ * a list-tail control, not the main CTA.
+ */
 @Composable
-private fun LoadMoreSpinner() {
+private fun LoadMoreButton(
+    loading: Boolean,
+    onClick: () -> Unit,
+) {
     Row(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
-                .testTag(TestTagLoadMoreSpinner),
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .testTag(TestTagLoadMoreButton),
         horizontalArrangement = Arrangement.Center,
     ) {
-        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+        androidx.compose.material3.OutlinedButton(
+            onClick = onClick,
+            enabled = !loading,
+        ) {
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier =
+                        Modifier
+                            .size(18.dp)
+                            .testTag(TestTagLoadMoreSpinner),
+                    strokeWidth = 2.dp,
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Text(stringResource(R.string.feature_stop_detail_load_more))
+        }
     }
 }
 
@@ -899,14 +912,6 @@ private fun RouteType.label(): String =
 private const val MAX_INLINE_ROUTE_CHIPS = 6
 private const val SKELETON_ROWS = 5
 
-/**
- * How many items from the tail of the list count as "the user is near the end" and should
- * trigger the next page fetch. Tuned so the page lands before the user actually runs out of
- * rows, but not so eager that we page on every screen scroll. Mirrors the same heuristic
- * Paging 3 ships with by default.
- */
-private const val END_TRIGGER_BUFFER = 3
-
 internal const val TestTagRoot: String = "stop-detail-root"
 internal const val TestTagRouteChips: String = "stop-detail-route-chips"
 internal const val TestTagGroupHeader: String = "stop-detail-group-header"
@@ -923,5 +928,6 @@ internal const val TestTagDeparturesRetry: String = "stop-detail-departures-retr
 internal const val TestTagShowMore: String = "stop-detail-show-more"
 internal const val TestTagDateDivider: String = "stop-detail-date-divider"
 internal const val TestTagLoadMoreSpinner: String = "stop-detail-load-more-spinner"
+internal const val TestTagLoadMoreButton: String = "stop-detail-load-more-button"
 internal const val TestTagPinIndicator: String = "stop-detail-pin-indicator"
 internal const val TestTagShowOnMap: String = "stop-detail-show-on-map"
