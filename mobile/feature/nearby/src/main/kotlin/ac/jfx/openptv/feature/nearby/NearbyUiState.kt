@@ -8,7 +8,7 @@ import ac.jfx.openptv.core.model.Stop
 
 /**
  * Screen state for the nearby map. Sealed so the screen branches on the variant — permission
- * gating shows a rationale dialog / denied banner, "loaded" shows the map.
+ * gating tints the follow-me FAB red (#125) plus shows a denied banner, "loaded" shows the map.
  *
  * The map screen always renders some map — even pre-grant we centre on Melbourne CBD so the user
  * sees Victoria from frame one. The variants describe the **permission overlay** and the
@@ -31,7 +31,7 @@ sealed interface NearbyUiState {
      */
     val routeTypeFilter: Set<RouteType>
 
-    /** First entry, permission not yet asked. Shows rationale dialog over the CBD-centred map. */
+    /** First entry, permission not yet asked. Tapping the red follow-me FAB launches the system prompt (#125). */
     data object PermissionUnasked : NearbyUiState {
         override val routeTypeFilter: Set<RouteType> = DEFAULT_FILTER
     }
