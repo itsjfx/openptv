@@ -89,12 +89,10 @@ fun StopDetailRoute(
     focusDirectionId: Int? = null,
     onDepartureClicked: (Departure) -> Unit = {},
     // Issue #123: jump back to the Nearby map screen centred on this stop. The lambda receives
-    // the stop's `(lat, lon, stopId, routeTypeCode)` from the resolved header — `:app` packs them
-    // into the `AppNavKey.Nearby` destination args so Nearby both centres the camera and
-    // auto-opens the bottom-sheet preview for the stop (#139 review). Default no-op so the
-    // existing `:feature:*` tests that don't drive the action don't have to know it exists.
-    onShowOnMap: (latitude: Double, longitude: Double, stopId: Int, routeTypeCode: Int) -> Unit =
-        { _, _, _, _ -> },
+    // the stop's `(lat, lon)` from the resolved header — the screen passes them through verbatim
+    // to whatever caller is wired up in `:app`. Default no-op so the existing `:feature:*` tests
+    // that don't drive the action don't have to know it exists.
+    onShowOnMap: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
     viewModel: StopDetailViewModel =
         hiltViewModel<StopDetailViewModel, StopDetailViewModel.Factory>(
             // The focus args are part of the ViewModel store key so tapping the same favourite
@@ -149,7 +147,7 @@ internal fun StopDetailScreenContent(
     onToggleExpand: (GroupKey) -> Unit,
     onToggleFavourite: (RouteId, Direction) -> Unit,
     onReachedEnd: () -> Unit,
-    onShowOnMap: (latitude: Double, longitude: Double, stopId: Int, routeTypeCode: Int) -> Unit,
+    onShowOnMap: (latitude: Double, longitude: Double) -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -216,14 +214,7 @@ internal fun StopDetailScreenContent(
                         val stop = loadedHeader.detail.stop
                         val description = stringResource(R.string.feature_stop_detail_show_on_map)
                         IconButton(
-                            onClick = {
-                                onShowOnMap(
-                                    stop.latitude,
-                                    stop.longitude,
-                                    stop.id.value,
-                                    stop.routeType.toCode(),
-                                )
-                            },
+                            onClick = { onShowOnMap(stop.latitude, stop.longitude) },
                             modifier =
                                 Modifier
                                     .testTag(TestTagShowOnMap)

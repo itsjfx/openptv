@@ -116,8 +116,6 @@ private fun MainNav() {
                     NearbyRoute(
                         focusLat = key.focusLat,
                         focusLon = key.focusLon,
-                        focusStopId = key.focusStopId,
-                        focusStopRouteTypeCode = key.focusStopRouteTypeCode,
                         onOpenStopDetail = { stopId, routeTypeCode ->
                             backStack.add(
                                 AppNavKey.StopDetail(
@@ -139,16 +137,12 @@ private fun MainNav() {
                         // destination with the stop's lat/lon as a one-shot camera focus hint.
                         // The Nearby ViewModel re-centres the map at street zoom and the focus
                         // args are consumed once via a `LaunchedEffect` keyed on the pair, so
-                        // configuration changes don't re-focus the camera. #139 review: the
-                        // stop's id + route-type travel along so Nearby also auto-opens the
-                        // bottom-sheet preview as if the user had tapped the pin themselves.
-                        onShowOnMap = { lat, lon, stopId, routeTypeCode ->
+                        // configuration changes don't re-focus the camera.
+                        onShowOnMap = { lat, lon ->
                             backStack.add(
                                 AppNavKey.Nearby(
                                     focusLat = lat,
                                     focusLon = lon,
-                                    focusStopId = stopId,
-                                    focusStopRouteTypeCode = routeTypeCode,
                                 ),
                             )
                         },

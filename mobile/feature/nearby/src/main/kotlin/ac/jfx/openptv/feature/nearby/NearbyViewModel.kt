@@ -139,24 +139,6 @@ class NearbyViewModel
         private var pendingFocus: Coordinates? = null
 
         /**
-         * One-shot pin-select request (#139 review) that travels with [pendingFocus] when the user
-         * navigates in from stop-detail's "show on map" with a `(stopId, routeType)` pair. The
-         * fetch scheduled by [focusOn] / [onPermissionResult] won't have landed yet by the time
-         * we apply the camera, so the stop's full [Stop] projection (name, suburb, lat/lon) isn't
-         * available — we hold the lookup key here and consume it inside [scheduleFetch] as soon as
-         * a fetch result lands carrying the matching stop. That's the same shape `onPinClicked`
-         * gets, so the bottom-sheet preview matches the pin-tap path exactly.
-         *
-         * Cleared as soon as we open the sheet (or once we've tried and missed — see [scheduleFetch]).
-         */
-        private var pendingSelect: PendingSelect? = null
-
-        private data class PendingSelect(
-            val stopId: StopId,
-            val routeType: RouteType,
-        )
-
-        /**
          * LRU cache of every stop the user has fetched this session. Solves the disappear/reappear
          * problem: panning into a region we've fetched before keeps those pins on-screen
          * immediately, instead of dropping them until the next fetch lands.
@@ -444,32 +426,10 @@ class NearbyViewModel
          * the coordinate in [pendingFocus] and let [onPermissionResult] consume it when the
          * permission flow finishes — that produces the very first Loaded camera at the requested
          * stop, no second hop required.
-         *
-         * **Auto-select the stop preview (#139 review).** When the caller also passes [selectStopId]
-         * + [selectRouteType], the same one-shot wave that centres the camera also opens the
-         * bottom-sheet preview for that stop — same UX a pin tap produces. The select needs the
-         * full [Stop] projection (name, suburb, lat/lon) which isn't available until the fetch
-         * lands, so we hold the lookup key in [pendingSelect] and let [scheduleFetch] consume it
-         * when a matching stop appears in the result. If the stop never lands (e.g. the user
-         * toggles the filter mid-flight, or the fetch failed), the request silently drops — the
-         * user can still tap the pin manually.
          */
-        fun focusOn(
-            coordinates: Coordinates,
-            selectStopId: StopId? = null,
-            selectRouteType: RouteType? = null,
-        ) {
+        fun focusOn(coordinates: Coordinates) {
             val camera = OpenPtvCameraState(centre = coordinates, zoom = FOCUS_ZOOM)
             val filter = currentFilter()
-            // Stash the select request first so the very next [scheduleFetch] callback can consume
-            // it once the fetch lands. Stored regardless of the current state — even in
-            // PermissionUnasked the buffered fetch will eventually fire and find it.
-            pendingSelect =
-                if (selectStopId != null && selectRouteType != null) {
-                    PendingSelect(stopId = selectStopId, routeType = selectRouteType)
-                } else {
-                    null
-                }
             when (val current = _uiState.value) {
                 is NearbyUiState.Loaded ->
                     _uiState.value =
@@ -553,25 +513,6 @@ class NearbyViewModel
                         is NearbyUiState.PermissionDenied ->
                             _uiState.value = current.copy(pins = pins)
                         NearbyUiState.PermissionUnasked -> Unit
-                    }
-                    // Auto-select the requested stop (#139 review). If the user navigated in from
-                    // stop-detail's "show on map" with a `(stopId, routeType)` pair, fan the
-                    // freshly-landed stops for the match and open the bottom-sheet preview as if
-                    // the user had tapped the pin themselves. The lookup runs on `pins` (the
-                    // merged cache snapshot, not just `fresh`) so a re-entry that hits the cache
-                    // before the network call lands still resolves. Bottom-sheet only exists on
-                    // Loaded — PermissionDenied silently skips the select; the user can still
-                    // tap the pin manually once it renders.
-                    val select = pendingSelect
-                    if (select != null && _uiState.value is NearbyUiState.Loaded) {
-                        val match =
-                            pins.firstOrNull {
-                                it.id == select.stopId && it.routeType == select.routeType
-                            }
-                        if (match != null) {
-                            pendingSelect = null
-                            onPinClicked(match)
-                        }
                     }
                 }
         }
