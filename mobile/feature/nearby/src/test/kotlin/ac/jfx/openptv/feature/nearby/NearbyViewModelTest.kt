@@ -1150,6 +1150,77 @@ class NearbyViewModelTest {
             assertThat(persisted).isEqualTo(DEFAULT_FILTER - RouteType.Bus)
         }
 
+    // -------------------- viewport radius vs zoom (issue #124) --------------------
+    //
+    // The fetch radius grows as the user zooms out so the visible viewport stays covered. Bug
+    // #124 was that the radius capped at 5 km — past zoom ~11 the fetch covered a tiny disc in
+    // the centre of a much-wider viewport and pins outside that disc visibly disappeared. The
+    // cap is now [MAX_RADIUS_METERS] (50 km), enough to span a metro-wide viewport at zoom ~10.
+
+    @Test
+    fun `zoom 10 fetch radius covers a metro-wide viewport`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Zoom 10 ≈ city-wide. The fetch radius must be well past the old 5 km cap so the
+            // pins outside the centre don't disappear.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 10.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
+            val call = nearbyRepo.requestedCalls.last()
+            // 2^(15-10) * 500 = 16 km, well past the old 5 km cap.
+            assertThat(call.radiusMeters).isGreaterThan(5_000)
+        }
+
+    @Test
+    fun `very-low-zoom fetch radius is clamped to MAX_RADIUS_METERS not the old 5 km`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // Zoom 5 ≈ the whole state. The cap kicks in here — we never widen further so a pan
+            // over regional Victoria doesn't ask PTV for an unreasonable bbox. MapLibre's native
+            // clustering groups the response into halos so the dense set still renders cleanly.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 5.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
+            assertThat(nearbyRepo.requestedCalls.last().radiusMeters)
+                .isEqualTo(NearbyViewModel.MAX_RADIUS_METERS)
+        }
+
+    @Test
+    fun `zoom 15 fetch radius is the base — street level stays tightly scoped`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            // At INITIAL_ZOOM (15) the viewport is ~500 m across — the fetch radius matches.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 15.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
+            assertThat(nearbyRepo.requestedCalls.last().radiusMeters)
+                .isEqualTo(NearbyViewModel.RADIUS_BASE_METERS)
+        }
+
     @Test
     fun `simulated app restart — fresh VM picks up the previous toggle`() =
         runTest(dispatcher) {

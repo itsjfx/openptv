@@ -519,6 +519,13 @@ class NearbyViewModel
          * Picks a fetch radius from the current zoom. The mapping is a coarse power-of-two: each
          * zoom step out doubles the radius, up to a per-request ceiling so a low-zoom pan over
          * regional Victoria doesn't ask PTV for an unreasonable bbox.
+         *
+         * **Issue #124.** The previous 5 km cap meant any zoom out past ~11 fetched a tiny disc in
+         * the centre of a much-wider viewport — pins outside that disc visibly disappeared. The
+         * cap is now [MAX_RADIUS_METERS] (sized to span the visible viewport at city-wide zoom);
+         * MapLibre's native clustering on the GeoJSON source (`withCluster(true)`) groups the
+         * denser response into halos so the rendered map stays legible. We still cap so a zoomed-
+         * way-out fetch over regional Victoria doesn't ask PTV for the entire state in one go.
          */
         private fun radiusForZoom(zoom: Double): Int {
             val zoomDelta = (MAX_ZOOM - zoom).coerceAtLeast(0.0)
@@ -549,8 +556,19 @@ class NearbyViewModel
             /** Base radius at MAX_ZOOM — the visible viewport diameter at street level is ~500 m. */
             internal const val RADIUS_BASE_METERS: Int = 500
 
-            /** Cap per-fetch radius. PTV rejects unreasonable bboxes; we never exceed this. */
-            internal const val MAX_RADIUS_METERS: Int = 5_000
+            /**
+             * Cap per-fetch radius. PTV's `max_distance` accepts arbitrary metres but a huge value
+             * costs latency + bytes for stops the user can't usefully tap. 50 km roughly covers a
+             * zoom-10 viewport over central Melbourne (the metro area + the inner suburbs) — past
+             * that point we're showing the whole metro region clustered, so we don't need to keep
+             * widening. MapLibre's native clustering ([MapLibreOpenPtvMap]) groups the fetched
+             * pins into halos at low zoom so the dense response still renders cleanly.
+             *
+             * **Issue #124.** Previous cap of 5 km meant zoom levels < 11 fetched a tiny disc in
+             * the centre of a viewport that covered an order of magnitude more area — pins outside
+             * that disc visibly disappeared.
+             */
+            internal const val MAX_RADIUS_METERS: Int = 50_000
 
             /** Zoom at which RADIUS_BASE_METERS is the right radius. */
             internal const val MAX_ZOOM: Double = 15.0
