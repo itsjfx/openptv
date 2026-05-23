@@ -140,7 +140,7 @@ class OpenPtvDatabaseMigrationTest {
         migrated.query(
             "SELECT addedAt, position FROM favourite_destinations_at_stop " +
                 "WHERE stopId = ? AND destinationKey = ?",
-            arrayOf(CAULFIELD_STOP_ID, "city"),
+            arrayOf<Any>(CAULFIELD_STOP_ID, "city"),
         ).use { cursor ->
             assertThat(cursor.moveToFirst()).isTrue()
             assertThat(cursor.getLong(0)).isEqualTo(1_000L)
@@ -183,7 +183,7 @@ class OpenPtvDatabaseMigrationTest {
                 "(stopId, routeType, routeId, directionId, stopName, stopSuburb, routeNumber, " +
                 "routeName, directionName, lat, lng, position, addedAt) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            arrayOf(
+            arrayOf<Any>(
                 stopId, routeType, routeId, directionId, stopName, stopSuburb, routeNumber,
                 routeName, directionName, lat, lng, position, addedAt,
             ),
