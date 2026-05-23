@@ -18,6 +18,7 @@ import ac.jfx.openptv.core.testing.DepartureMother
 import ac.jfx.openptv.core.testing.FavouriteRouteAtStopMother
 import ac.jfx.openptv.core.testing.RouteMother
 import ac.jfx.openptv.core.testing.StopDetailMother
+import ac.jfx.openptv.core.testing.StopMother
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
@@ -747,6 +748,73 @@ class StopDetailViewModelTest {
         }
 
     @Test
+    fun `toggleFavourite persists every denormalised display field on the favourited row`() =
+        runTest(dispatcher) {
+            // Issue #129 regression guard. The favourites screen renders rows from cached
+            // display fields (`stopName`, `stopSuburb`, `routeNumber`, `routeName`,
+            // `directionName`, `lat`, `lng`) — if the toggle path ever drops one, the
+            // favourite row goes blank on the next screen, which is the bug the user reported.
+            // Pin every field at the boundary so a future refactor of `ToggleFavouriteUseCase`
+            // or `FavouritesRepository.add(...)` can't silently regress this.
+            val stop =
+                StopMother.aStop()
+                    .withId(DEFAULT_STOP_ID)
+                    .withName("Caulfield Railway Station")
+                    .withSuburb("Caulfield East")
+                    .withRouteType(RouteType.Train)
+                    .withLatitude(EXPECTED_LAT)
+                    .withLongitude(EXPECTED_LNG)
+                    .build()
+            val route =
+                RouteMother.aRoute()
+                    .withId(FAVE_ROUTE_ID)
+                    .withNumber("CRA")
+                    .withName("Cranbourne")
+                    .withRouteType(RouteType.Train)
+                    .build()
+            stopDetailRepository.enqueueSuccess(
+                StopDetailMother.aStopDetail()
+                    .withStop(stop)
+                    .withServingRoutes(listOf(route))
+                    .build(),
+            )
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+            departureRepository.emitSuccess(
+                listOf(
+                    DepartureMother.aDeparture()
+                        .withRouteId(FAVE_ROUTE_ID)
+                        .withDirectionId(FAVE_DIRECTION_ID)
+                        .withDirectionName("Cranbourne")
+                        .build(),
+                ),
+            )
+            advanceUntilIdle()
+
+            viewModel.toggleFavourite(
+                routeId = RouteId(FAVE_ROUTE_ID),
+                direction = Direction(id = DirectionId(FAVE_DIRECTION_ID), name = "Cranbourne"),
+            )
+            advanceUntilIdle()
+
+            assertThat(favouritesRepository.current).hasSize(1)
+            val saved = favouritesRepository.current.single()
+            assertThat(saved.stopId.value).isEqualTo(DEFAULT_STOP_ID)
+            assertThat(saved.routeId.value).isEqualTo(FAVE_ROUTE_ID)
+            assertThat(saved.directionId.value).isEqualTo(FAVE_DIRECTION_ID)
+            assertThat(saved.routeType).isEqualTo(RouteType.Train)
+            assertThat(saved.stopName).isEqualTo("Caulfield Railway Station")
+            assertThat(saved.stopSuburb).isEqualTo("Caulfield East")
+            assertThat(saved.routeNumber).isEqualTo("CRA")
+            assertThat(saved.routeName).isEqualTo("Cranbourne")
+            assertThat(saved.directionName).isEqualTo("Cranbourne")
+            assertThat(saved.lat).isEqualTo(EXPECTED_LAT)
+            assertThat(saved.lng).isEqualTo(EXPECTED_LNG)
+        }
+
+    @Test
     fun `toggleFavourite a second time removes the favourite and flips isFavourite back to false`() =
         runTest(dispatcher) {
             val route =
@@ -1418,5 +1486,10 @@ class StopDetailViewModelTest {
         const val MISSING_ROUTE_ID = 9999
         const val MISSING_DIRECTION_ID = 99
         const val OTHER_STOP_ID = 2222
+
+        // Issue #129 — pinned coords for the denormalised-field test so the assertion picks up
+        // a tweak to the use case that forgets to thread lat/lng through.
+        const val EXPECTED_LAT = -37.8770
+        const val EXPECTED_LNG = 145.0426
     }
 }
