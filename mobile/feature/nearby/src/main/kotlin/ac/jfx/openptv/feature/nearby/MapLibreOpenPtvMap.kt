@@ -12,8 +12,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -93,13 +95,20 @@ internal class MapLibreOpenPtvMap
             val pinsLatest by rememberUpdatedState(pins)
             val userLocationLatest by rememberUpdatedState(userLocation)
             val userBearingLatest by rememberUpdatedState(userBearing)
-
             val lifecycleOwner = LocalLifecycleOwner.current
 
             // Hold a single MapView across recompositions. Compose's `remember` keyed by no inputs
             // keeps the same instance as long as the composition is alive; the DisposableEffect
             // below calls `onDestroy` on dispose to clean up the EGL context.
             val mapViewRef = remember { MapViewRef() }
+
+            // Track when MapLibre's async style/map setup has finished. The `LaunchedEffect`s
+            // below that push state into MapView are gated on this — without it, an effect that
+            // fires before the map is ready (e.g. issue #123 focus consume during the permission
+            // round-trip) silently no-ops because `mapViewRef.map` is null. The flag flips inside
+            // the factory's `getMapAsync` callback and stays true for the rest of the
+            // composition's lifetime, so subsequent state changes always reach the map.
+            var mapReady by remember { mutableStateOf(false) }
 
             AndroidView(
                 modifier = modifier,
@@ -117,11 +126,13 @@ internal class MapLibreOpenPtvMap
                                 applyPins(map, pinsLatest)
                                 applyUserLocation(map, userLocationLatest, userBearingLatest)
                             }
-                            map.cameraPosition =
-                                CameraPosition.Builder()
-                                    .target(LatLng(camera.centre.lat, camera.centre.lng))
-                                    .zoom(camera.zoom)
-                                    .build()
+                            // Flip the ready flag so the camera/pins LaunchedEffects below
+                            // re-fire now that `mapViewRef.map` is non-null. The initial camera
+                            // is NOT set here — the `LaunchedEffect(camera, mapReady)` below is
+                            // the single source of truth so the latest camera always wins,
+                            // including across the async setup window when the VM may transition
+                            // (issue #123 focus consume during the permission round-trip).
+                            mapReady = true
                             map.addOnCameraIdleListener {
                                 val pos = map.cameraPosition
                                 val target = pos.target ?: return@addOnCameraIdleListener
@@ -207,25 +218,36 @@ internal class MapLibreOpenPtvMap
             // Push pin updates into the GeoJsonSource only when the pin set actually changes.
             // `setGeoJson` is the right way to swap features in place (MapLibre diffs and
             // re-renders only what moved); the bug was that we were calling it on every
-            // recomposition, including the bottom-sheet's animation frames.
-            LaunchedEffect(pins) {
-                mapViewRef.map?.let { map -> applyPins(map, pins) }
+            // recomposition, including the bottom-sheet's animation frames. Keyed on
+            // `mapReady` too so the very first pin set lands as soon as the async setup
+            // finishes, even if `pins` hasn't changed since the original composition.
+            LaunchedEffect(pins, mapReady) {
+                if (mapReady) mapViewRef.map?.let { map -> applyPins(map, pins) }
             }
 
-            // Likewise for the camera — animate only when the requested camera changes.
-            LaunchedEffect(camera) {
-                mapViewRef.map?.animateCamera(
-                    CameraUpdateFactory.newCameraPosition(
-                        CameraPosition.Builder()
-                            .target(LatLng(camera.centre.lat, camera.centre.lng))
-                            .zoom(camera.zoom)
-                            .build(),
-                    ),
-                )
+            // Likewise for the camera — animate only when the requested camera changes. Also
+            // keyed on `mapReady` so a camera that arrived during MapLibre's async setup
+            // (issue #123 focus consume during the permission round-trip) gets applied the
+            // moment the map is ready, instead of being silently dropped because
+            // `mapViewRef.map` was still null. Without this, the map would render with no
+            // camera at all (MapLibre defaults to centre 0,0 zoom 0 — visibly broken) until
+            // the VM emitted a different camera, by which time MapLibre's own initial
+            // `onCameraIdle` had usually pushed a phantom centre into the VM state already.
+            LaunchedEffect(camera, mapReady) {
+                if (mapReady) {
+                    mapViewRef.map?.animateCamera(
+                        CameraUpdateFactory.newCameraPosition(
+                            CameraPosition.Builder()
+                                .target(LatLng(camera.centre.lat, camera.centre.lng))
+                                .zoom(camera.zoom)
+                                .build(),
+                        ),
+                    )
+                }
             }
 
-            LaunchedEffect(userLocation, userBearing) {
-                mapViewRef.map?.let { map -> applyUserLocation(map, userLocation, userBearing) }
+            LaunchedEffect(userLocation, userBearing, mapReady) {
+                if (mapReady) mapViewRef.map?.let { map -> applyUserLocation(map, userLocation, userBearing) }
             }
 
             // Forward Compose's lifecycle into MapView's mirror lifecycle. Without this the GL
