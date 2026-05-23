@@ -112,8 +112,10 @@ private fun MainNav() {
                         onOpenSettings = { backStack.add(AppNavKey.Settings) },
                     )
                 }
-                entry<AppNavKey.Nearby> {
+                entry<AppNavKey.Nearby> { key ->
                     NearbyRoute(
+                        focusLat = key.focusLat,
+                        focusLon = key.focusLon,
                         onOpenStopDetail = { stopId, routeTypeCode ->
                             backStack.add(
                                 AppNavKey.StopDetail(
@@ -131,6 +133,19 @@ private fun MainNav() {
                         routeType = RouteType.fromCode(key.routeTypeCode),
                         focusRouteId = key.focusRouteId,
                         focusDirectionId = key.focusDirectionId,
+                        // Issue #123: tapping the map icon on stop-detail jumps to the Nearby
+                        // destination with the stop's lat/lon as a one-shot camera focus hint.
+                        // The Nearby ViewModel re-centres the map at street zoom and the focus
+                        // args are consumed once via a `LaunchedEffect` keyed on the pair, so
+                        // configuration changes don't re-focus the camera.
+                        onShowOnMap = { lat, lon ->
+                            backStack.add(
+                                AppNavKey.Nearby(
+                                    focusLat = lat,
+                                    focusLon = lon,
+                                ),
+                            )
+                        },
                     )
                 }
                 entry<AppNavKey.Settings> {
@@ -210,6 +225,10 @@ private fun HomeScaffold(
                         onOpenSettings = onOpenSettings,
                     )
                 HomeTab.Nearby ->
+                    // Tab variant takes no focus args — the bottom-nav tap opens Nearby on
+                    // whatever camera the VM already holds, which is the existing UX. The
+                    // focus-driven entry (issue #123) lives on the `AppNavKey.Nearby` destination
+                    // pushed by stop-detail's map icon.
                     NearbyRoute(
                         onOpenStopDetail = { stopId, routeTypeCode ->
                             onOpenStopDetail(stopId, routeTypeCode, -1, -1)
