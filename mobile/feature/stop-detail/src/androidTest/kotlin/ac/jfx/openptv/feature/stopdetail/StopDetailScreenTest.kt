@@ -19,6 +19,7 @@ import ac.jfx.openptv.core.testing.RouteMother
 import ac.jfx.openptv.core.testing.StopDetailMother
 import ac.jfx.openptv.core.testing.StopMother
 import ac.jfx.openptv.uitesthiltmanifest.HiltComponentActivity
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -473,6 +474,63 @@ class StopDetailScreenTest {
         // Exactly one group header on screen — the filtered one.
         assertThat(composeTestRule.onAllNodesWithTag(TestTagGroupHeader).fetchSemanticsNodes())
             .hasSize(1)
+    }
+
+    /**
+     * Issue #122: a row with a known platform renders the "platform N" line; a row whose
+     * `platform` is null hides the platform line entirely (no "no platform info" placeholder).
+     */
+    @Test
+    fun platformLine_hiddenWhenDepartureHasNoPlatform() {
+        stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+
+        composeTestRule.setContent {
+            StopDetailRoute(
+                stopId = StopId(STOP_ID),
+                routeType = RouteType.Train,
+            )
+        }
+
+        runBlocking {
+            departureRepository.emitSuccess(
+                listOf(DepartureMother.aDeparture().withPlatform(null).build()),
+            )
+        }
+
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule
+                .onAllNodesWithTag(TestTagDepartureRow)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        composeTestRule.onAllNodesWithTag(TestTagPlatform).assertCountEquals(0)
+    }
+
+    /** Sanity-check the opposite case: a row with a platform still renders the platform line. */
+    @Test
+    fun platformLine_shownWhenDepartureHasPlatform() {
+        stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+
+        composeTestRule.setContent {
+            StopDetailRoute(
+                stopId = StopId(STOP_ID),
+                routeType = RouteType.Train,
+            )
+        }
+
+        runBlocking {
+            departureRepository.emitSuccess(
+                listOf(DepartureMother.aDeparture().withPlatform("3").build()),
+            )
+        }
+
+        composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
+            composeTestRule
+                .onAllNodesWithTag(TestTagPlatform)
+                .fetchSemanticsNodes()
+                .isNotEmpty()
+        }
+        composeTestRule.onNodeWithTag(TestTagPlatform).assertIsDisplayed()
     }
 
     private companion object {
