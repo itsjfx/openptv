@@ -698,7 +698,7 @@ private fun DepartureRow(
                 )
                 Text(
                     text = stringResource(R.string.feature_stop_detail_scheduled, scheduled),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
@@ -724,22 +724,30 @@ private fun DepartureRow(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text =
-                    departure.platform?.let {
-                        stringResource(R.string.feature_stop_detail_platform, it.value)
-                    } ?: stringResource(R.string.feature_stop_detail_no_platform),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (departure.flags.hasDisruption) {
-                Spacer(modifier = Modifier.width(8.dp))
-                androidx.compose.material3.TextButton(
-                    onClick = onDisruptionClicked,
-                    modifier = Modifier.testTag(TestTagDisruptionFlag),
-                ) {
-                    Text(stringResource(R.string.feature_stop_detail_disruption))
+        // Issue #122: drop the "no platform info" placeholder when PTV doesn't return a platform
+        // for the run — the line was empty noise on tram/bus rows where platform data never exists.
+        // Disruption affordance still renders on its own if the platform line is suppressed.
+        val platform = departure.platform
+        if (platform != null || departure.flags.hasDisruption) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (platform != null) {
+                    Text(
+                        text = stringResource(R.string.feature_stop_detail_platform, platform.value),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag(TestTagPlatform),
+                    )
+                }
+                if (departure.flags.hasDisruption) {
+                    if (platform != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    androidx.compose.material3.TextButton(
+                        onClick = onDisruptionClicked,
+                        modifier = Modifier.testTag(TestTagDisruptionFlag),
+                    ) {
+                        Text(stringResource(R.string.feature_stop_detail_disruption))
+                    }
                 }
             }
         }
@@ -872,6 +880,7 @@ internal const val TestTagGroupHeader: String = "stop-detail-group-header"
 internal const val TestTagFavouriteToggle: String = "stop-detail-favourite-toggle"
 internal const val TestTagDepartureRow: String = "stop-detail-departure-row"
 internal const val TestTagDisruptionFlag: String = "stop-detail-disruption-flag"
+internal const val TestTagPlatform: String = "stop-detail-platform"
 internal const val TestTagAsOf: String = "stop-detail-as-of"
 internal const val TestTagLoading: String = "stop-detail-loading"
 internal const val TestTagEmpty: String = "stop-detail-empty"
