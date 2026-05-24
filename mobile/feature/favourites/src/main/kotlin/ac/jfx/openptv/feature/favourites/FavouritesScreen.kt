@@ -66,13 +66,13 @@ import kotlin.math.roundToInt
  * lifecycle: `repeatOnLifecycle(RESUMED)` kicks off the 60 s next-departure tick, cancelling it
  * on Pause and re-launching on Resume.
  *
- * `onOpenStopDetail` accepts the four ints the destination key needs: `stopId`, `routeTypeCode`,
- * `focusRouteId`, `focusDirectionId`. The app composition root translates those into an
+ * `onOpenStopDetail` accepts the three values the navigation key needs: `stopId`,
+ * `routeTypeCode`, `focusDestinationKey`. The app composition root translates those into an
  * `AppNavKey.StopDetail` push.
  */
 @Composable
 fun FavouritesRoute(
-    onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusRouteId: Int, focusDirectionId: Int) -> Unit,
+    onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusDestinationKey: String?) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
     viewModel: FavouritesViewModel = hiltViewModel(),
@@ -90,7 +90,7 @@ fun FavouritesRoute(
     FavouritesScreen(
         uiState = uiState,
         onRowClicked = { row ->
-            onOpenStopDetail(row.key.stopId, row.routeType.toCode(), row.key.routeId, row.key.directionId)
+            onOpenStopDetail(row.key.stopId, row.routeType.toCode(), row.key.destinationKey)
         },
         onReorder = viewModel::onReorder,
         onSwipeDelete = viewModel::onSwipeDelete,
@@ -393,21 +393,28 @@ private fun FavouriteRowContent(
             }
             Spacer(modifier = Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // Route badge — same `primaryContainer` + rounded-corner badge as stop-detail's
-                // `DepartureRow` so the visual language is consistent across the two screens.
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(4.dp),
-                ) {
-                    Text(
-                        text = row.routeNumber,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
+                // Issue #137: the route badge is the actual next service's badge, lifted off
+                // `NextDepartureState.Loaded`. Multi-route destinations like "City" rotate the
+                // badge across Cranbourne / Pakenham / Frankston as each comes up; single-route
+                // destinations always show the same badge. While the next-departure fetch is
+                // still loading the badge slot is empty — the destination label below carries
+                // the row on its own.
+                val liveBadge = (row.nextDeparture as? NextDepartureState.Loaded)?.routeBadge
+                if (!liveBadge.isNullOrBlank()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        shape = RoundedCornerShape(4.dp),
+                    ) {
+                        Text(
+                            text = liveBadge,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
                 }
-                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = row.directionName.ifBlank { row.routeName },
+                    text = stringResource(R.string.feature_favourites_to_destination, row.destinationName),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -574,13 +581,13 @@ private fun RouteType.glyph(): String =
     }
 
 internal fun testTagForRow(key: FavouriteKey): String =
-    "favourites-row-${key.stopId}-${key.routeId}-${key.directionId}"
+    "favourites-row-${key.stopId}-${key.destinationKey}"
 
 internal fun testTagForDelete(key: FavouriteKey): String =
-    "favourites-delete-${key.stopId}-${key.routeId}-${key.directionId}"
+    "favourites-delete-${key.stopId}-${key.destinationKey}"
 
 internal fun testTagForNext(key: FavouriteKey): String =
-    "favourites-next-${key.stopId}-${key.routeId}-${key.directionId}"
+    "favourites-next-${key.stopId}-${key.destinationKey}"
 
 /**
  * Bundle-safe string projection of [FavouriteKey] for `LazyColumn`'s `key =` slot.
@@ -588,13 +595,15 @@ internal fun testTagForNext(key: FavouriteKey): String =
  * `LazyColumn` round-trips the key through `Bundle` via `SaveableStateHolder` for state
  * restoration, and `Bundle` rejects anything that isn't a registered primitive / `Parcelable` /
  * `Serializable` — a Kotlin `data class` matches `Serializable` only if explicitly declared so,
- * which [FavouriteKey] is not. Passing the data class directly throws
- * `IllegalArgumentException: Type of the key ... is not supported` on the first composition that
- * actually has rows. Project to a delimited `String` instead — same uniqueness, Bundle-safe.
+ * which [FavouriteKey] is not. Project to a delimited `String` instead — same uniqueness,
+ * Bundle-safe.
+ *
+ * `|` is the delimiter because PTV destination strings are space-separated words and can contain
+ * dots (e.g. "St. Kilda"), so `.` would collide. `|` doesn't appear in any PTV destination.
  *
  * Visible to tests so a JVM regression can assert the contract without booting an emulator.
  */
-internal fun FavouriteKey.asLazyListKey(): String = "$stopId.$routeId.$directionId"
+internal fun FavouriteKey.asLazyListKey(): String = "$stopId|$destinationKey"
 
 /** How many pixels of vertical drag count as one row-swap. Tuned for a typical ~64.dp row. */
 private const val REORDER_THRESHOLD_PX: Float = 80f

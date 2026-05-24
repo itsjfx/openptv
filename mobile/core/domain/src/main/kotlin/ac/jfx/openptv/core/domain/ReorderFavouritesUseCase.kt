@@ -5,13 +5,13 @@ import javax.inject.Inject
 
 /**
  * Use case: re-number the user's favourites to match a new manual order. Pass-through to the
- * repository's transactional reorder. The consumer (the favourites screen in issue #35) hands in
- * the post-drag list of `(stopId, routeId, directionId)` triples.
+ * repository's transactional reorder. The consumer hands in the post-drag list of
+ * `(stopId, destinationKey)` pairs.
  */
 class ReorderFavouritesUseCase
     @Inject
     constructor(
         private val repository: FavouritesRepository,
     ) {
-        suspend operator fun invoke(orderedIds: List<Triple<Int, Int, Int>>) = repository.reorder(orderedIds)
+        suspend operator fun invoke(orderedKeys: List<Pair<Int, String>>) = repository.reorder(orderedKeys)
     }

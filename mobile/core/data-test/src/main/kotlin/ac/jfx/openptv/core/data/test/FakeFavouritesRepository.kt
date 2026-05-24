@@ -1,9 +1,7 @@
 package ac.jfx.openptv.core.data.test
 
 import ac.jfx.openptv.core.data.FavouritesRepository
-import ac.jfx.openptv.core.model.DirectionId
-import ac.jfx.openptv.core.model.FavouriteRouteAtStop
-import ac.jfx.openptv.core.model.RouteId
+import ac.jfx.openptv.core.model.FavouriteDestinationAtStop
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import kotlinx.coroutines.flow.Flow
@@ -18,70 +16,61 @@ import javax.inject.Singleton
 /**
  * Hand-written fake for [FavouritesRepository] backed by an in-memory [MutableStateFlow]. Behaves
  * close enough to the Room-backed impl for feature androidTests and ViewModel unit tests — the
- * real repository's contract (observe, add, remove, reorder, isFavourite) is covered by
- * `FavouritesRepositoryImplTest` in `:core:data`.
+ * real repository's contract is covered by `FavouritesRepositoryImplTest` in `:core:data`.
  *
  * `@Singleton` so a `setUp()` mutation lands on the same instance the ViewModel ends up
  * collecting. `seed(...)` pre-populates the state in one call — `add(...)` adds at the tail,
- * `remove(...)` filters out the matching triple, `reorder(...)` permutes by position.
+ * `remove(...)` filters out the matching pair, `reorder(...)` permutes by position.
  *
  * The `addedAt` instant on newly-added favourites comes from a public, swappable [Clock] so tests
  * that care about ordering by recency can pin the value deterministically. Default is
- * `Clock.System` which keeps the no-arg use convenient.
+ * `Clock.System`.
  */
 @Singleton
 class FakeFavouritesRepository
     @Inject
     constructor() : FavouritesRepository {
-        private val state: MutableStateFlow<List<FavouriteRouteAtStop>> = MutableStateFlow(emptyList())
+        private val state: MutableStateFlow<List<FavouriteDestinationAtStop>> = MutableStateFlow(emptyList())
 
-        /** Public so tests that care about deterministic `addedAt` can swap in a fixed clock. */
         var clock: Clock = Clock.System
 
         /** Replace the entire state in one call. Useful for `@Before`-style seeding. */
-        fun seed(favourites: List<FavouriteRouteAtStop>) {
+        fun seed(favourites: List<FavouriteDestinationAtStop>) {
             state.value = favourites
         }
 
         /** Read-only view of the current state — for assertions. */
-        val current: List<FavouriteRouteAtStop>
+        val current: List<FavouriteDestinationAtStop>
             get() = state.value
 
-        override fun observe(): Flow<List<FavouriteRouteAtStop>> = state
+        override fun observe(): Flow<List<FavouriteDestinationAtStop>> = state
 
         @Suppress("LongParameterList")
         override suspend fun add(
             stopId: StopId,
+            destinationKey: String,
             routeType: RouteType,
-            routeId: RouteId,
-            directionId: DirectionId,
             stopName: String,
             stopSuburb: String,
-            routeNumber: String,
-            routeName: String,
-            directionName: String,
+            destinationName: String,
             lat: Double,
             lng: Double,
         ) {
             state.update { current ->
-                // Replace existing same-key row (matches Room's @Upsert semantics) so the test
-                // mirrors what production does on re-favouriting the same triple.
+                // Replace existing same-key row (matches Room's @Upsert semantics).
                 val withoutSameKey =
                     current.filterNot {
-                        it.stopId == stopId && it.routeId == routeId && it.directionId == directionId
+                        it.stopId == stopId && it.destinationKey == destinationKey
                     }
                 val nextPosition = (withoutSameKey.maxOfOrNull { it.position } ?: -1) + 1
                 withoutSameKey +
-                    FavouriteRouteAtStop(
+                    FavouriteDestinationAtStop(
                         stopId = stopId,
+                        destinationKey = destinationKey,
                         routeType = routeType,
-                        routeId = routeId,
-                        directionId = directionId,
                         stopName = stopName,
                         stopSuburb = stopSuburb,
-                        routeNumber = routeNumber,
-                        routeName = routeName,
-                        directionName = directionName,
+                        destinationName = destinationName,
                         lat = lat,
                         lng = lng,
                         position = nextPosition,
@@ -92,25 +81,22 @@ class FakeFavouritesRepository
 
         override suspend fun remove(
             stopId: StopId,
-            routeId: RouteId,
-            directionId: DirectionId,
+            destinationKey: String,
         ) {
             state.update { current ->
-                current.filterNot {
-                    it.stopId == stopId && it.routeId == routeId && it.directionId == directionId
-                }
+                current.filterNot { it.stopId == stopId && it.destinationKey == destinationKey }
             }
         }
 
-        override suspend fun reorder(orderedIds: List<Triple<Int, Int, Int>>) {
+        override suspend fun reorder(orderedKeys: List<Pair<Int, String>>) {
             state.update { current ->
                 val indexOf =
-                    orderedIds
+                    orderedKeys
                         .withIndex()
-                        .associate { (index, triple) -> triple to index }
+                        .associate { (index, pair) -> pair to index }
                 current
                     .map { fav ->
-                        val key = Triple(fav.stopId.value, fav.routeId.value, fav.directionId.value)
+                        val key = fav.stopId.value to fav.destinationKey
                         val newPosition = indexOf[key] ?: fav.position
                         fav.copy(position = newPosition)
                     }
@@ -120,14 +106,11 @@ class FakeFavouritesRepository
 
         override fun isFavourite(
             stopId: StopId,
-            routeId: RouteId,
-            directionId: DirectionId,
+            destinationKey: String,
         ): Flow<Boolean> =
             state
                 .map { current ->
-                    current.any {
-                        it.stopId == stopId && it.routeId == routeId && it.directionId == directionId
-                    }
+                    current.any { it.stopId == stopId && it.destinationKey == destinationKey }
                 }
                 .distinctUntilChanged()
     }

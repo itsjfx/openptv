@@ -71,8 +71,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * MapView.
  *
  * @param onOpenStopDetail navigates to stop detail. The screen produces `(stopId, routeTypeCode)`
- *   exactly — there's no `focusRouteId` from the map (we don't know which route the user wants
- *   from a single pin tap, so the screen lands on stop-detail's grouped view).
+ *   exactly — there's no `focusDestinationKey` from the map (we don't know which destination the
+ *   user wants from a single pin tap, so the screen lands on stop-detail's grouped view).
  */
 @Composable
 fun NearbyRoute(
