@@ -1418,6 +1418,46 @@ class NearbyViewModelTest {
         }
 
     @Test
+    fun `already-granted on arrival — second onPermissionResult(true) does not clobber a freshly applied focus camera`() =
+        runTest(dispatcher) {
+            // Regression for PR #139 (third attempt — the on-device root cause). When the user
+            // navigates from stop-detail's "show on map" back into Nearby, the screen recomposes
+            // and re-runs its pre-grant `LaunchedEffect(Unit)`. With permission already granted
+            // the LE calls `onPermissionResult(true)` a second time, AFTER the focus
+            // LaunchedEffect has already routed the focus coord through [focusOn] into the
+            // already-Loaded state. Without this guard, the second `onPermissionResult` rebuilds
+            // a fresh `Loaded` from `locationProvider.lastKnown()` and clobbers the focus camera
+            // back to the user's location — observed in device logcat as the very next state
+            // emission after `focusOn` applied the focus.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+
+            // Pre-grant LE fires once on cold-start composition — state becomes Loaded centred
+            // on the user's last-known fix.
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre)
+                .isEqualTo(flinders)
+
+            // Focus LE fires (the user has tapped "show on map") — re-centres on the stop.
+            val universityOfMelbourne = Coordinates(lat = -37.7964, lng = 144.9612)
+            viewModel.focusOn(universityOfMelbourne)
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre)
+                .isEqualTo(universityOfMelbourne)
+
+            // Pre-grant LE re-fires from the post-navigation recomposition — must be a no-op.
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(universityOfMelbourne)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+            assertThat(loaded.isFollowingUser).isFalse()
+        }
+
+    @Test
     fun `user gesture move-started clears the suppression slot so a subsequent idle is honoured`() =
         runTest(dispatcher) {
             // Complementary to the programmatic case above: the slot MUST clear when the user

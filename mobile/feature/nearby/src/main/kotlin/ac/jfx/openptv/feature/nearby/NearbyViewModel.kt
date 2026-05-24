@@ -175,6 +175,26 @@ class NearbyViewModel
          * Caller (the screen) tells us the permission decision. Permission grant kicks off a
          * `lastKnown()` snapshot and centres the camera; denial keeps the CBD view and lets the
          * user pan.
+         *
+         * **Idempotent on re-affirmation (PR #139 follow-up).** The screen fires the pre-grant
+         * `LaunchedEffect(Unit)` every time `NearbyRoute` recomposes from a fresh navigation
+         * destination — including the "show on map" return path from stop-detail, which lands a
+         * brand-new `NearbyRoute` composition. If permission was already granted, that re-fires
+         * `onPermissionResult(true)` *after* `focusOn` has already moved the camera onto the
+         * requested stop. Without the in-coroutine guard below we'd rebuild the `Loaded` state
+         * with the `locationProvider.lastKnown()` camera and silently clobber the focus camera
+         * back to the user's location — exactly the bug PR #139 was meant to fix. The earlier
+         * "stale idle" / "gate clear on USER_GESTURE" attempts were chasing a symptom (a stale
+         * camera landing in state via MapLibre's idle callback) when the real cause was the VM
+         * itself overwriting the focus camera one tick after `focusOn` applied it. The fix is
+         * to make the second pre-grant fire a no-op when we're already in a Loaded state: the
+         * state already reflects "permission is granted" and the camera + follow-me + tracker
+         * jobs are correctly seeded — nothing to do.
+         *
+         * The same guard for `granted = false` falling onto an existing `PermissionDenied`
+         * state would be similarly correct, but the screen never calls
+         * `onPermissionResult(false)` automatically — that's only fired from explicit rationale
+         * dismissal, so the redundant-call case doesn't arise on that branch in practice.
          */
         fun onPermissionResult(granted: Boolean) {
             viewModelScope.launch {
@@ -185,6 +205,19 @@ class NearbyViewModel
                 // resolves; using the DEFAULT_FILTER here as a fall-back would silently lose the
                 // user's previous "trams only" choice on a slow first launch.
                 val seedFilter = persistedFilter.await()
+                if (granted && _uiState.value is NearbyUiState.Loaded) {
+                    // Already in the granted-Loaded shape — a recomposition-driven re-fire of the
+                    // screen's pre-grant LaunchedEffect. Re-running the granted branch would
+                    // issue a fresh Loaded with the user-location camera, wiping any focus
+                    // camera that [focusOn] just applied (and disarming the
+                    // [pendingProgrammaticCenter] slot). The state already reflects "permission
+                    // is granted" — nothing to do. Checked inside the coroutine (not at the call
+                    // site) so the snapshot is the state at the moment the redundant call would
+                    // execute, not at enqueue time — back-to-back revoke + re-grant calls in
+                    // tests / quick UI flips correctly see PermissionDenied between them and
+                    // proceed.
+                    return@launch
+                }
                 if (granted) {
                     val fix = locationProvider.lastKnown()
                     // Issue #123: if the user navigated in from stop-detail's "show on map" while
