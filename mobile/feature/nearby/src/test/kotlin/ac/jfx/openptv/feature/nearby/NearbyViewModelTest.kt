@@ -252,7 +252,7 @@ class NearbyViewModelTest {
             viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 2)
             // New drag begins — cancels the pending fetch.
-            viewModel.onCameraMoveStarted()
+            viewModel.onCameraMoveStarted(CameraMoveReason.USER_GESTURE)
             // Run past where the debounce WOULD have fired the fetch.
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
@@ -275,7 +275,7 @@ class NearbyViewModelTest {
             // fire with the final camera position once the debounce elapses.
             viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 2)
-            viewModel.onCameraMoveStarted()
+            viewModel.onCameraMoveStarted(CameraMoveReason.USER_GESTURE)
             advanceTimeBy(100)
             viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.83, 144.98), 13.0))
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
@@ -301,7 +301,7 @@ class NearbyViewModelTest {
             repeat(5) {
                 viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96 + it * 0.01), 13.0))
                 advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 4)
-                viewModel.onCameraMoveStarted()
+                viewModel.onCameraMoveStarted(CameraMoveReason.USER_GESTURE)
                 advanceTimeBy(50)
             }
             advanceUntilIdle()
@@ -1384,6 +1384,62 @@ class NearbyViewModelTest {
 
             val loaded = viewModel.uiState.value as NearbyUiState.Loaded
             assertThat(loaded.camera.centre).isEqualTo(newCentre)
+        }
+
+    @Test
+    fun `already-granted on arrival — programmatic move-started does not clear the focus suppression slot`() =
+        runTest(dispatcher) {
+            // Regression for PR #139 follow-up: MapLibre fires `onCameraMoveStarted` for our own
+            // `animateCamera(focus)` too. The previous fix cleared `pendingProgrammaticCenter` on
+            // every move-started, which disarmed the stale-idle guard before the stale idle
+            // arrived — so the focus camera got clobbered back to the user-location frame and the
+            // map stayed on the user's location instead of the focused stop. The fix gates the
+            // clear on [CameraMoveReason.USER_GESTURE]; a programmatic move-started must NOT
+            // disarm the slot.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val richmondStop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmondStop)
+            advanceUntilIdle()
+
+            // MapLibre fires move-started for our own animateCamera(focus) call.
+            viewModel.onCameraMoveStarted(CameraMoveReason.PROGRAMMATIC)
+            // Stale pre-animation idle from MapLibre's setup window — must be dropped.
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = flinders, zoom = 14.0))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(richmondStop)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+        }
+
+    @Test
+    fun `user gesture move-started clears the suppression slot so a subsequent idle is honoured`() =
+        runTest(dispatcher) {
+            // Complementary to the programmatic case above: the slot MUST clear when the user
+            // pans away during the focus animation — otherwise their pan would be ignored.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val richmondStop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmondStop)
+            advanceUntilIdle()
+
+            // User grabs the map mid-animation — that's a real gesture, not the stale frame.
+            viewModel.onCameraMoveStarted(CameraMoveReason.USER_GESTURE)
+            val panned = Coordinates(lat = -37.8500, lng = 145.0000)
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = panned, zoom = 13.0))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(panned)
         }
 
     @Test

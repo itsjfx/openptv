@@ -337,14 +337,24 @@ class NearbyViewModel
          * for a typical drag-start, so the cancel is mostly defensive against the "fast pan,
          * then a long network round-trip lands mid-drag" case. Pins on screen are unaffected
          * because the LRU cache (#108) holds the previously-rendered set.
+         *
+         * **Gating on [reason] (PR #139 follow-up).** Cancelling the in-flight fetch is correct on
+         * any move (the camera is about to land somewhere else). But [pendingProgrammaticCenter]
+         * must ONLY be cleared on a user gesture — MapLibre fires move-started for our own
+         * `animateCamera` call too, and clearing the slot on that path would let the next stale
+         * pre-animation idle sail through the guard and overwrite the focus camera back to a
+         * non-focus value. That's the regression PR #139's `ee316ad` "stale idle" guard missed:
+         * it filtered idles but didn't gate the slot clear, so a programmatic move-started
+         * disarmed the filter before the stale idle arrived.
          */
-        fun onCameraMoveStarted() {
+        fun onCameraMoveStarted(reason: CameraMoveReason) {
             fetchJob?.cancel()
             fetchJob = null
-            // A user-driven move (or any non-programmatic gesture) ends the suppression window —
-            // whatever idle lands next is the user's pan, not the stale pre-animation frame, so
-            // accept it on arrival.
-            pendingProgrammaticCenter = null
+            if (reason == CameraMoveReason.USER_GESTURE) {
+                // The user has taken control of the camera — whatever idle lands next is theirs,
+                // not the stale pre-animation frame, so accept it on arrival.
+                pendingProgrammaticCenter = null
+            }
         }
 
         /**

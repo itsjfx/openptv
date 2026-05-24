@@ -82,7 +82,7 @@ internal class MapLibreOpenPtvMap
             pins: List<Stop>,
             isDark: Boolean,
             onCameraIdle: (OpenPtvCameraState) -> Unit,
-            onCameraMoveStarted: () -> Unit,
+            onCameraMoveStarted: (CameraMoveReason) -> Unit,
             onPinClicked: (Stop) -> Unit,
             modifier: Modifier,
         ) {
@@ -144,12 +144,21 @@ internal class MapLibreOpenPtvMap
                                 )
                             }
                             // Forward MapLibre's move-started signal so the ViewModel can cancel
-                            // any in-flight pin fetch the moment the user starts dragging — issue
-                            // #109. We don't distinguish gesture vs programmatic moves because a
-                            // `setCameraPosition` (initial centre / follow-me) is followed by an
-                            // idle anyway, so cancelling and re-fetching is correct in both cases.
-                            map.addOnCameraMoveStartedListener { _ ->
-                                onCameraMoveStartedLatest()
+                            // any in-flight pin fetch the moment the camera starts moving — issue
+                            // #109. The reason int is mapped to a domain enum so the VM can gate
+                            // its focus-suppression slot (PR #139 follow-up): a programmatic
+                            // animateCamera triggered by our own `focusOn` ALSO fires
+                            // move-started, and if we cleared the slot on every move-started the
+                            // very next stale pre-animation idle would sail through the guard
+                            // and clobber the focus camera.
+                            map.addOnCameraMoveStartedListener { reason ->
+                                val mapped =
+                                    when (reason) {
+                                        MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE ->
+                                            CameraMoveReason.USER_GESTURE
+                                        else -> CameraMoveReason.PROGRAMMATIC
+                                    }
+                                onCameraMoveStartedLatest(mapped)
                             }
                             // Tap detection runs through a custom touch listener instead of
                             // MapLibre's built-in `addOnMapClickListener`. The View-side click

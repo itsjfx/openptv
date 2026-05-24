@@ -208,7 +208,7 @@ internal fun NearbyScreen(
     timeFormatter: RelativeTimeFormatter,
     distanceFormatter: DistanceFormatter,
     onCameraIdle: (OpenPtvCameraState) -> Unit,
-    onCameraMoveStarted: () -> Unit,
+    onCameraMoveStarted: (CameraMoveReason) -> Unit,
     onPinClicked: (Stop) -> Unit,
     onSheetDismissed: () -> Unit,
     onFollowMeClicked: () -> Unit,
