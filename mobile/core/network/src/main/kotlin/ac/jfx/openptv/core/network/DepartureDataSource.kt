@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.network
 
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.DeparturesAtStop
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import kotlinx.datetime.Instant
@@ -9,6 +10,11 @@ import kotlinx.datetime.Instant
  * Network-layer fetch for live [Departure]s at a stop. The polling cadence (30 s) lives in
  * `:core:data` — this interface is one-shot. If the proxy ever exposes a server-push channel
  * (SSE / WebSocket), a second implementation slots in without touching the data layer.
+ *
+ * Returns [DeparturesAtStop] (departures + the sideloaded `routes` map) so callers that need to
+ * render the line name on a row badge can join `Departure.routeId` back to a [ac.jfx.openptv
+ * .core.model.Route] — issue #137. The polling / one-shot repository paths that only care about
+ * departures discard the routes list at the boundary.
  *
  * [dateUtc], [maxResults], and [lookBackwards] are optional pass-throughs to the PTV API:
  *  - `date_utc` shifts the window forward in time so we can ask for "departures from this instant
@@ -27,5 +33,5 @@ interface DepartureDataSource {
         dateUtc: Instant? = null,
         maxResults: Int? = null,
         lookBackwards: Boolean? = null,
-    ): List<Departure>
+    ): DeparturesAtStop
 }

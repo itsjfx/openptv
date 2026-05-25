@@ -1,8 +1,8 @@
 package ac.jfx.openptv.core.database
 
 import ac.jfx.openptv.OpenPtvDatabase
-import ac.jfx.openptv.core.database.FavouriteRouteAtStopEntityMother.Companion.aFavouriteRouteAtStopEntity
-import ac.jfx.openptv.core.database.dao.FavouriteRouteAtStopDao
+import ac.jfx.openptv.core.database.FavouriteDestinationAtStopEntityMother.Companion.aFavouriteDestinationAtStopEntity
+import ac.jfx.openptv.core.database.dao.FavouriteDestinationAtStopDao
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -19,37 +19,31 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 
 /**
- * Unit tests for [FavouriteRouteAtStopDao] against an in-memory Room DB. Uses Robolectric so the
- * test runs on the JVM (gradle `:core:database:testDebugUnitTest`) without booting an emulator.
+ * Unit tests for [FavouriteDestinationAtStopDao] against an in-memory Room DB. Uses Robolectric so
+ * the test runs on the JVM (gradle `:core:database:testDebugUnitTest`) without booting an emulator.
  *
- * The crown jewel is `observeAll_reemits_when_row_is_edited`: Room conflates
- * `Flow<List<...>>` by default, but an `@Upsert` that updates an *existing* row must still
- * trigger a downstream emission. A regression here would silently freeze the favourites screen
- * on stale data; `docs/mobile/phase-04-favourites.md` calls it out as the sneaky gotcha for v1.
+ * The crown jewel is `observeAll_reemits_when_row_is_edited`: Room conflates `Flow<List<...>>`
+ * by default, but an `@Upsert` that updates an *existing* row must still trigger a downstream
+ * emission. A regression here would silently freeze the favourites screen on stale data.
  */
 @RunWith(AndroidJUnit4::class)
 // Pin the Robolectric SDK so the test doesn't try to load a system image for the project's
-// `compileSdk = 36` (Robolectric 4.14.x ships SDK 34 jars; newer SDKs need a newer Robolectric).
-// `manifest = NONE` skips manifest merging — this module has no XML to read anyway.
+// `compileSdk`. `manifest = NONE` skips manifest merging — this module has no XML to read.
 @Config(manifest = Config.NONE, sdk = [34])
-class FavouriteRouteAtStopDaoTest {
+class FavouriteDestinationAtStopDaoTest {
     private lateinit var database: OpenPtvDatabase
-    private lateinit var dao: FavouriteRouteAtStopDao
+    private lateinit var dao: FavouriteDestinationAtStopDao
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     @Before
     fun setUp() {
-        // `Dispatchers.setMain` lets Room's internal query coroutines run on the test dispatcher
-        // instead of the real Android main thread (which isn't present under Robolectric here).
         Dispatchers.setMain(UnconfinedTestDispatcher())
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         database =
             Room.inMemoryDatabaseBuilder(context, OpenPtvDatabase::class.java)
-                // `allowMainThreadQueries` is fine in tests: it spares us a real executor for
-                // the once-per-test setup path, and queries run via coroutines anyway.
                 .allowMainThreadQueries()
                 .build()
-        dao = database.favouriteRouteAtStopDao()
+        dao = database.favouriteDestinationAtStopDao()
     }
 
     @After
@@ -60,7 +54,7 @@ class FavouriteRouteAtStopDaoTest {
     @Test
     fun upsert_inserts_row_and_observeAll_emits_it() =
         runTest {
-            val entity = aFavouriteRouteAtStopEntity().build()
+            val entity = aFavouriteDestinationAtStopEntity().build()
 
             dao.upsert(entity)
 
@@ -79,7 +73,7 @@ class FavouriteRouteAtStopDaoTest {
             // because the *contents* changed. If Room ever silently dedupes on PK identity this
             // test fails — and the favourites list would freeze on stale display fields in prod.
             val initial =
-                aFavouriteRouteAtStopEntity()
+                aFavouriteDestinationAtStopEntity()
                     .withStopName("Old Name")
                     .build()
             dao.upsert(initial)
@@ -89,9 +83,6 @@ class FavouriteRouteAtStopDaoTest {
                 assertThat(first).hasSize(1)
                 assertThat(first.first().stopName).isEqualTo("Old Name")
 
-                // Same composite PK, different cached display fields — this is the scenario the
-                // repository will hit when the user re-favourites after the stop's name
-                // changes upstream (renames are rare, but still happen).
                 val edited = initial.copy(stopName = "New Name", stopSuburb = "Different Suburb")
                 dao.upsert(edited)
 
@@ -107,35 +98,32 @@ class FavouriteRouteAtStopDaoTest {
     fun delete_removes_only_matching_composite_key() =
         runTest {
             val keep =
-                aFavouriteRouteAtStopEntity()
+                aFavouriteDestinationAtStopEntity()
                     .withStopId(1)
-                    .withRouteId(10)
-                    .withDirectionId(100)
+                    .withDestinationKey("north coburg")
                     .withPosition(0)
                     .build()
             val remove =
-                aFavouriteRouteAtStopEntity()
+                aFavouriteDestinationAtStopEntity()
                     .withStopId(2)
-                    .withRouteId(20)
-                    .withDirectionId(200)
+                    .withDestinationKey("city")
                     .withPosition(1)
                     .build()
-            val sameStopDifferentRoute =
-                aFavouriteRouteAtStopEntity()
+            val sameStopDifferentDestination =
+                aFavouriteDestinationAtStopEntity()
                     .withStopId(2)
-                    .withRouteId(21)
-                    .withDirectionId(200)
+                    .withDestinationKey("cranbourne")
                     .withPosition(2)
                     .build()
             dao.upsert(keep)
             dao.upsert(remove)
-            dao.upsert(sameStopDifferentRoute)
+            dao.upsert(sameStopDifferentDestination)
 
-            dao.delete(stopId = 2, routeId = 20, directionId = 200)
+            dao.delete(stopId = 2, destinationKey = "city")
 
             dao.observeAll().test {
                 val emitted = awaitItem()
-                assertThat(emitted).containsExactly(keep, sameStopDifferentRoute).inOrder()
+                assertThat(emitted).containsExactly(keep, sameStopDifferentDestination).inOrder()
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -144,24 +132,21 @@ class FavouriteRouteAtStopDaoTest {
     fun reorder_updates_positions_and_observeAll_reflects_new_order() =
         runTest {
             val a =
-                aFavouriteRouteAtStopEntity()
+                aFavouriteDestinationAtStopEntity()
                     .withStopId(1)
-                    .withRouteId(10)
-                    .withDirectionId(100)
+                    .withDestinationKey("north coburg")
                     .withPosition(0)
                     .build()
             val b =
-                aFavouriteRouteAtStopEntity()
+                aFavouriteDestinationAtStopEntity()
                     .withStopId(2)
-                    .withRouteId(20)
-                    .withDirectionId(200)
+                    .withDestinationKey("city")
                     .withPosition(1)
                     .build()
             val c =
-                aFavouriteRouteAtStopEntity()
+                aFavouriteDestinationAtStopEntity()
                     .withStopId(3)
-                    .withRouteId(30)
-                    .withDirectionId(300)
+                    .withDestinationKey("frankston")
                     .withPosition(2)
                     .build()
             dao.upsert(a)
@@ -171,19 +156,19 @@ class FavouriteRouteAtStopDaoTest {
             // Reverse order: c, b, a → positions 0, 1, 2.
             dao.reorder(
                 listOf(
-                    Triple(3, 30, 300),
-                    Triple(2, 20, 200),
-                    Triple(1, 10, 100),
+                    3 to "frankston",
+                    2 to "city",
+                    1 to "north coburg",
                 ),
             )
 
             dao.observeAll().test {
                 val emitted = awaitItem()
-                assertThat(emitted.map { Triple(it.stopId, it.routeId, it.directionId) })
+                assertThat(emitted.map { it.stopId to it.destinationKey })
                     .containsExactly(
-                        Triple(3, 30, 300),
-                        Triple(2, 20, 200),
-                        Triple(1, 10, 100),
+                        3 to "frankston",
+                        2 to "city",
+                        1 to "north coburg",
                     ).inOrder()
                 assertThat(emitted.map { it.position }).containsExactly(0, 1, 2).inOrder()
                 cancelAndIgnoreRemainingEvents()

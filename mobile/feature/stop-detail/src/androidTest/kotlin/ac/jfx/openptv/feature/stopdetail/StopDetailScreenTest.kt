@@ -400,8 +400,8 @@ class StopDetailScreenTest {
         }
         assertThat(favouritesRepository.current).hasSize(1)
         val added = favouritesRepository.current.single()
-        assertThat(added.routeId.value).isEqualTo(FAVE_ROUTE_ID)
-        assertThat(added.directionId.value).isEqualTo(FAVE_DIRECTION_ID)
+        assertThat(added.destinationKey).isEqualTo("north coburg")
+        assertThat(added.destinationName).isEqualTo("North Coburg")
 
         // Tap to unfavourite.
         composeTestRule.onNodeWithTag(TestTagFavouriteToggle).performClick()
@@ -412,12 +412,12 @@ class StopDetailScreenTest {
     }
 
     /**
-     * Issue #35: when entered with `focusRouteId` + `focusDirectionId`, the screen filters down
-     * to only the matching `(routeId, directionId)` group — the other group's header is not
-     * rendered.
+     * Issue #78 + #137: when entered with `focusDestinationKey`, the matching destination block
+     * is pinned at the top but every other group still renders underneath — full stop info is
+     * preserved per #78. The pin indicator marks the hoisted group.
      */
     @Test
-    fun focusArgs_filterDeparturesToASingleGroup() {
+    fun focusDestinationKey_pinsMatchingGroupAtTopAndShowsAllGroups() {
         val faveRoute =
             RouteMother.aRoute()
                 .withId(FAVE_ROUTE_ID)
@@ -442,8 +442,7 @@ class StopDetailScreenTest {
             StopDetailRoute(
                 stopId = StopId(STOP_ID),
                 routeType = RouteType.Tram,
-                focusRouteId = FAVE_ROUTE_ID,
-                focusDirectionId = FAVE_DIRECTION_ID,
+                focusDestinationKey = "north coburg",
             )
         }
 
@@ -451,7 +450,6 @@ class StopDetailScreenTest {
         val matching =
             DepartureMother.aDeparture()
                 .withRouteId(FAVE_ROUTE_ID)
-                .withDirectionId(FAVE_DIRECTION_ID)
                 .withDirectionName("North Coburg")
                 .withRunRef("MATCH-1")
                 .withScheduledDepartureUtc(now + 5.minutes)
@@ -460,7 +458,6 @@ class StopDetailScreenTest {
         val other =
             DepartureMother.aDeparture()
                 .withRouteId(OTHER_ROUTE_ID)
-                .withDirectionId(99)
                 .withDirectionName("East Brunswick")
                 .withRunRef("OTHER-1")
                 .withScheduledDepartureUtc(now + 5.minutes)
@@ -469,11 +466,12 @@ class StopDetailScreenTest {
         runBlocking { departureRepository.emitSuccess(listOf(matching, other)) }
 
         composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
-            composeTestRule.onAllNodesWithTag(TestTagGroupHeader).fetchSemanticsNodes().isNotEmpty()
+            composeTestRule.onAllNodesWithTag(TestTagGroupHeader).fetchSemanticsNodes().size >= 2
         }
-        // Exactly one group header on screen — the filtered one.
+        // Both destinations render; the pinned one is marked with the pin indicator.
         assertThat(composeTestRule.onAllNodesWithTag(TestTagGroupHeader).fetchSemanticsNodes())
-            .hasSize(1)
+            .hasSize(2)
+        composeTestRule.onNodeWithTag(TestTagPinIndicator).assertIsDisplayed()
     }
 
     /**

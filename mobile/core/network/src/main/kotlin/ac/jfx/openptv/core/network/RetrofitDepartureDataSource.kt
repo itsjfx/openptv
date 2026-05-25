@@ -1,6 +1,6 @@
 package ac.jfx.openptv.core.network
 
-import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.DeparturesAtStop
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.network.model.toDomain
@@ -34,7 +34,7 @@ internal class RetrofitDepartureDataSource
             dateUtc: Instant?,
             maxResults: Int?,
             lookBackwards: Boolean?,
-        ): List<Departure> {
+        ): DeparturesAtStop {
             val typeCode = routeType.toPtvCode()
             val basePath =
                 "departures/route_type/$typeCode/stop/${stopId.value}" +

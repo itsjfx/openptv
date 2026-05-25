@@ -9,8 +9,8 @@ plugins {
 android {
     namespace = "ac.jfx.openptv.core.designsystem"
 
-    // Robolectric drives `createComposeRule` in `LocationPermissionRationaleTest`; same
-    // shape as `:core:datastore` / `:feature:favourites` use for JVM Compose smoke tests.
+    // Robolectric drives `createComposeRule` in any JVM Compose smoke tests added here; same
+    // shape as `:core:datastore` / `:feature:favourites` use.
     testOptions {
         unitTests.isIncludeAndroidResources = true
     }

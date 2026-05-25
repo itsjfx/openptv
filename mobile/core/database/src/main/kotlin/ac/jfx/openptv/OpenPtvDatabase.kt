@@ -1,8 +1,8 @@
 package ac.jfx.openptv
 
 import ac.jfx.openptv.core.database.converter.RouteTypeConverter
-import ac.jfx.openptv.core.database.dao.FavouriteRouteAtStopDao
-import ac.jfx.openptv.core.database.entity.FavouriteRouteAtStopEntity
+import ac.jfx.openptv.core.database.dao.FavouriteDestinationAtStopDao
+import ac.jfx.openptv.core.database.entity.FavouriteDestinationAtStopEntity
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
@@ -11,33 +11,30 @@ import androidx.room.TypeConverters
  * The single Room database for the app. Lives at the top-level `ac.jfx.openptv` package (rather
  * than under `ac.jfx.openptv.core.database`) so the schema export path —
  * `core/database/schemas/ac.jfx.openptv.OpenPtvDatabase/<version>.json` — stays short and
- * stable across the multi-module re-layout. The schema directory tracks the @Database class's
- * FQN; nesting it deeper would mean a path change on every package move.
+ * stable across the multi-module re-layout.
  *
- * Version 1 carries one entity: [FavouriteRouteAtStopEntity]. Phase 8 will introduce a
- * known-disruption table at v2, at which point a real `Migration` lands next to this class
- * and the `OpenPtvDatabaseMigrationTest` infrastructure already in `androidTest/` exercises it.
+ * v1 — per-route favourites (`favourite_routes_at_stop`, keyed `(stopId, routeId, directionId)`).
+ * v2 — per-destination favourites (`favourite_destinations_at_stop`, keyed `(stopId, destinationKey)`).
+ * Migration in `core.database.migration.MIGRATION_1_2` collapses by `LOWER(directionName)` per stop.
  *
- * `exportSchema = true` so Room writes `1.json` under the configured schema directory at build
- * time. The JSON is committed (acceptance criterion: schema diff visible in PR) and serves as
- * the source of truth for migration tests.
+ * `exportSchema = true` so Room writes `<version>.json` under the configured schema directory at
+ * build time. JSONs are committed; the migration test uses them as the source of truth.
  */
 @Database(
-    entities = [FavouriteRouteAtStopEntity::class],
+    entities = [FavouriteDestinationAtStopEntity::class],
     version = OpenPtvDatabase.VERSION,
     exportSchema = true,
 )
 @TypeConverters(RouteTypeConverter::class)
 abstract class OpenPtvDatabase : RoomDatabase() {
-    abstract fun favouriteRouteAtStopDao(): FavouriteRouteAtStopDao
+    abstract fun favouriteDestinationAtStopDao(): FavouriteDestinationAtStopDao
 
     companion object {
-        const val VERSION: Int = 1
+        const val VERSION: Int = 2
 
         /**
          * Filename used by `Room.databaseBuilder`. Centralised so the migration test harness
-         * can open the same on-disk file the production app uses (rather than re-deriving it
-         * from a string literal that could drift).
+         * can open the same on-disk file the production app uses.
          */
         const val DATABASE_NAME: String = "openptv.db"
     }

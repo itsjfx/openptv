@@ -2,7 +2,6 @@ package ac.jfx.openptv.feature.nearby
 
 import ac.jfx.openptv.core.common.DistanceFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
-import ac.jfx.openptv.core.designsystem.LocationPermissionRationale
 import ac.jfx.openptv.core.designsystem.ScreenHeading
 import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.Departure
@@ -52,10 +51,7 @@ import androidx.compose.material3.rememberStandardBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -75,8 +71,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * MapView.
  *
  * @param onOpenStopDetail navigates to stop detail. The screen produces `(stopId, routeTypeCode)`
- *   exactly — there's no `focusRouteId` from the map (we don't know which route the user wants
- *   from a single pin tap, so the screen lands on stop-detail's grouped view).
+ *   exactly — there's no `focusDestinationKey` from the map (we don't know which destination the
+ *   user wants from a single pin tap, so the screen lands on stop-detail's grouped view).
  */
 @Composable
 @Suppress("LongParameterList")
@@ -127,10 +123,6 @@ fun NearbyRoute(
             viewModel.onPermissionResult(granted)
         }
 
-    // Track "have we already asked this session" so re-entering the screen after the system prompt
-    // doesn't re-show the rationale dialog forever. Saved through config change.
-    var rationaleDismissed by rememberSaveable { mutableStateOf(false) }
-
     // Pre-grant check: a user who already granted on a previous launch (either coarse OR fine —
     // a user who picked "Precise" in the system dialog has fine; "Approximate" gets coarse) should
     // land in `Loaded` immediately. Fired once on entry.
@@ -146,7 +138,6 @@ fun NearbyRoute(
                 ) == PackageManager.PERMISSION_GRANTED
         if (granted) {
             viewModel.onPermissionResult(true)
-            rationaleDismissed = true
         }
     }
 
@@ -174,13 +165,7 @@ fun NearbyRoute(
                 }
             context.startActivity(intent)
         },
-        rationaleDismissed = rationaleDismissed,
-        onRationaleDismiss = {
-            rationaleDismissed = true
-            viewModel.onPermissionResult(false)
-        },
-        onRationaleConfirm = {
-            rationaleDismissed = true
+        onRequestPermission = {
             permissionLauncher.launch(
                 arrayOf(
                     Manifest.permission.ACCESS_FINE_LOCATION,
@@ -216,9 +201,7 @@ internal fun NearbyScreen(
     onViewStop: (Stop) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenAppSettings: () -> Unit,
-    rationaleDismissed: Boolean,
-    onRationaleDismiss: () -> Unit,
-    onRationaleConfirm: () -> Unit,
+    onRequestPermission: () -> Unit,
 ) {
     val isDark = MaterialTheme.colorScheme.surface.luminance() < DARK_LUMINANCE_THRESHOLD
 
@@ -341,32 +324,42 @@ internal fun NearbyScreen(
                         )
                     }
 
-                    // Follow-me FAB — only useful when there's a user location to centre on. Sits
-                    // above the bottom sheet's peek surface so it doesn't disappear behind the
-                    // sheet header.
-                    if (uiState is NearbyUiState.Loaded && uiState.userLocation != null) {
-                        FloatingActionButton(
-                            onClick = onFollowMeClicked,
-                            modifier =
-                                Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(16.dp)
-                                    .testTag(TestTagFollowMeFab),
-                        ) {
-                            Text("⌖", style = MaterialTheme.typography.titleLarge)
+                    // Follow-me FAB — visible in every state so the user always has a one-tap path
+                    // to "use my location". When permission is denied or unasked (#125) we tint
+                    // the icon with `colorScheme.error` and rewire the tap to either launch the
+                    // system permission prompt (unasked) or jump to app settings (denied — the
+                    // system won't re-prompt once the user has refused). When granted, the FAB
+                    // recentres on the user fix exactly as before. Sits above the bottom sheet's
+                    // peek surface so it doesn't disappear behind the sheet header.
+                    val fabAction = uiState.followMeFabAction()
+                    val iconTint =
+                        if (fabAction.isPermissionAction) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onPrimaryContainer
                         }
+                    FloatingActionButton(
+                        onClick =
+                            when (fabAction) {
+                                FollowMeFabAction.Recentre -> onFollowMeClicked
+                                FollowMeFabAction.RequestPermission -> onRequestPermission
+                                FollowMeFabAction.OpenAppSettings -> onOpenAppSettings
+                            },
+                        modifier =
+                            Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(16.dp)
+                                .testTag(TestTagFollowMeFab),
+                    ) {
+                        Text(
+                            text = "⌖",
+                            style = MaterialTheme.typography.titleLarge,
+                            color = iconTint,
+                        )
                     }
                 }
             }
         }
-    }
-
-    // Rationale dialog — shown only once per session, only when we haven't asked yet
-    if (uiState is NearbyUiState.PermissionUnasked && !rationaleDismissed) {
-        LocationPermissionRationale(
-            onConfirm = onRationaleConfirm,
-            onDismiss = onRationaleDismiss,
-        )
     }
 
     // Bottom sheet for a tapped pin
@@ -826,6 +819,37 @@ private fun NearbyUiState.pinsOrEmpty(): List<Stop> =
         is NearbyUiState.Loaded -> pins
         is NearbyUiState.PermissionDenied -> pins
         NearbyUiState.PermissionUnasked -> emptyList()
+    }
+
+/**
+ * What the follow-me FAB should do when tapped, derived from the current [NearbyUiState] (#125).
+ *
+ * - [Recentre] — permission is granted and we (will) have a fix, so the tap recentres the camera
+ *   on the user. This is the default behaviour from before the popup-removal change.
+ * - [RequestPermission] — first-launch / not-yet-asked. Tap launches the system permission prompt
+ *   in place of the old rationale dialog (#120, #125).
+ * - [OpenAppSettings] — user has actively denied. The system suppresses re-prompts, so the only
+ *   way back is the app's system-settings page; the FAB jumps the user straight there.
+ *
+ * Pure function so the screen-render branching stays trivial and the test can pin every state
+ * without booting Compose.
+ */
+internal enum class FollowMeFabAction {
+    Recentre,
+    RequestPermission,
+    OpenAppSettings,
+    ;
+
+    /** Whether the icon should render in `colorScheme.error` (the "GPS off" hint, #125). */
+    val isPermissionAction: Boolean
+        get() = this != Recentre
+}
+
+internal fun NearbyUiState.followMeFabAction(): FollowMeFabAction =
+    when (this) {
+        is NearbyUiState.Loaded -> FollowMeFabAction.Recentre
+        is NearbyUiState.PermissionDenied -> FollowMeFabAction.OpenAppSettings
+        NearbyUiState.PermissionUnasked -> FollowMeFabAction.RequestPermission
     }
 
 /**

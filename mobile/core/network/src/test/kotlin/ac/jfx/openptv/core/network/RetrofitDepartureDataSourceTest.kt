@@ -65,10 +65,10 @@ class RetrofitDepartureDataSourceTest {
                 ),
             )
 
-            val departures = dataSource.getDepartures(StopId(1071), RouteType.Train)
+            val result = dataSource.getDepartures(StopId(1071), RouteType.Train)
 
-            assertThat(departures).hasSize(1)
-            assertThat(departures[0].direction.name).isEqualTo("City")
+            assertThat(result.departures).hasSize(1)
+            assertThat(result.departures[0].direction.name).isEqualTo("City")
         }
 
     @Test
@@ -78,9 +78,9 @@ class RetrofitDepartureDataSourceTest {
                 MockResponse().setResponseCode(200).setBody("""{"departures":[],"directions":{}}"""),
             )
 
-            val departures = dataSource.getDepartures(StopId(1071), RouteType.Train)
+            val result = dataSource.getDepartures(StopId(1071), RouteType.Train)
 
-            assertThat(departures).isEmpty()
+            assertThat(result.departures).isEmpty()
         }
 
     @Test(expected = HttpException::class)
