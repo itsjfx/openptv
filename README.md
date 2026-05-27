@@ -52,6 +52,6 @@ I found opening and closing the private space annoying which is why I made OpenP
 
 ## Thanks to
 
-* [Public Transport Victoria](https://www.vic.gov.au/public-transport-timetable-api) for providing the PTV API to the public
+* [Public Transport Victoria](https://www.vic.gov.au/public-transport-timetable-api) - for providing the PTV API to the public
 * [ReadYou](https://github.com/ReadYouApp/ReadYou) - which inspired Material You design in OpenPTV
 * [Now in Android](https://github.com/android/nowinandroid) - helped base the patterns used in OpenPTV
