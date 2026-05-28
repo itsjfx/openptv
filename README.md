@@ -42,11 +42,11 @@ OpenPTV's proxy exists so people can use OpenPTV straight away. Sadly, requestin
 
 We respect your privacy and do not sell any data or track you. We collect HTTP traffic logs for 24 hours for abuse tracking purposes only. You can freely use OpenPTV without your own key.
 
-## I don't like OpenPTV. What can I use instead?
+## I don't like OpenPTV, what can I use instead?
 
-You can install Google Play services and use the official PTV without any issues.
+If you're using GrapheneOS, then you can install Sandboxed Google Play services and use the official PTV without any issues.
 
-If you'd like Play services not to leak onto other apps in your profile, then installing Play services into your profiles' private space works as a sandbox mechanism. You can then run PTV within the private space and use it without issue.
+If you'd like Play services not to leak onto other apps in your profile, then instal Play services into your profiles' private space. Private spaces work as a sandbox (similar to profiles). You can then install and run PTV within the private space and use PTV without issue.
 
 I found opening and closing the private space annoying which is why I made OpenPTV, but I still have PTV with Play services in my private space in case I need it.
 
