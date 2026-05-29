@@ -581,13 +581,30 @@ class NearbyViewModel
             internal const val FOLLOW_LEASH_METERS: Double = 50.0
 
             /**
-             * Cap on the LRU stop cache. Sized so an hour of pan/zoom across central Melbourne
-             * wouldn't evict — a single screen-width of dense CBD fetches a few hundred stops,
-             * a typical pan accumulates well under this number. Far below memory pressure: each
-             * `Stop` is a handful of strings + two doubles (~150 bytes), so 2000 entries is
-             * ~300 KB.
+             * Cap on the LRU stop cache. Sized so a whole session of pan/zoom across the metro
+             * area never evicts — previously-visited regions stay on the map instead of vanishing.
+             *
+             * **Issue #134 review.** The previous 2000 bound was too small once #134 raised the
+             * per-fetch result cap to [RetrofitNearbyStopsDataSource]'s `max_results` (600): the
+             * cache held barely three wide (metro-zoom) fetches, so exploring a fourth area evicted
+             * the earliest-visited stops by recency. Concretely — load the CBD, pan out to a few
+             * suburbs, then come back, and the CBD pins were gone (and a single re-fetch only
+             * restores the 600 nearest the camera centre, so the area came back far sparser than it
+             * was). The same eviction is why pins "only loaded reliably when zoomed in far": a
+             * previously-loaded area no longer had its pins cached, so it stayed blank until a fresh
+             * fetch landed instead of rendering the cached set instantly.
+             *
+             * 20000 holds ~33 full wide fetches — far more distinct stops than a heavy metro
+             * exploration session accumulates — so the CBD (and every other visited area) persists
+             * for the lifetime of the screen, which is the behaviour the cache is there to provide.
+             * The bound only scales memory with what's *actually* loaded (the LinkedHashMap grows
+             * lazily), so a normal session that loads a few thousand stops pays for a few thousand,
+             * not the cap. Even at the cap each `Stop` is ~150 bytes, so 20000 entries is ~3 MB —
+             * trivial on any phone. We keep a hard cap (rather than going unbounded) so pathological
+             * regional panning that would load every stop in Victoria still can't grow without
+             * limit; eldest-out eviction still applies once the bound is genuinely exceeded.
              */
-            internal const val MAX_CACHED_STOPS: Int = 2000
+            internal const val MAX_CACHED_STOPS: Int = 20_000
         }
     }
 

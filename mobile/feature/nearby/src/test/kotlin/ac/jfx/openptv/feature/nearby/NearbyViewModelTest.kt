@@ -1046,6 +1046,54 @@ class NearbyViewModelTest {
         }
 
     @Test
+    fun `pins from the first-visited area survive a multi-area exploration session (#134)`() =
+        runTest(dispatcher) {
+            // Reproduces the #134 review bug at the ViewModel level: load one area (the "CBD"),
+            // then pan/zoom around several more areas the way the real app does, and the first
+            // area's pins MUST still be on the map when you come back. Before the fix the LRU bound
+            // (2000) held only ~3 wide fetches, so the earliest area was evicted by recency and the
+            // CBD pins vanished. We size the session above the OLD bound but within the current one
+            // so the assertion proves "the earliest area persists for the whole session".
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+
+            // Each fetch returns a distinct batch (no id overlap) so total distinct == sum of
+            // batch sizes — mirrors panning across non-overlapping metro discs. Sized so the total
+            // comfortably exceeds the pre-fix 2000 bound yet stays well under MAX_CACHED_STOPS.
+            val batchSize = 500
+            val areaCount = 6
+            check(batchSize * areaCount in 2001..NearbyViewModel.MAX_CACHED_STOPS) {
+                "Session must exceed the old 2000 bound but fit the current cache cap"
+            }
+            val areas = (0 until areaCount).map { area ->
+                (0 until batchSize).map { i ->
+                    StopMother.aStop().withId(area * batchSize + i).build()
+                }
+            }
+            // Initial grant consumes the first (CBD) batch; each later camera-idle consumes the next.
+            areas.forEach { nearbyRepo.enqueueSuccess(it) }
+
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Pan to the remaining areas, one camera-idle fetch each — the way a user explores.
+            for (area in 1 until areaCount) {
+                viewModel.onCameraIdle(
+                    OpenPtvCameraState(Coordinates(-37.82, 144.96 + area * 0.05), 12.0),
+                )
+                advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+                advanceUntilIdle()
+            }
+
+            val pins = (viewModel.uiState.value as NearbyUiState.Loaded).pins
+            // Nothing was evicted — every distinct stop from every visited area is still cached.
+            assertThat(pins).hasSize(batchSize * areaCount)
+            // The first-visited ("CBD") area specifically persists, which is the user's complaint.
+            assertThat(pins).containsAtLeastElementsIn(areas.first())
+        }
+
+    @Test
     fun `tapping a different pin replaces the sheet contents and rebinds fetches`() =
         runTest(dispatcher) {
             locationProvider.seed(CoordinatesMother.flindersStreet().build())
