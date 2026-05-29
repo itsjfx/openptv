@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.DeparturesAtStop
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.network.DepartureDataSource
@@ -45,7 +46,7 @@ class DepartureRepositoryImplTest {
     // ---------- getDepartures one-shot ----------
 
     @Test
-    fun `getDepartures success wraps mapped list`() =
+    fun `getDepartures success wraps mapped DeparturesAtStop`() =
         runTest {
             val expected = listOf(DepartureMother.aDeparture().build())
             val repo = DepartureRepositoryImpl(FakeDataSource(returning = expected), clock)
@@ -53,7 +54,7 @@ class DepartureRepositoryImplTest {
             val result = repo.getDepartures(StopId(1071), RouteType.Train)
 
             assertThat(result).isInstanceOf(Result.Success::class.java)
-            assertThat((result as Result.Success).data).isEqualTo(expected)
+            assertThat((result as Result.Success).data.departures).isEqualTo(expected)
         }
 
     @Test
@@ -345,7 +346,7 @@ class DepartureRepositoryImplTest {
             dateUtc: Instant?,
             maxResults: Int?,
             lookBackwards: Boolean?,
-        ): List<Departure> {
+        ): DeparturesAtStop {
             val index = callCount.getAndIncrement()
             lastDateUtc.set(dateUtc)
             lastMaxResults.set(maxResults)
@@ -353,11 +354,11 @@ class DepartureRepositoryImplTest {
             throwing?.let { throw it }
             if (returningSeries != null) {
                 return when (val outcome = returningSeries.outcomeAt(index)) {
-                    is FakeOutcome.Returning -> outcome.list
+                    is FakeOutcome.Returning -> DeparturesAtStop(outcome.list, routes = emptyList())
                     is FakeOutcome.Throwing -> throw outcome.throwable
                 }
             }
-            return returning ?: emptyList()
+            return DeparturesAtStop(departures = returning ?: emptyList(), routes = emptyList())
         }
     }
 

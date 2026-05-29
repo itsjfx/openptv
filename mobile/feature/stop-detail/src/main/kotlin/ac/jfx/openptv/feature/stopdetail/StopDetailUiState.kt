@@ -1,9 +1,7 @@
 package ac.jfx.openptv.feature.stopdetail
 
 import ac.jfx.openptv.core.model.Departure
-import ac.jfx.openptv.core.model.Direction
 import ac.jfx.openptv.core.model.Route
-import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopDetail
 import kotlinx.datetime.Instant
@@ -96,34 +94,16 @@ data class Group(
     val departures: List<Departure>,
     val expanded: Boolean = false,
     /**
-     * Whether the user has favourited the (stopId, routeId, directionId) triple represented by
-     * this group. Only meaningful when the group contains a single route — see [favouriteTarget].
+     * Whether the user has favourited the `(stopId, destinationKey)` represented by this group.
      * Populated by the ViewModel from `ObserveFavouritesUseCase`. Defaults to `false`.
      */
     val isFavourite: Boolean = false,
     /**
      * True when this group is the favourite-tap-through pinned destination (issue #78). Pinned
-     * groups sort to the top of the list and start expanded, so the user lands on the route they
-     * actually came in for, with the rest of the stop's services still visible underneath.
+     * groups sort to the top of the list so the user lands on the destination they came in for,
+     * with the rest of the stop's services still visible underneath.
      */
     val isPinned: Boolean = false,
-    /**
-     * When the group contains exactly one route, this is the (routeId, direction) tuple the
-     * favourite star toggles. Null when the group bundles multiple routes — the favourite model
-     * is per-(routeId, directionId), so a "City" block at Richmond with five lines feeding into
-     * it has no single favourite target and the star is hidden.
-     */
-    val favouriteTarget: FavouriteTarget? = null,
-)
-
-/**
- * Pair the favourite star needs to toggle: the specific route and direction this group's single
- * route serves. Only populated for single-route groups; multi-route groups (issue #87) set this
- * to null and hide the star.
- */
-data class FavouriteTarget(
-    val routeId: RouteId,
-    val direction: Direction,
 )
 
 /**

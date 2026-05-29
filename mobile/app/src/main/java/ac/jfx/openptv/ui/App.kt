@@ -70,13 +70,12 @@ private fun MainNav() {
             entryProvider {
                 entry<AppNavKey.Home> {
                     HomeScaffold(
-                        onOpenStopDetail = { stopId, routeTypeCode, focusRouteId, focusDirectionId ->
+                        onOpenStopDetail = { stopId, routeTypeCode, focusDestinationKey ->
                             backStack.add(
                                 AppNavKey.StopDetail(
                                     stopId = stopId,
                                     routeTypeCode = routeTypeCode,
-                                    focusRouteId = focusRouteId,
-                                    focusDirectionId = focusDirectionId,
+                                    focusDestinationKey = focusDestinationKey,
                                 ),
                             )
                         },
@@ -98,13 +97,12 @@ private fun MainNav() {
                 }
                 entry<AppNavKey.Favourites> {
                     FavouritesRoute(
-                        onOpenStopDetail = { stopId, routeTypeCode, focusRouteId, focusDirectionId ->
+                        onOpenStopDetail = { stopId, routeTypeCode, focusDestinationKey ->
                             backStack.add(
                                 AppNavKey.StopDetail(
                                     stopId = stopId,
                                     routeTypeCode = routeTypeCode,
-                                    focusRouteId = focusRouteId,
-                                    focusDirectionId = focusDirectionId,
+                                    focusDestinationKey = focusDestinationKey,
                                 ),
                             )
                         },
@@ -129,8 +127,7 @@ private fun MainNav() {
                     StopDetailRoute(
                         stopId = StopId(key.stopId),
                         routeType = RouteType.fromCode(key.routeTypeCode),
-                        focusRouteId = key.focusRouteId,
-                        focusDirectionId = key.focusDirectionId,
+                        focusDestinationKey = key.focusDestinationKey,
                     )
                 }
                 entry<AppNavKey.Settings> {
@@ -162,7 +159,7 @@ private fun MainNav() {
  */
 @Composable
 private fun HomeScaffold(
-    onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusRouteId: Int, focusDirectionId: Int) -> Unit,
+    onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusDestinationKey: String?) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Favourites) }
@@ -212,14 +209,14 @@ private fun HomeScaffold(
                 HomeTab.Nearby ->
                     NearbyRoute(
                         onOpenStopDetail = { stopId, routeTypeCode ->
-                            onOpenStopDetail(stopId, routeTypeCode, -1, -1)
+                            onOpenStopDetail(stopId, routeTypeCode, null)
                         },
                         onOpenSettings = onOpenSettings,
                     )
                 HomeTab.Search ->
                     SearchScreen(
                         onStopSelected = { stop ->
-                            onOpenStopDetail(stop.id.value, stop.routeType.toCode(), -1, -1)
+                            onOpenStopDetail(stop.id.value, stop.routeType.toCode(), null)
                         },
                         onOpenSettings = onOpenSettings,
                     )

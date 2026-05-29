@@ -4,9 +4,7 @@ import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
 import ac.jfx.openptv.core.model.Departure
-import ac.jfx.openptv.core.model.Direction
 import ac.jfx.openptv.core.model.Route
-import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.model.StopId
@@ -85,21 +83,19 @@ import kotlinx.datetime.toLocalDateTime
 fun StopDetailRoute(
     stopId: StopId,
     routeType: RouteType,
-    focusRouteId: Int? = null,
-    focusDirectionId: Int? = null,
+    focusDestinationKey: String? = null,
     onDepartureClicked: (Departure) -> Unit = {},
     viewModel: StopDetailViewModel =
         hiltViewModel<StopDetailViewModel, StopDetailViewModel.Factory>(
-            // The focus args are part of the ViewModel store key so tapping the same favourite
+            // The focus arg is part of the ViewModel store key so tapping the same favourite
             // twice in a row reuses the cached ViewModel, but navigating to the same stop *without*
             // the focus filter (e.g. via search) allocates a fresh one and renders the full list.
-            key = "stop-detail-${stopId.value}-${routeType.name}-${focusRouteId ?: -1}-${focusDirectionId ?: -1}",
+            key = "stop-detail-${stopId.value}-${routeType.name}-${focusDestinationKey ?: ""}",
         ) { factory ->
             factory.create(
                 stopId = stopId.value,
                 routeTypeCode = routeType.toCode(),
-                focusRouteId = focusRouteId ?: -1,
-                focusDirectionId = focusDirectionId ?: -1,
+                focusDestinationKey = focusDestinationKey ?: "",
             )
         },
 ) {
@@ -138,7 +134,7 @@ internal fun StopDetailScreenContent(
     onRetry: () -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onToggleExpand: (GroupKey) -> Unit,
-    onToggleFavourite: (RouteId, Direction) -> Unit,
+    onToggleFavourite: (destinationName: String) -> Unit,
     onReachedEnd: () -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
@@ -191,9 +187,9 @@ internal fun StopDetailScreenContent(
                         maxLines = 1,
                     )
                 },
-                // Favourite affordance moved into the per-route `GroupHeader` (issue #34). The
-                // favourites unit is `(stopId, routeId, directionId)` — a service — not a whole
-                // stop, so the star belongs at the group's granularity.
+                // Favourite affordance lives in `GroupHeader` per destination block (issue #137).
+                // The favourite unit is `(stopId, destinationKey)` — a destination at this stop —
+                // so the star belongs at the group's granularity.
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },
@@ -253,7 +249,7 @@ private fun LazyListScope.departuresSection(
     today: LocalDate,
     timeFormatter: RelativeTimeFormatter,
     onToggleExpand: (GroupKey) -> Unit,
-    onToggleFavourite: (RouteId, Direction) -> Unit,
+    onToggleFavourite: (destinationName: String) -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onRefresh: () -> Unit,
     onDisruptionClicked: () -> Unit,
@@ -304,7 +300,7 @@ private fun LazyListScope.groupSection(
     today: LocalDate,
     timeFormatter: RelativeTimeFormatter,
     onToggleExpand: (GroupKey) -> Unit,
-    onToggleFavourite: (RouteId, Direction) -> Unit,
+    onToggleFavourite: (destinationName: String) -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onDisruptionClicked: () -> Unit,
 ) {
@@ -312,13 +308,7 @@ private fun LazyListScope.groupSection(
         GroupHeader(
             group = group,
             onToggleExpand = { onToggleExpand(group.key) },
-            onToggleFavourite = {
-                // Favourite affordance only fires when the group projects a single (route,
-                // direction) target — multi-route destination blocks (Richmond → City) suppress
-                // the star and never call this callback.
-                val target = group.favouriteTarget ?: return@GroupHeader
-                onToggleFavourite(target.routeId, target.direction)
-            },
+            onToggleFavourite = { onToggleFavourite(group.headerLabel) },
         )
     }
     val visible =
@@ -471,24 +461,15 @@ private fun GroupHeader(
     onToggleExpand: () -> Unit,
     onToggleFavourite: () -> Unit,
 ) {
-    // Favourite affordance only renders when the destination block represents a single route +
-    // direction tuple — multi-route blocks (Richmond → City) have no single favourite target to
-    // toggle. The content description folds the route + destination context in for TalkBack.
-    val favouriteTarget = group.favouriteTarget
     // PTV's train feed sometimes returns blank route numbers + names — `Route.displayLabel`
     // (issue #88) handles the per-`route_type` rule plus the "#id" fallback so the multi-route
     // header still tells the user which lines feed the destination.
     val routesLabel = group.routes.joinToString(separator = ", ") { it.displayLabel }
     val favouriteDescription =
-        if (favouriteTarget != null) {
-            val routeDescriptor = group.routes.firstOrNull()?.displayLabel.orEmpty()
-            if (group.isFavourite) {
-                stringResource(R.string.feature_stop_detail_unfavourite_route, routeDescriptor, group.headerLabel)
-            } else {
-                stringResource(R.string.feature_stop_detail_favourite_route, routeDescriptor, group.headerLabel)
-            }
+        if (group.isFavourite) {
+            stringResource(R.string.feature_stop_detail_unfavourite_destination, group.headerLabel)
         } else {
-            ""
+            stringResource(R.string.feature_stop_detail_favourite_destination, group.headerLabel)
         }
 
     Surface(
@@ -536,32 +517,30 @@ private fun GroupHeader(
                 }
             }
             // Star glyph — filled when favourited, hollow otherwise. `Crossfade` animates between
-            // the two states so the user gets feedback on the tap without flicker. Only renders
-            // when the group has a single favourite target — multi-route blocks suppress the
-            // affordance because there's no single tuple to toggle.
-            if (favouriteTarget != null) {
-                IconButton(
-                    onClick = onToggleFavourite,
-                    modifier =
-                        Modifier
-                            .testTag(TestTagFavouriteToggle)
-                            .semantics { contentDescription = favouriteDescription },
-                ) {
-                    Crossfade(
-                        targetState = group.isFavourite,
-                        label = "favourite-star",
-                    ) { favourited ->
-                        Text(
-                            text = if (favourited) "★" else "☆",
-                            style = MaterialTheme.typography.titleLarge,
-                            color =
-                                if (favourited) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                        )
-                    }
+            // the two states so the user gets feedback on the tap without flicker. Issue #137:
+            // the favourite is destination-keyed, so the star renders on every group regardless
+            // of how many routes feed the destination.
+            IconButton(
+                onClick = onToggleFavourite,
+                modifier =
+                    Modifier
+                        .testTag(TestTagFavouriteToggle)
+                        .semantics { contentDescription = favouriteDescription },
+            ) {
+                Crossfade(
+                    targetState = group.isFavourite,
+                    label = "favourite-star",
+                ) { favourited ->
+                    Text(
+                        text = if (favourited) "★" else "☆",
+                        style = MaterialTheme.typography.titleLarge,
+                        color =
+                            if (favourited) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                    )
                 }
             }
             // Chevron glyph: closed when collapsed, open when expanded.
@@ -698,7 +677,7 @@ private fun DepartureRow(
                 )
                 Text(
                     text = stringResource(R.string.feature_stop_detail_scheduled, scheduled),
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
@@ -724,22 +703,30 @@ private fun DepartureRow(
                 }
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text =
-                    departure.platform?.let {
-                        stringResource(R.string.feature_stop_detail_platform, it.value)
-                    } ?: stringResource(R.string.feature_stop_detail_no_platform),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (departure.flags.hasDisruption) {
-                Spacer(modifier = Modifier.width(8.dp))
-                androidx.compose.material3.TextButton(
-                    onClick = onDisruptionClicked,
-                    modifier = Modifier.testTag(TestTagDisruptionFlag),
-                ) {
-                    Text(stringResource(R.string.feature_stop_detail_disruption))
+        // Issue #122: drop the "no platform info" placeholder when PTV doesn't return a platform
+        // for the run — the line was empty noise on tram/bus rows where platform data never exists.
+        // Disruption affordance still renders on its own if the platform line is suppressed.
+        val platform = departure.platform
+        if (platform != null || departure.flags.hasDisruption) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (platform != null) {
+                    Text(
+                        text = stringResource(R.string.feature_stop_detail_platform, platform.value),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.testTag(TestTagPlatform),
+                    )
+                }
+                if (departure.flags.hasDisruption) {
+                    if (platform != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    androidx.compose.material3.TextButton(
+                        onClick = onDisruptionClicked,
+                        modifier = Modifier.testTag(TestTagDisruptionFlag),
+                    ) {
+                        Text(stringResource(R.string.feature_stop_detail_disruption))
+                    }
                 }
             }
         }
@@ -872,6 +859,7 @@ internal const val TestTagGroupHeader: String = "stop-detail-group-header"
 internal const val TestTagFavouriteToggle: String = "stop-detail-favourite-toggle"
 internal const val TestTagDepartureRow: String = "stop-detail-departure-row"
 internal const val TestTagDisruptionFlag: String = "stop-detail-disruption-flag"
+internal const val TestTagPlatform: String = "stop-detail-platform"
 internal const val TestTagAsOf: String = "stop-detail-as-of"
 internal const val TestTagLoading: String = "stop-detail-loading"
 internal const val TestTagEmpty: String = "stop-detail-empty"

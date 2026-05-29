@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.DeparturesAtStop
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import kotlinx.coroutines.flow.Flow
@@ -30,10 +31,17 @@ import kotlinx.datetime.Instant
  * behaviour in `DepartureRepositoryImplTest`.
  */
 interface DepartureRepository {
+    /**
+     * One-shot fetch returning both the [Departure] list and the [DeparturesAtStop.routes]
+     * sideload PTV emits in the same response. The favourites screen needs the route join to
+     * render the line-name badge for the next service (issue #137). Consumers that don't care
+     * about routes can read `result.data.departures` and discard the rest — the polling
+     * [observeDepartures] surface already does this internally.
+     */
     suspend fun getDepartures(
         stopId: StopId,
         routeType: RouteType,
-    ): Result<List<Departure>>
+    ): Result<DeparturesAtStop>
 
     fun observeDepartures(
         stopId: StopId,
