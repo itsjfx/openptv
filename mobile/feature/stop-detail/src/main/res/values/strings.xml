@@ -13,7 +13,6 @@
     <string name="feature_stop_detail_as_of">As of %1$s</string>
     <string name="feature_stop_detail_scheduled">scheduled %1$s</string>
     <string name="feature_stop_detail_platform">platform %1$s</string>
-    <string name="feature_stop_detail_no_platform">no platform info</string>
     <plurals name="feature_stop_detail_delay_late">
         <item quantity="one">%d min late</item>
         <item quantity="other">%d mins late</item>
@@ -31,10 +30,10 @@
     <string name="feature_stop_detail_disruption_snackbar">Disruption details land in Phase 10.</string>
     <string name="feature_stop_detail_serving_routes">Routes serving this stop</string>
 
-    <!-- Favourite affordance on the per-route group header (issue #34). Slots:
-         route descriptor (e.g. "19"), direction name (e.g. "North Coburg"). -->
-    <string name="feature_stop_detail_favourite_route">Favourite route %1$s to %2$s</string>
-    <string name="feature_stop_detail_unfavourite_route">Unfavourite route %1$s to %2$s</string>
+    <!-- Favourite affordance on the per-destination group header (issue #137). Slot:
+         destination name (e.g. "City", "North Coburg"). -->
+    <string name="feature_stop_detail_favourite_destination">Favourite services to %1$s</string>
+    <string name="feature_stop_detail_unfavourite_destination">Unfavourite services to %1$s</string>
 
     <!-- Departure row content description. Slots: route number/name, direction destination,
          relative time phrase ("in 3 minutes"), platform clause ("from platform 2" or empty). -->

@@ -3,6 +3,8 @@ package ac.jfx.openptv.core.data.test
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.DepartureRepository
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.DeparturesAtStop
+import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import kotlinx.coroutines.flow.Flow
@@ -30,7 +32,7 @@ import javax.inject.Singleton
 class FakeDepartureRepository
     @Inject
     constructor() : DepartureRepository {
-        private val oneShotQueue: ArrayDeque<Result<List<Departure>>> = ArrayDeque()
+        private val oneShotQueue: ArrayDeque<Result<DeparturesAtStop>> = ArrayDeque()
 
         private val observedFlow = MutableSharedFlow<Result<List<Departure>>>(replay = 1)
         val observedKeys: MutableList<Pair<StopId, RouteType>> = mutableListOf()
@@ -38,12 +40,24 @@ class FakeDepartureRepository
 
         // -------- one-shot --------
 
-        fun enqueueResult(result: Result<List<Departure>>) {
+        fun enqueueResult(result: Result<DeparturesAtStop>) {
             oneShotQueue.addLast(result)
         }
 
+        /**
+         * Convenience: enqueue a successful one-shot with [departures] and no sideloaded routes.
+         * Tests that want to assert the route-name join on the favourites badge use
+         * [enqueueSuccessWithRoutes] instead.
+         */
         fun enqueueSuccess(departures: List<Departure>) {
-            oneShotQueue.addLast(Result.Success(departures))
+            oneShotQueue.addLast(Result.Success(DeparturesAtStop(departures = departures, routes = emptyList())))
+        }
+
+        fun enqueueSuccessWithRoutes(
+            departures: List<Departure>,
+            routes: List<Route>,
+        ) {
+            oneShotQueue.addLast(Result.Success(DeparturesAtStop(departures = departures, routes = routes)))
         }
 
         fun enqueueError(throwable: Throwable) {
@@ -53,7 +67,7 @@ class FakeDepartureRepository
         override suspend fun getDepartures(
             stopId: StopId,
             routeType: RouteType,
-        ): Result<List<Departure>> {
+        ): Result<DeparturesAtStop> {
             oneShotKeys += stopId to routeType
             return oneShotQueue.removeFirstOrNull()
                 ?: error("FakeDepartureRepository: no result enqueued for ($stopId, $routeType)")

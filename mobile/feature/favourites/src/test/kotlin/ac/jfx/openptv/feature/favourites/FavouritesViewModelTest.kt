@@ -8,7 +8,8 @@ import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ReorderFavouritesUseCase
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.testing.DepartureMother
-import ac.jfx.openptv.core.testing.FavouriteRouteAtStopMother
+import ac.jfx.openptv.core.testing.FavouriteDestinationAtStopMother
+import ac.jfx.openptv.core.testing.RouteMother
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -28,14 +29,11 @@ import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Unit tests for [FavouritesViewModel].
+ * Unit tests for [FavouritesViewModel] against the hand-written fakes.
  *
- * Uses real [FakeFavouritesRepository] / [FakeDepartureRepository] from `:core:data-test`. No
- * MockK. Sort persistence was removed in issue #78 — the screen no longer surfaces sort UI, so
- * the previously-needed DataStore harness has been dropped.
- *
- * Coroutines: [StandardTestDispatcher] so we control timing precisely via `advanceUntilIdle` /
- * `advanceTimeBy` and the polling tick can be exercised by hand.
+ * Issue #137: favourites are destination-keyed `(stopId, destinationKey)`. Next-departure picks
+ * the soonest matching service across whatever route happens to operate it, and the row exposes
+ * that route's badge alongside the destination label.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FavouritesViewModelTest {
@@ -55,8 +53,6 @@ class FavouritesViewModelTest {
 
     @After
     fun tearDown() {
-        // Always stop the tick before resetting the dispatcher so a still-running polling
-        // coroutine doesn't bleed an uncaught exception into the next test's `runTest`.
         activeViewModel?.stopObserving()
         Dispatchers.resetMain()
     }
@@ -83,21 +79,15 @@ class FavouritesViewModelTest {
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111)
-                        .withStopName("Brunswick").withRouteNumber("19")
-                        .withPosition(0)
-                        .build(),
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(2).withRouteId(22).withDirectionId(222)
-                        .withStopName("Aberfeldie").withRouteNumber("57")
-                        .withPosition(1)
-                        .build(),
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(3).withRouteId(33).withDirectionId(333)
-                        .withStopName("Carlton").withRouteNumber("96")
-                        .withPosition(2)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withDestinationName("North Coburg")
+                        .withStopName("Brunswick").withPosition(0).build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(2).withDestinationKey("city").withDestinationName("City")
+                        .withStopName("Aberfeldie").withPosition(1).build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(3).withDestinationKey("east brunswick").withDestinationName("East Brunswick")
+                        .withStopName("Carlton").withPosition(2).build(),
                 ),
             )
             val viewModel = newViewModel()
@@ -107,25 +97,21 @@ class FavouritesViewModelTest {
             assertThat(loaded.rows.map { it.stopName })
                 .containsExactly("Brunswick", "Aberfeldie", "Carlton")
                 .inOrder()
-            // No sort UI — edit mode and refreshing flags default to false.
             assertThat(loaded.editMode).isFalse()
             assertThat(loaded.isRefreshing).isFalse()
         }
 
     @Test
-    fun `onReorder writes the new triple ordering to the repository`() =
+    fun `onReorder writes the new pair ordering to the repository`() =
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(2).withRouteId(22).withDirectionId(222).withPosition(1)
-                        .build(),
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(3).withRouteId(33).withDirectionId(333).withPosition(2)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0).build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(2).withDestinationKey("city").withPosition(1).build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(3).withDestinationKey("frankston").withPosition(2).build(),
                 ),
             )
             val viewModel = newViewModel()
@@ -135,14 +121,13 @@ class FavouritesViewModelTest {
             viewModel.onReorder(
                 orderedKeys =
                     listOf(
-                        FavouriteKey(2, 22, 222),
-                        FavouriteKey(3, 33, 333),
-                        FavouriteKey(1, 11, 111),
+                        FavouriteKey(2, "city"),
+                        FavouriteKey(3, "frankston"),
+                        FavouriteKey(1, "north coburg"),
                     ),
             )
             advanceUntilIdle()
 
-            // The fake's reorder mutates `position` to match the supplied order.
             val current = favouritesRepository.current.sortedBy { it.position }
             assertThat(current.map { it.stopId.value }).containsExactly(2, 3, 1).inOrder()
         }
@@ -152,29 +137,26 @@ class FavouritesViewModelTest {
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(2).withRouteId(22).withDirectionId(222).withPosition(1)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0).build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(2).withDestinationKey("city").withPosition(1).build(),
                 ),
             )
             val viewModel = newViewModel()
             advanceUntilIdle()
 
-            viewModel.onSwipeDelete(FavouriteKey(stopId = 2, routeId = 22, directionId = 222))
+            viewModel.onSwipeDelete(FavouriteKey(stopId = 2, destinationKey = "city"))
             advanceUntilIdle()
 
-            // The repository no longer has the deleted row.
             assertThat(favouritesRepository.current.map { it.stopId.value }).containsExactly(1)
 
-            // The pending undo carries the deleted row and its original position.
             val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
             val undo = loaded.pendingUndo
             assertThat(undo).isNotNull()
             assertThat(undo!!.originalPosition).isEqualTo(1)
             assertThat(undo.row.key.stopId).isEqualTo(2)
+            assertThat(undo.row.key.destinationKey).isEqualTo("city")
         }
 
     @Test
@@ -182,15 +164,14 @@ class FavouritesViewModelTest {
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0).build(),
                 ),
             )
             val viewModel = newViewModel()
             advanceUntilIdle()
 
-            viewModel.onSwipeDelete(FavouriteKey(stopId = 1, routeId = 11, directionId = 111))
+            viewModel.onSwipeDelete(FavouriteKey(stopId = 1, destinationKey = "north coburg"))
             advanceUntilIdle()
             assertThat(favouritesRepository.current).isEmpty()
 
@@ -202,16 +183,13 @@ class FavouritesViewModelTest {
             assertThat(loaded.pendingUndo).isNull()
         }
 
-    // ---------- edit mode (issue #78) ----------
-
     @Test
     fun `toggleEditMode flips Loaded editMode flag`() =
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0).build(),
                 ),
             )
             val viewModel = newViewModel()
@@ -232,9 +210,8 @@ class FavouritesViewModelTest {
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0).build(),
                 ),
             )
             val viewModel = newViewModel()
@@ -247,21 +224,18 @@ class FavouritesViewModelTest {
             assertThat((viewModel.uiState.value as FavouritesUiState.Loaded).editMode).isFalse()
         }
 
-    // ---------- pull-to-refresh (issue #78) ----------
-
     @Test
     fun `refresh flips isRefreshing and runs an extra fan-out cycle`() =
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0).build(),
                 ),
             )
             val dep =
                 DepartureMother.aDeparture()
-                    .withRouteId(11).withDirectionId(111)
+                    .withDirectionName("North Coburg")
                     .withScheduledDepartureUtc(clock.now() + 5.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 5.minutes)
                     .build()
@@ -269,32 +243,28 @@ class FavouritesViewModelTest {
 
             val viewModel = newViewModel()
             advanceUntilIdle()
-            // No tick running — refresh() drives the whole fan-out.
             viewModel.refresh()
             advanceUntilIdle()
 
-            // After the fan-out lands, isRefreshing flips back off.
             val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
             assertThat(loaded.isRefreshing).isFalse()
             assertThat(departureRepository.oneShotKeys).hasSize(1)
         }
 
-    // ---------- 60 s tick + Semaphore-bounded fan-out ----------
-
     @Test
-    fun `startObserving fetches next-departure for each favourite and exposes Loaded labels with both clock times`() =
+    fun `startObserving fetches next-departure for each favourite and exposes Loaded with the live route badge`() =
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg")
+                        .withRouteType(RouteType.Tram).build(),
                 ),
             )
-            // Real-time tracking lags the timetable by 90 s — both should appear on the row.
+            // Real-time tracking lags the timetable — both clock times should land on the row.
             val matching =
                 DepartureMother.aDeparture()
-                    .withRouteId(11).withDirectionId(111)
+                    .withRouteId(19).withDirectionName("North Coburg")
                     .withScheduledDepartureUtc(clock.now() + 5.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 6.minutes + 30.seconds)
                     .build()
@@ -309,12 +279,96 @@ class FavouritesViewModelTest {
 
             val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
             val next = loaded.rows.single().nextDeparture as NextDepartureState.Loaded
-            // Issue #78 part 2: both scheduled and live are exposed. Issue #89 moved the
-            // actual clock-face formatting into the Compose layer (so a 12/24-hour flip
-            // reflects without a tick), so the contract here is the two raw [Instant]s diverge.
             assertThat(next.scheduledUtc).isNotNull()
             assertThat(next.estimatedUtc).isNotNull()
             assertThat(next.estimatedUtc).isNotEqualTo(next.scheduledUtc)
+            // Issue #137: the badge reflects the actual next service. With tram routeType +
+            // empty routeNumber/routeName from the mother default, the helper falls back to
+            // `#<routeId>`.
+            assertThat(next.routeBadge).isEqualTo("#19")
+            assertThat(next.routeName).isEqualTo("North Coburg")
+        }
+
+    @Test
+    fun `train badge shows the line name joined from the routes sideload (issue #137 regression)`() =
+        runTest(dispatcher) {
+            // The regression itself: favouriting a Belgrave train should render "Belgrave" on the
+            // row badge, not "#<routeId>". Before the fix the VM derived the badge from the
+            // departure alone with blank routeName/routeNumber and the helper fell back to the id.
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1071).withDestinationKey("belgrave").withDestinationName("Belgrave")
+                        .withRouteType(RouteType.Train).build(),
+                ),
+            )
+            val belgraveDep =
+                DepartureMother.aDeparture()
+                    .withRouteId(5).withDirectionName("Belgrave").withRunRef("BEL-1")
+                    .withScheduledDepartureUtc(clock.now() + 5.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 5.minutes)
+                    .build()
+            val belgraveRoute = RouteMother.aRoute().withId(5).withName("Belgrave").withRouteType(RouteType.Train).build()
+            departureRepository.enqueueSuccessWithRoutes(
+                departures = listOf(belgraveDep),
+                routes = listOf(belgraveRoute),
+            )
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            runCurrent()
+            runCurrent()
+            viewModel.stopObserving()
+
+            val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
+            val next = loaded.rows.single().nextDeparture as NextDepartureState.Loaded
+            assertThat(next.routeBadge).isEqualTo("Belgrave")
+        }
+
+    @Test
+    fun `multi-route destination badge reflects whichever line is actually next`() =
+        runTest(dispatcher) {
+            // The headline #137 affordance on the favourites screen: at Caulfield → City, the
+            // favourite row shows the badge of the route that's soonest. The badge text is the
+            // line name joined from the PTV `routes` sideload (issue #137 regression fix).
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(22180).withDestinationKey("city").withDestinationName("City")
+                        .withRouteType(RouteType.Train).build(),
+                ),
+            )
+            val cran =
+                DepartureMother.aDeparture()
+                    .withRouteId(101).withDirectionName("City").withRunRef("CRA")
+                    .withScheduledDepartureUtc(clock.now() + 4.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 4.minutes)
+                    .build()
+            val pak =
+                DepartureMother.aDeparture()
+                    .withRouteId(102).withDirectionName("City").withRunRef("PAK")
+                    .withScheduledDepartureUtc(clock.now() + 9.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 9.minutes)
+                    .build()
+            val cranRoute = RouteMother.aRoute().withId(101).withName("Cranbourne").withRouteType(RouteType.Train).build()
+            val pakRoute = RouteMother.aRoute().withId(102).withName("Pakenham").withRouteType(RouteType.Train).build()
+            departureRepository.enqueueSuccessWithRoutes(
+                departures = listOf(pak, cran),
+                routes = listOf(cranRoute, pakRoute),
+            )
+
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            runCurrent()
+            runCurrent()
+            viewModel.stopObserving()
+
+            val loaded = viewModel.uiState.value as FavouritesUiState.Loaded
+            val next = loaded.rows.single().nextDeparture as NextDepartureState.Loaded
+            // Cranbourne is sooner — its line name wins.
+            assertThat(next.routeBadge).isEqualTo("Cranbourne")
         }
 
     @Test
@@ -322,14 +376,13 @@ class FavouritesViewModelTest {
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0).build(),
                 ),
             )
             val dep =
                 DepartureMother.aDeparture()
-                    .withRouteId(11).withDirectionId(111)
+                    .withDirectionName("North Coburg")
                     .withScheduledDepartureUtc(clock.now() + 5.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 5.minutes)
                     .build()
@@ -355,14 +408,13 @@ class FavouritesViewModelTest {
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0).build(),
                 ),
             )
             val dep =
                 DepartureMother.aDeparture()
-                    .withRouteId(11).withDirectionId(111)
+                    .withDirectionName("North Coburg")
                     .withScheduledDepartureUtc(clock.now() + 3.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 3.minutes)
                     .build()
@@ -394,18 +446,17 @@ class FavouritesViewModelTest {
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0).build(),
                 ),
             )
-            val otherRoute =
+            val otherDest =
                 DepartureMother.aDeparture()
-                    .withRouteId(99).withDirectionId(99)
+                    .withDirectionName("Footscray")
                     .withScheduledDepartureUtc(clock.now() + 5.minutes)
                     .withEstimatedDepartureUtc(clock.now() + 5.minutes)
                     .build()
-            departureRepository.enqueueSuccess(listOf(otherRoute))
+            departureRepository.enqueueSuccess(listOf(otherDest))
 
             val viewModel = newViewModel()
             advanceUntilIdle()
@@ -423,10 +474,9 @@ class FavouritesViewModelTest {
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111)
-                        .withRouteType(RouteType.Tram).withPosition(0)
-                        .build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg")
+                        .withRouteType(RouteType.Tram).withPosition(0).build(),
                 ),
             )
             val viewModel = newViewModel()
@@ -440,15 +490,15 @@ class FavouritesViewModelTest {
         runTest(dispatcher) {
             favouritesRepository.seed(
                 listOf(
-                    FavouriteRouteAtStopMother.aFavouriteRouteAtStop()
-                        .withStopId(1).withRouteId(11).withDirectionId(111).withPosition(0)
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("north coburg").withPosition(0)
                         .withLat(-37.8183).withLng(144.9671)
                         .build(),
                 ),
             )
             val viewModel = newViewModel()
             advanceUntilIdle()
-            viewModel.onSwipeDelete(FavouriteKey(stopId = 1, routeId = 11, directionId = 111))
+            viewModel.onSwipeDelete(FavouriteKey(stopId = 1, destinationKey = "north coburg"))
             advanceUntilIdle()
             viewModel.onUndoDelete()
             advanceUntilIdle()
@@ -458,7 +508,6 @@ class FavouritesViewModelTest {
             assertThat(restored.lng).isEqualTo(144.9671)
         }
 
-    /** A `Clock` that returns a fixed instant. */
     private class FakeClock(private val instant: Instant) : Clock {
         override fun now(): Instant = instant
     }
