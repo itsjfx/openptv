@@ -113,7 +113,22 @@ class RetrofitNearbyStopsDataSourceTest {
 
             val recorded = server.takeRequest()
             assertThat(recorded.path)
-                .isEqualTo("/api/v3/stops/location/-37.818300,144.967100?max_distance=750")
+                .isEqualTo(
+                    "/api/v3/stops/location/-37.818300,144.967100?max_distance=750&max_results=600",
+                )
+        }
+
+    @Test
+    fun `request URL overrides PTV's stingy max_results default so wide fetches stay full`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
+
+            dataSource.stopsNear(FLINDERS, RADIUS_M)
+
+            // PTV defaults max_results to 30 and applies it before max_distance, so a wide-radius
+            // fetch would otherwise only return the 30 stops nearest the centre (issue #124).
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).contains("max_results=600")
         }
 
     @Test
@@ -133,7 +148,7 @@ class RetrofitNearbyStopsDataSourceTest {
             assertThat(recorded.path)
                 .isEqualTo(
                     "/api/v3/stops/location/-37.818300,144.967100?max_distance=$RADIUS_M" +
-                        "&route_types=0&route_types=1&route_types=2",
+                        "&max_results=600&route_types=0&route_types=1&route_types=2",
                 )
         }
 
