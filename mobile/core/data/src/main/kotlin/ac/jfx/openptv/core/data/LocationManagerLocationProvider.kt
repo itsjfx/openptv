@@ -17,17 +17,26 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Default [LocationProvider]. Uses `android.location.LocationManager` with `NETWORK_PROVIDER` (and
- * a `GPS_PROVIDER` fall-back) — deliberately not `FusedLocationProviderClient`, which is part of
- * Google Play Services. The whole project's GrapheneOS constraint means GMS is off the table; a
- * detekt rule (`ForbidPlayServices`) in `:lint:detekt` keeps that boundary enforceable in CI.
+ * Default [LocationProvider]. Uses `android.location.LocationManager` with `GPS_PROVIDER` AND
+ * `NETWORK_PROVIDER` registered together — deliberately not `FusedLocationProviderClient`, which
+ * is part of Google Play Services. The whole project's GrapheneOS constraint means GMS is off the
+ * table; a detekt rule (`ForbidPlayServices`) in `:lint:detekt` keeps that boundary enforceable
+ * in CI.
  *
- * **Coarse-or-fine.** PTV stops aren't block-precise — the nearby map screen (issue #37) doesn't
- * need anything tighter than ~100 m. Since issue #91 the screen requests COARSE + FINE together
- * so Android 12+ shows the user the Precise/Approximate toggle; this provider treats either grant
- * as sufficient (the `hasLocationPermission` check below is an OR). We don't tighten the
- * `LocationManager` provider choice or callback cadence based on the grant — coarse-resolution
- * fixes match the visible-state-change resolution of the map either way.
+ * **Both providers registered (issue #127).** The earlier impl preferred NETWORK with a GPS
+ * fall-back and picked ONE. That meant the system "location in use" indicator dropped on/off as
+ * NETWORK fixes trickled in every 10 s (NETWORK can be that slow even with a tower fix when wifi
+ * is the only positioning source), and the user's blue dot lagged badly on the nearby map. Now
+ * we register both providers with the same callback so the user gets whichever fires first — GPS
+ * for precision when outdoors, NETWORK for the quick warm-up while GPS is still acquiring. Both
+ * registrations also keep Android's foreground-location indicator solidly lit while the user is on
+ * the map (the indicator turns off when no provider is actively delivering updates).
+ *
+ * **Coarse-or-fine.** Since issue #91 the screen requests COARSE + FINE together so Android 12+
+ * shows the user the Precise/Approximate toggle; this provider treats either grant as sufficient
+ * (the `hasLocationPermission` check below is an OR). When only COARSE is granted, the OS
+ * automatically downgrades GPS fixes to ~2 km resolution — registering GPS regardless is still
+ * correct, the OS just clamps the precision.
  *
  * **Behaviour on permission missing / providers disabled.** Both methods absorb the failure
  * locally instead of bubbling a `SecurityException` up to the caller:
@@ -76,21 +85,25 @@ internal class LocationManagerLocationProvider
                     return@callbackFlow
                 }
 
-                // Prefer NETWORK_PROVIDER; fall back to GPS if Network isn't enabled (rural Vic,
-                // airplane mode + GPS on). If neither is enabled, complete the flow — caller can
-                // observe `isProviderEnabled` if it wants a richer "no location available" state.
-                val provider =
-                    when {
-                        manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER) ->
-                            LocationManager.NETWORK_PROVIDER
-                        manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ->
-                            LocationManager.GPS_PROVIDER
-                        else -> {
-                            close()
-                            return@callbackFlow
-                        }
-                    }
+                // Register against every enabled provider so the user gets whichever fires first
+                // — GPS for precision once acquired, NETWORK for the quick wake-up beforehand.
+                // Registering both also keeps Android's foreground-location indicator solidly lit
+                // (issue #127): with only one provider registered the indicator can blink off
+                // between fixes, making it look like the app has lost the user. If neither
+                // provider is enabled, complete the flow — caller can observe `isProviderEnabled`
+                // if it wants a richer "no location available" state.
+                val providers =
+                    listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+                        .filter { manager.isProviderEnabled(it) }
+                if (providers.isEmpty()) {
+                    close()
+                    return@callbackFlow
+                }
 
+                // A single listener fans both providers' callbacks into the same flow. If the user
+                // disables one provider mid-stream, we keep the other one alive instead of
+                // completing the whole flow — only complete when the LAST provider drops.
+                val activeProviders = providers.toMutableSet()
                 val listener =
                     object : LocationListener {
                         override fun onLocationChanged(location: Location) {
@@ -98,23 +111,28 @@ internal class LocationManagerLocationProvider
                         }
 
                         override fun onProviderDisabled(provider: String) {
-                            // Provider disabled mid-stream (user toggled Location off, or
-                            // GrapheneOS revoked it). Complete cleanly rather than throw.
-                            close()
+                            activeProviders.remove(provider)
+                            if (activeProviders.isEmpty()) {
+                                // Last provider gone (user toggled Location off, or GrapheneOS
+                                // revoked it). Complete cleanly rather than throw.
+                                close()
+                            }
                         }
 
                         // The other two `LocationListener` methods (`onProviderEnabled`,
-                        // `onStatusChanged`) are no-ops on API 30+ and irrelevant to coarse
-                        // tracking; the defaults inherited from the interface are fine.
+                        // `onStatusChanged`) are no-ops on API 30+ and irrelevant here; the
+                        // defaults inherited from the interface are fine.
                     }
 
                 try {
-                    manager.requestLocationUpdates(
-                        provider,
-                        MIN_TIME_MS,
-                        MIN_DISTANCE_M,
-                        listener,
-                    )
+                    providers.forEach { provider ->
+                        manager.requestLocationUpdates(
+                            provider,
+                            MIN_TIME_MS,
+                            MIN_DISTANCE_M,
+                            listener,
+                        )
+                    }
                 } catch (_: SecurityException) {
                     // Permission race — same handling as lastKnown(): close silently.
                     close()
@@ -139,12 +157,23 @@ internal class LocationManagerLocationProvider
         private fun Location.toCoordinates(): Coordinates = Coordinates(lat = latitude, lng = longitude)
 
         private companion object {
-            // 10 s between callbacks. Coarse-only consumers (nearby map, favourites' Nearest sort)
-            // don't need anything tighter — a faster cadence would chew battery for no UX gain.
-            const val MIN_TIME_MS: Long = 10_000L
+            // 2 s between callbacks. The nearby map's follow-me dot needs to track walking pace
+            // (~1.4 m/s) smoothly — at the old 10 s cadence the dot teleported a full 14 m every
+            // refresh, which the user perceives as "the app lost me" and which also let Android's
+            // foreground-location indicator flicker off between fixes (issue #127). 2 s is the
+            // upper bound on what feels live; lower won't help because GPS itself only fixes at
+            // ~1 Hz on most consumer chips. The `LocationManager` contract treats this as a
+            // minimum interval — the OS still throttles when the device is dozing, so the battery
+            // floor is unchanged for idle states; the wake cost only applies while the user is
+            // actively viewing the map.
+            const val MIN_TIME_MS: Long = 2_000L
 
-            // 50 m between callbacks. Same rationale: PTV stops have walking-distance granularity,
-            // so a callback every 50 m matches the actual visible-state-change resolution.
-            const val MIN_DISTANCE_M: Float = 50f
+            // 5 m between callbacks. The blue dot needs to move smoothly as the user walks; the
+            // old 50 m bound meant standing still vs walking half a block looked identical.
+            // 5 m is roughly the GPS noise floor outdoors so we won't emit pure jitter, and it
+            // matches what the user expects from a "live" map (Maps / OsmAnd are in the same
+            // range). Distance is OR'd with time — a stationary user still gets a 2 s callback to
+            // confirm the fix is fresh, but a moving user gets sub-2 s callbacks at finer granularity.
+            const val MIN_DISTANCE_M: Float = 5f
         }
     }
