@@ -265,59 +265,73 @@ internal class MapLibreOpenPtvMap
         }
 
         /**
-         * One-time install: a clustering-enabled [GeoJsonSource] plus the three layers that
-         * project it to circles + cluster labels. Idempotent — a no-op if the source is already
-         * present (style reloads on theme flip). The source starts empty; [applyPins] swaps the
-         * `FeatureCollection` in on every camera-idle update.
+         * One-time install of the [GeoJsonSource] + pin layers. Idempotent — a no-op if the source
+         * is already present (style reloads on theme flip). The source starts empty; [applyPins]
+         * swaps the `FeatureCollection` in on every camera-idle update.
+         *
+         * **Clustering toggle ([CLUSTERING_ENABLED]).** With clustering on we install the
+         * canonical three-layer scheme (cluster halo + count label + unclustered pin). With it off
+         * we install only the pin layer and render every cached stop individually at all zoom
+         * levels. Clustering is currently OFF: MapLibre's clustered `GeoJsonSource` does not render
+         * its cluster tiles at very low zoom (#134 review — pins vanished entirely when zoomed out
+         * to a whole-metro view), whereas unclustered pins render reliably at every zoom. Flip the
+         * flag back to `true` to restore cluster halos if a future MapLibre build fixes the
+         * low-zoom cluster rendering.
          */
         private fun installPinLayers(style: Style) {
             if (style.getSource(SOURCE_PINS) != null) return
 
             val options =
-                GeoJsonOptions()
-                    .withCluster(true)
-                    .withClusterMaxZoom(CLUSTER_MAX_ZOOM)
-                    .withClusterRadius(CLUSTER_RADIUS_PX)
+                GeoJsonOptions().apply {
+                    if (CLUSTERING_ENABLED) {
+                        withCluster(true)
+                        withClusterMaxZoom(CLUSTER_MAX_ZOOM)
+                        withClusterRadius(CLUSTER_RADIUS_PX)
+                    }
+                }
             style.addSource(GeoJsonSource(SOURCE_PINS, options))
 
-            // Cluster halo — a soft circle behind the count label. Sized in two steps so a busy
-            // CBD area still looks distinguishable from a quiet suburb pair. Wrapping the
-            // colour in `Expression.color` matches the same fix the unclustered layer uses —
-            // a raw int works with `PropertyFactory.circleColor(int)` directly but NOT inside
-            // a parent expression.
-            val clusterCircle =
-                CircleLayer(LAYER_CLUSTERS, SOURCE_PINS).withProperties(
-                    PropertyFactory.circleColor(CLUSTER_COLOR),
-                    PropertyFactory.circleRadius(
-                        Expression.step(
-                            Expression.get(GEOJSON_PROP_POINT_COUNT),
-                            Expression.literal(CLUSTER_RADIUS_SMALL_PX),
-                            Expression.literal(CLUSTER_STEP_MID),
-                            Expression.literal(CLUSTER_RADIUS_MID_PX),
-                            Expression.literal(CLUSTER_STEP_LARGE),
-                            Expression.literal(CLUSTER_RADIUS_LARGE_PX),
+            if (CLUSTERING_ENABLED) {
+                // Cluster halo — a soft circle behind the count label. Sized in two steps so a busy
+                // CBD area still looks distinguishable from a quiet suburb pair. Wrapping the
+                // colour in `Expression.color` matches the same fix the unclustered layer uses —
+                // a raw int works with `PropertyFactory.circleColor(int)` directly but NOT inside
+                // a parent expression.
+                val clusterCircle =
+                    CircleLayer(LAYER_CLUSTERS, SOURCE_PINS).withProperties(
+                        PropertyFactory.circleColor(CLUSTER_COLOR),
+                        PropertyFactory.circleRadius(
+                            Expression.step(
+                                Expression.get(GEOJSON_PROP_POINT_COUNT),
+                                Expression.literal(CLUSTER_RADIUS_SMALL_PX),
+                                Expression.literal(CLUSTER_STEP_MID),
+                                Expression.literal(CLUSTER_RADIUS_MID_PX),
+                                Expression.literal(CLUSTER_STEP_LARGE),
+                                Expression.literal(CLUSTER_RADIUS_LARGE_PX),
+                            ),
                         ),
-                    ),
-                    PropertyFactory.circleStrokeColor(STROKE_COLOR),
-                    PropertyFactory.circleStrokeWidth(CLUSTER_STROKE_WIDTH_PX),
-                )
-            clusterCircle.setFilter(Expression.has(GEOJSON_PROP_POINT_COUNT))
-            style.addLayer(clusterCircle)
+                        PropertyFactory.circleStrokeColor(STROKE_COLOR),
+                        PropertyFactory.circleStrokeWidth(CLUSTER_STROKE_WIDTH_PX),
+                    )
+                clusterCircle.setFilter(Expression.has(GEOJSON_PROP_POINT_COUNT))
+                style.addLayer(clusterCircle)
 
-            // Cluster count label sitting on top of the halo.
-            val clusterCount =
-                SymbolLayer(LAYER_CLUSTER_COUNT, SOURCE_PINS).withProperties(
-                    PropertyFactory.textField(Expression.toString(Expression.get(GEOJSON_PROP_POINT_COUNT))),
-                    PropertyFactory.textSize(CLUSTER_LABEL_SIZE_SP),
-                    PropertyFactory.textColor(LABEL_COLOR),
-                    PropertyFactory.textIgnorePlacement(true),
-                    PropertyFactory.textAllowOverlap(true),
-                )
-            clusterCount.setFilter(Expression.has(GEOJSON_PROP_POINT_COUNT))
-            style.addLayer(clusterCount)
+                // Cluster count label sitting on top of the halo.
+                val clusterCount =
+                    SymbolLayer(LAYER_CLUSTER_COUNT, SOURCE_PINS).withProperties(
+                        PropertyFactory.textField(Expression.toString(Expression.get(GEOJSON_PROP_POINT_COUNT))),
+                        PropertyFactory.textSize(CLUSTER_LABEL_SIZE_SP),
+                        PropertyFactory.textColor(LABEL_COLOR),
+                        PropertyFactory.textIgnorePlacement(true),
+                        PropertyFactory.textAllowOverlap(true),
+                    )
+                clusterCount.setFilter(Expression.has(GEOJSON_PROP_POINT_COUNT))
+                style.addLayer(clusterCount)
+            }
 
-            // Unclustered single-stop circle, colour driven by the stop's route type. The match
-            // expression maps each PTV wire code to a constant; falls back to grey for Unknown.
+            // Single-stop circle, colour driven by the stop's route type. The match expression
+            // maps each PTV wire code to a constant; falls back to grey for Unknown. When
+            // clustering is on this is the "unclustered leaf" layer; when off it renders every pin.
             val pinCircle =
                 CircleLayer(LAYER_UNCLUSTERED, SOURCE_PINS).withProperties(
                     PropertyFactory.circleRadius(PIN_RADIUS_PX),
@@ -354,7 +368,11 @@ internal class MapLibreOpenPtvMap
                         ),
                     ),
                 )
-            pinCircle.setFilter(Expression.not(Expression.has(GEOJSON_PROP_POINT_COUNT)))
+            // Only render leaf (non-cluster) features when clustering is on; with it off every
+            // feature is a stop, so render them all (no filter).
+            if (CLUSTERING_ENABLED) {
+                pinCircle.setFilter(Expression.not(Expression.has(GEOJSON_PROP_POINT_COUNT)))
+            }
             style.addLayer(pinCircle)
         }
 
@@ -532,6 +550,20 @@ internal class MapLibreOpenPtvMap
         }
 
         private companion object {
+            /**
+             * Master switch for MapLibre's native point clustering (#134 review). When `true` the
+             * map installs the cluster halo + count layers and groups dense pins into halos at low
+             * zoom; when `false` every cached stop renders as its own pin at all zoom levels.
+             *
+             * Currently `false`: MapLibre's clustered `GeoJsonSource` does not render its cluster
+             * tiles at very low zoom — zooming out to a whole-metro view dropped *all* pins even
+             * though they were cached and in the source (reproduced on MapLibre 11.11, 11.13.5 and
+             * 13.2.0; unclustered pins render fine at every zoom). Rendering individual pins is the
+             * reliable behaviour today. Flip back to `true` if a future MapLibre build fixes the
+             * low-zoom cluster rendering.
+             */
+            private const val CLUSTERING_ENABLED: Boolean = false
+
             /**
              * Tap within ~80 m of a pin counts as a hit. Original Phase 05 default of 30 m was
              * tuned to the metric "one stop's worth of granularity" but in practice that's only
