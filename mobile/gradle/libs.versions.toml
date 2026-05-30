@@ -51,7 +51,7 @@ retrofit = "3.0.0"
 # composable; the wrap is mandatory anyway for the test seam (the Hilt-
 # Compose UI test injects a `FakeOpenPtvMap`). License is BSD-2-Clause and
 # no GMS deps — verified via `:app:dependencyGuard` baseline diff.
-maplibreAndroid = "11.11.0"
+maplibreAndroid = "13.2.0"
 
 # Testing
 junit = "4.13.2"

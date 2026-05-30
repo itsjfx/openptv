@@ -64,7 +64,7 @@ androidx.datastore:datastore:1.1.1
 androidx.documentfile:documentfile:1.0.0
 androidx.dynamicanimation:dynamicanimation:1.0.0
 androidx.emoji2:emoji2:1.4.0
-androidx.fragment:fragment:1.8.2
+androidx.fragment:fragment:1.8.9
 androidx.graphics:graphics-path:1.0.1
 androidx.graphics:graphics-shapes-android:1.0.1
 androidx.graphics:graphics-shapes:1.0.1
@@ -168,5 +168,5 @@ org.jetbrains:annotations:23.0.0
 org.jspecify:jspecify:1.0.0
 org.maplibre.gl:android-sdk-geojson:6.0.1
 org.maplibre.gl:android-sdk-turf:6.0.1
-org.maplibre.gl:android-sdk:11.11.0
+org.maplibre.gl:android-sdk:13.2.0
 org.maplibre.gl:maplibre-android-gestures:0.0.4
