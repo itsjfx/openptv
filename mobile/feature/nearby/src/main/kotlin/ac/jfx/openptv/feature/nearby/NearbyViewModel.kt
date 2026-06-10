@@ -581,30 +581,28 @@ class NearbyViewModel
             internal const val FOLLOW_LEASH_METERS: Double = 50.0
 
             /**
-             * Cap on the LRU stop cache. Sized so a whole session of pan/zoom across the metro
-             * area never evicts — previously-visited regions stay on the map instead of vanishing.
+             * Cap on the LRU stop cache. Sized so a realistic session of pan/zoom across the metro
+             * area doesn't evict — previously-visited regions (e.g. the CBD) stay on the map
+             * instead of vanishing when you come back to them.
              *
-             * **Issue #134 review.** The previous 2000 bound was too small once #134 raised the
+             * **Issue #134 review.** The original 2000 bound was too small once #134 raised the
              * per-fetch result cap to [RetrofitNearbyStopsDataSource]'s `max_results` (600): the
              * cache held barely three wide (metro-zoom) fetches, so exploring a fourth area evicted
-             * the earliest-visited stops by recency. Concretely — load the CBD, pan out to a few
-             * suburbs, then come back, and the CBD pins were gone (and a single re-fetch only
-             * restores the 600 nearest the camera centre, so the area came back far sparser than it
-             * was). The same eviction is why pins "only loaded reliably when zoomed in far": a
-             * previously-loaded area no longer had its pins cached, so it stayed blank until a fresh
-             * fetch landed instead of rendering the cached set instantly.
+             * the earliest-visited stops by recency — load the CBD, pan out to a few suburbs, come
+             * back, and the CBD pins were gone (a single re-fetch only restores the 600 nearest the
+             * camera centre, so the area returned far sparser than it was).
              *
-             * 20000 holds ~33 full wide fetches — far more distinct stops than a heavy metro
-             * exploration session accumulates — so the CBD (and every other visited area) persists
-             * for the lifetime of the screen, which is the behaviour the cache is there to provide.
-             * The bound only scales memory with what's *actually* loaded (the LinkedHashMap grows
-             * lazily), so a normal session that loads a few thousand stops pays for a few thousand,
-             * not the cap. Even at the cap each `Stop` is ~150 bytes, so 20000 entries is ~3 MB —
-             * trivial on any phone. We keep a hard cap (rather than going unbounded) so pathological
-             * regional panning that would load every stop in Victoria still can't grow without
-             * limit; eldest-out eviction still applies once the bound is genuinely exceeded.
+             * 5000 holds ~8 full wide fetches — comfortably more distinct stops than a normal
+             * exploration session accumulates — so visited areas persist for the lifetime of the
+             * screen. We don't go higher because clustering is currently disabled (see
+             * `MapLibreOpenPtvMap.CLUSTERING_ENABLED`): every cached stop renders as its own circle,
+             * so this cap also bounds how many pins the map draws at once when zoomed out. 5000 is a
+             * deliberate balance — large enough that the CBD persists, small enough that the
+             * zoomed-out draw stays cheap. The `LinkedHashMap` grows lazily so a session only pays
+             * for what it loads; at the cap each `Stop` is ~150 bytes (~750 KB). Eldest-out eviction
+             * still applies once the bound is exceeded.
              */
-            internal const val MAX_CACHED_STOPS: Int = 20_000
+            internal const val MAX_CACHED_STOPS: Int = 5_000
         }
     }
 
