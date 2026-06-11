@@ -30,18 +30,18 @@ kotlinxSerialization = "1.11.0"
 kotlinxDatetime = "0.6.2"
 
 # Coroutines
-kotlinxCoroutines = "1.10.2"
+kotlinxCoroutines = "1.11.0"
 
 # Persistence
-androidxDatastore = "1.1.1"
-# Room is the local DB. Pinned to the latest stable 2.7.x line — 2.7 ships the
-# KSP2-compatible compiler so KSP `kotlin = "2.3.20"` resolves cleanly. Schema
+androidxDatastore = "1.2.1"
+# Room is the local DB. On the latest stable 2.8.x line — ships the KSP2-
+# compatible compiler so KSP `kotlin = "2.3.20"` resolves cleanly. Schema
 # export is on (see `:core:database/build.gradle.kts`) so the JSON under
 # `core/database/schemas/` is committed and migrations can diff against v1.
-androidxRoom = "2.7.2"
+androidxRoom = "2.8.4"
 
 # Networking
-okhttp = "5.3.2"
+okhttp = "5.4.0"
 retrofit = "3.0.0"
 
 # Maps. MapLibre Android (BSD-2) is the only MapLibre binding available on
@@ -55,13 +55,13 @@ maplibreAndroid = "11.11.0"
 
 # Testing
 junit = "4.13.2"
-truth = "1.4.4"
+truth = "1.4.5"
 turbine = "1.2.1"
 # Robolectric — only `:core:database` uses it (so far) to give Room
 # in-memory DAO tests a `Context` without an emulator. Pinned to the 4.x line
 # that supports AGP 9 + JDK 21. Other modules continue to use plain JUnit;
 # this is not the default test runtime.
-robolectric = "4.14.1"
+robolectric = "4.16.1"
 androidxTestRunner = "1.7.0"
 # AndroidX test core + JUnit4 extension — pulled in by Compose UI tests and by
 # `createAndroidComposeRule`. Versions track the AndroidX test BOM line that
