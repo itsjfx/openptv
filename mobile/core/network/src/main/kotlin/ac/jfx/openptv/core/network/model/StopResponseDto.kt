@@ -28,9 +28,35 @@ internal data class StopDetailsDto(
     @SerialName("stop_name") val stopName: String,
     @SerialName("stop_suburb") val stopSuburb: String = "",
     @SerialName("route_type") val routeType: Int,
+    /**
+     * Top-level lat/lon — PTV's `/stops/location/...` (nearby) endpoint puts the coordinate
+     * here. The single-stop endpoint (`/stops/{id}/route_type/{type}?stop_location=true`) uses
+     * the nested [stopLocation] shape instead. Defaulted to 0.0 so we don't fail parsing when
+     * only one of the two shapes is present — [toDomain] picks the non-zero one.
+     */
     @SerialName("stop_latitude") val stopLatitude: Double = 0.0,
     @SerialName("stop_longitude") val stopLongitude: Double = 0.0,
+    /**
+     * PR #139 follow-up: the `/stops/{id}/route_type/{type}?stop_location=true` endpoint
+     * returns the GPS pair under `stop_location.gps.{latitude,longitude}` — NOT at the top
+     * level. Without this field the lat/lon read in [toDomain] is always (0, 0), which is what
+     * the issue #123 "show on map" affordance was hitting (PR #139 smoke regression: map
+     * centred on the user's location instead of the requested stop).
+     */
+    @SerialName("stop_location") val stopLocation: StopLocationDto? = null,
     @SerialName("routes") val routes: List<RouteDto> = emptyList(),
+)
+
+@Serializable
+internal data class StopLocationDto(
+    @SerialName("suburb") val suburb: String = "",
+    @SerialName("gps") val gps: GpsDto? = null,
+)
+
+@Serializable
+internal data class GpsDto(
+    @SerialName("latitude") val latitude: Double = 0.0,
+    @SerialName("longitude") val longitude: Double = 0.0,
 )
 
 @Serializable
@@ -48,15 +74,25 @@ internal data class RouteDto(
  */
 internal fun StopResponseDto.toDomain(): StopDetail? {
     val s = stop ?: return null
+    // Pick the nested `stop_location.gps` pair when the top-level fields are absent (= default
+    // 0.0) — the single-stop endpoint only populates the nested shape. The nearby endpoint
+    // continues to use the top-level fields; this fallback is one-way (top-level wins when
+    // both are present, because nearby's flat shape is the canonical projection we render).
+    val gps = s.stopLocation?.gps
+    val lat = if (s.stopLatitude != 0.0) s.stopLatitude else gps?.latitude ?: 0.0
+    val lng = if (s.stopLongitude != 0.0) s.stopLongitude else gps?.longitude ?: 0.0
+    // Same fallback for suburb — single-stop endpoint puts it under `stop_location.suburb`
+    // rather than `stop_suburb`.
+    val suburb = s.stopSuburb.ifBlank { s.stopLocation?.suburb ?: "" }
     return StopDetail(
         stop =
             Stop(
                 id = StopId(s.stopId),
                 name = s.stopName.trim(),
-                suburb = s.stopSuburb.trim(),
+                suburb = suburb.trim(),
                 routeType = RouteType.fromCode(s.routeType),
-                latitude = s.stopLatitude,
-                longitude = s.stopLongitude,
+                latitude = lat,
+                longitude = lng,
             ),
         servingRoutes = s.routes.map { it.toDomain() },
     )

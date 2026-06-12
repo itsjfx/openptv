@@ -77,9 +77,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  *   user wants from a single pin tap, so the screen lands on stop-detail's grouped view).
  */
 @Composable
+@Suppress("LongParameterList")
 fun NearbyRoute(
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int) -> Unit,
     onOpenSettings: () -> Unit,
+    // Issue #123: optional one-shot focus coordinate, supplied by the stop-detail "show on map"
+    // affordance through the `AppNavKey.Nearby` destination args. When both are non-null the
+    // screen re-centres the map on the coordinate the first time this composition runs for the
+    // pair — see the `LaunchedEffect` below. Null in the bottom-nav tab path (which opens Nearby
+    // on whatever camera the VM already holds, unchanged from the existing behaviour).
+    focusLat: Double? = null,
+    focusLon: Double? = null,
     viewModel: NearbyViewModel = hiltViewModel(),
     map: OpenPtvMap = hiltViewModel<NearbyMapHolder>().map,
     initialiser: OpenPtvMapInitialiser = hiltViewModel<NearbyMapHolder>().initialiser,
@@ -91,6 +99,16 @@ fun NearbyRoute(
 
     LaunchedEffect(Unit) {
         initialiser.init()
+    }
+
+    // Issue #123: one-shot camera focus. Keyed on the `(focusLat, focusLon)` pair so the effect
+    // only re-runs when the user re-navigates with a different stop — a configuration change
+    // (rotation, dark-mode flip) keys identically and the effect doesn't re-fire, which preserves
+    // any pan the user has made since arriving. Skipped on the tab variant (both nulls).
+    LaunchedEffect(focusLat, focusLon) {
+        if (focusLat != null && focusLon != null) {
+            viewModel.focusOn(Coordinates(lat = focusLat, lng = focusLon))
+        }
     }
 
     // Request both COARSE and FINE together so Android 12+ shows the Precise/Approximate toggle
@@ -177,7 +195,7 @@ internal fun NearbyScreen(
     timeFormatter: RelativeTimeFormatter,
     distanceFormatter: DistanceFormatter,
     onCameraIdle: (OpenPtvCameraState) -> Unit,
-    onCameraMoveStarted: () -> Unit,
+    onCameraMoveStarted: (CameraMoveReason) -> Unit,
     onPinClicked: (Stop) -> Unit,
     onSheetDismissed: () -> Unit,
     onFollowMeClicked: () -> Unit,

@@ -252,7 +252,7 @@ class NearbyViewModelTest {
             viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 2)
             // New drag begins — cancels the pending fetch.
-            viewModel.onCameraMoveStarted()
+            viewModel.onCameraMoveStarted(CameraMoveReason.USER_GESTURE)
             // Run past where the debounce WOULD have fired the fetch.
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
             advanceUntilIdle()
@@ -275,7 +275,7 @@ class NearbyViewModelTest {
             // fire with the final camera position once the debounce elapses.
             viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 2)
-            viewModel.onCameraMoveStarted()
+            viewModel.onCameraMoveStarted(CameraMoveReason.USER_GESTURE)
             advanceTimeBy(100)
             viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.83, 144.98), 13.0))
             advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
@@ -301,7 +301,7 @@ class NearbyViewModelTest {
             repeat(5) {
                 viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96 + it * 0.01), 13.0))
                 advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS / 4)
-                viewModel.onCameraMoveStarted()
+                viewModel.onCameraMoveStarted(CameraMoveReason.USER_GESTURE)
                 advanceTimeBy(50)
             }
             advanceUntilIdle()
@@ -1148,6 +1148,338 @@ class NearbyViewModelTest {
             // Read directly from the typed flow — round-trip the wire encoding.
             val persisted = userPreferences.mapRouteTypeFilter.first().value
             assertThat(persisted).isEqualTo(DEFAULT_FILTER - RouteType.Bus)
+        }
+
+    // -------------------- focus camera (issue #123) --------------------
+    //
+    // `focusOn(coordinates)` is the one-shot entry the stop-detail "show on map" action calls
+    // via the `AppNavKey.Nearby(focusLat, focusLon)` route. It re-centres the camera at
+    // [FOCUS_ZOOM], disengages follow-me, and schedules a fresh fetch for the new viewport.
+    // The screen calls it once per entry via a `LaunchedEffect` keyed on the focus pair, so the
+    // ViewModel itself doesn't need to guard against multiple calls — each call honours the
+    // most recent coordinate.
+
+    @Test
+    fun `focusOn re-centres camera on the coordinate at street zoom and disengages follow-me`() =
+        runTest(dispatcher) {
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            // Follow-me starts on when a fix is present at grant.
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).isFollowingUser).isTrue()
+
+            val richmond = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmond)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(richmond)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+            // Follow-me is disengaged — the user has named a specific stop, not asked to track
+            // themselves; the dot still renders but the camera no longer chases new fixes.
+            assertThat(loaded.isFollowingUser).isFalse()
+        }
+
+    @Test
+    fun `focusOn schedules a fetch for the focused viewport`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val baselineCalls = nearbyRepo.requestedCalls.size
+
+            val richmond = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmond)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // One fresh fetch fired, for the focused coordinate — the user lands with pins
+            // already on screen without needing to manually pan to trigger a refresh.
+            assertThat(nearbyRepo.requestedCalls.size - baselineCalls).isEqualTo(1)
+            assertThat(nearbyRepo.requestedCalls.last().coordinates).isEqualTo(richmond)
+        }
+
+    @Test
+    fun `focusOn from PermissionDenied still re-centres the camera`() =
+        runTest(dispatcher) {
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = false)
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value).isInstanceOf(NearbyUiState.PermissionDenied::class.java)
+
+            val richmond = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmond)
+            advanceUntilIdle()
+
+            val denied = viewModel.uiState.value as NearbyUiState.PermissionDenied
+            assertThat(denied.camera.centre).isEqualTo(richmond)
+            assertThat(denied.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+        }
+
+    @Test
+    fun `focusOn in PermissionUnasked leaves visible state unchanged — overlay still up`() =
+        runTest(dispatcher) {
+            val viewModel = newViewModel()
+            // Don't call onPermissionResult — stays in PermissionUnasked.
+
+            val richmond = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmond)
+            advanceUntilIdle()
+
+            // Visible state is unchanged — the permission overlay is still up and we don't
+            // allocate a phantom Loaded/Denied variant. The focus coordinate is buffered
+            // internally and consumed by onPermissionResult (see the bug-fix test below).
+            assertThat(viewModel.uiState.value).isEqualTo(NearbyUiState.PermissionUnasked)
+        }
+
+    @Test
+    fun `focusOn before permission grant — first Loaded state lands centred on the focus coords`() =
+        runTest(dispatcher) {
+            // Regression for PR #139: the stop-detail "show on map" affordance navigates to
+            // Nearby with `(focusLat, focusLon)` baked into the destination args. The screen's
+            // permission-pre-grant LaunchedEffect and the focus LaunchedEffect both fire on the
+            // first composition. If focus runs first (state is still PermissionUnasked) the
+            // request used to be silently dropped because the focus LaunchedEffect is keyed on
+            // the focus pair, not on the state — so it doesn't re-fire when Loaded lands.
+            //
+            // Fix: the VM buffers the focus coord and consumes it the first time it transitions
+            // into Loaded, so the user lands framed on the requested stop instead of their own
+            // location (CBD here).
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+
+            // Focus arrives BEFORE permission resolves — this is the race we're pinning.
+            val universityOfMelbourne = Coordinates(lat = -37.7964, lng = 144.9612)
+            viewModel.focusOn(universityOfMelbourne)
+            // No state change yet — overlay is up.
+            assertThat(viewModel.uiState.value).isEqualTo(NearbyUiState.PermissionUnasked)
+
+            // Permission resolves — the very first Loaded state MUST be centred on the focus
+            // coords, not on the user's last-known fix.
+            viewModel.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(universityOfMelbourne)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+            // Follow-me is off — the user named a specific stop, not asked to chase their own
+            // location. Matches the semantics of a direct focusOn call into an already-Loaded
+            // state.
+            assertThat(loaded.isFollowingUser).isFalse()
+            // The fetch fires for the focused viewport — pins are ready without a manual pan.
+            assertThat(nearbyRepo.requestedCalls.last().coordinates).isEqualTo(universityOfMelbourne)
+        }
+
+    @Test
+    fun `focusOn before permission denial — first Denied state lands centred on the focus coords`() =
+        runTest(dispatcher) {
+            // Symmetric to the granted path: even if the user refuses location permission, the
+            // map is still shown and we should honour their "frame on this stop" intent.
+            val viewModel = newViewModel()
+
+            val universityOfMelbourne = Coordinates(lat = -37.7964, lng = 144.9612)
+            viewModel.focusOn(universityOfMelbourne)
+            viewModel.onPermissionResult(granted = false)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            val denied = viewModel.uiState.value as NearbyUiState.PermissionDenied
+            assertThat(denied.camera.centre).isEqualTo(universityOfMelbourne)
+            assertThat(denied.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+        }
+
+    @Test
+    fun `pending focus is consumed exactly once — subsequent permission flips do not refocus`() =
+        runTest(dispatcher) {
+            // Belt-and-braces: a permission revoke + re-grant must NOT refocus on the original
+            // coord — the user has moved on, and the pendingFocus slot is one-shot.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+
+            val universityOfMelbourne = Coordinates(lat = -37.7964, lng = 144.9612)
+            viewModel.focusOn(universityOfMelbourne)
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            // First Loaded was centred on the focus — pending consumed.
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre)
+                .isEqualTo(universityOfMelbourne)
+
+            // User pans elsewhere, then permission gets revoked + re-granted (e.g. flipped via
+            // system settings while the app was backgrounded).
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.8500, 145.0000), 13.0))
+            advanceUntilIdle()
+            viewModel.onPermissionResult(granted = false)
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            // The re-granted Loaded state MUST NOT be centred back on the original focus —
+            // it falls back to the user's last-known fix.
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(flinders)
+        }
+
+    @Test
+    fun `already-granted on arrival — stale onCameraIdle after focus does not clobber the focus camera`() =
+        runTest(dispatcher) {
+            // Regression for PR #139: when permission is already granted (cold-start with prior
+            // grant), `NearbyRoute`'s pre-grant LaunchedEffect fires `onPermissionResult(true)`
+            // synchronously, then the focus LaunchedEffect fires `focusOn(stop)`. MapLibre's
+            // async style/map setup hasn't finished animating to the focus coord yet, so the
+            // first `onCameraIdle` it fires carries the pre-focus frame (user-location / CBD).
+            // Without the suppression, that stale idle clobbers VM camera state and the
+            // `mapReady`-gated camera effect re-animates back to CBD instead of the stop.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+
+            // Sequence mirrors the already-granted-on-arrival path in NearbyRoute.
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            val richmondStop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmondStop)
+            advanceUntilIdle()
+
+            // Stale frame from MapLibre's setup window — the centre is still on the user's
+            // location, not the focused stop. The VM must drop this and keep the focus camera.
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = flinders, zoom = 14.0))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(richmondStop)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+            assertThat(loaded.isFollowingUser).isFalse()
+        }
+
+    @Test
+    fun `onCameraIdle suppression is one-shot — subsequent user-driven idles update the camera`() =
+        runTest(dispatcher) {
+            // Belt-and-braces: the suppression must clear after the post-animation idle on the
+            // expected coord, otherwise a user panning away from the focused stop would be
+            // ignored forever.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val richmondStop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmondStop)
+            advanceUntilIdle()
+
+            // Post-animation idle lands on the focus coord — clears the suppression slot.
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = richmondStop, zoom = NearbyViewModel.FOCUS_ZOOM))
+            advanceUntilIdle()
+
+            // User pans elsewhere. The next idle MUST update the VM camera as normal.
+            val newCentre = Coordinates(lat = -37.8500, lng = 145.0000)
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = newCentre, zoom = 13.0))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(newCentre)
+        }
+
+    @Test
+    fun `already-granted on arrival — programmatic move-started does not clear the focus suppression slot`() =
+        runTest(dispatcher) {
+            // Regression for PR #139 follow-up: MapLibre fires `onCameraMoveStarted` for our own
+            // `animateCamera(focus)` too. The previous fix cleared `pendingProgrammaticCenter` on
+            // every move-started, which disarmed the stale-idle guard before the stale idle
+            // arrived — so the focus camera got clobbered back to the user-location frame and the
+            // map stayed on the user's location instead of the focused stop. The fix gates the
+            // clear on [CameraMoveReason.USER_GESTURE]; a programmatic move-started must NOT
+            // disarm the slot.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val richmondStop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmondStop)
+            advanceUntilIdle()
+
+            // MapLibre fires move-started for our own animateCamera(focus) call.
+            viewModel.onCameraMoveStarted(CameraMoveReason.PROGRAMMATIC)
+            // Stale pre-animation idle from MapLibre's setup window — must be dropped.
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = flinders, zoom = 14.0))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(richmondStop)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+        }
+
+    @Test
+    fun `already-granted on arrival — second onPermissionResult(true) does not clobber a freshly applied focus camera`() =
+        runTest(dispatcher) {
+            // Regression for PR #139 (third attempt — the on-device root cause). When the user
+            // navigates from stop-detail's "show on map" back into Nearby, the screen recomposes
+            // and re-runs its pre-grant `LaunchedEffect(Unit)`. With permission already granted
+            // the LE calls `onPermissionResult(true)` a second time, AFTER the focus
+            // LaunchedEffect has already routed the focus coord through [focusOn] into the
+            // already-Loaded state. Without this guard, the second `onPermissionResult` rebuilds
+            // a fresh `Loaded` from `locationProvider.lastKnown()` and clobbers the focus camera
+            // back to the user's location — observed in device logcat as the very next state
+            // emission after `focusOn` applied the focus.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+
+            // Pre-grant LE fires once on cold-start composition — state becomes Loaded centred
+            // on the user's last-known fix.
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre)
+                .isEqualTo(flinders)
+
+            // Focus LE fires (the user has tapped "show on map") — re-centres on the stop.
+            val universityOfMelbourne = Coordinates(lat = -37.7964, lng = 144.9612)
+            viewModel.focusOn(universityOfMelbourne)
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre)
+                .isEqualTo(universityOfMelbourne)
+
+            // Pre-grant LE re-fires from the post-navigation recomposition — must be a no-op.
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(universityOfMelbourne)
+            assertThat(loaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+            assertThat(loaded.isFollowingUser).isFalse()
+        }
+
+    @Test
+    fun `user gesture move-started clears the suppression slot so a subsequent idle is honoured`() =
+        runTest(dispatcher) {
+            // Complementary to the programmatic case above: the slot MUST clear when the user
+            // pans away during the focus animation — otherwise their pan would be ignored.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val richmondStop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(richmondStop)
+            advanceUntilIdle()
+
+            // User grabs the map mid-animation — that's a real gesture, not the stale frame.
+            viewModel.onCameraMoveStarted(CameraMoveReason.USER_GESTURE)
+            val panned = Coordinates(lat = -37.8500, lng = 145.0000)
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = panned, zoom = 13.0))
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.camera.centre).isEqualTo(panned)
         }
 
     @Test

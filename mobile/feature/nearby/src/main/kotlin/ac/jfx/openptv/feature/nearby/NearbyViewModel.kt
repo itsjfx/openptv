@@ -126,6 +126,35 @@ class NearbyViewModel
         private var userBearingJob: Job? = null
 
         /**
+         * One-shot focus coordinate (issue #123) buffered when the user navigates in from
+         * stop-detail's "show on map" before the permission flow has resolved. The screen calls
+         * [focusOn] inside a `LaunchedEffect` keyed on the focus pair as soon as it composes — at
+         * that moment the state is typically [NearbyUiState.PermissionUnasked], so the camera
+         * can't be moved yet. We store the coordinate here and consume it on the first transition
+         * into [NearbyUiState.Loaded] / [NearbyUiState.PermissionDenied] so the user lands framed
+         * on the requested stop instead of their own location.
+         *
+         * Cleared as soon as it's applied; subsequent permission flips don't re-focus.
+         */
+        private var pendingFocus: Coordinates? = null
+
+        /**
+         * Expected centre of the next [onCameraIdle] after a programmatic camera write (issue
+         * #123 / PR #139 follow-up). The "already-granted on arrival + show on map" path races
+         * MapLibre's async style-load: the focus camera lands in VM state before the map view
+         * has animated to it, so the first `onCameraIdle` MapLibre fires carries the pre-focus
+         * frame (user-location / CBD) and would clobber the focus camera back to the stale value
+         * — the user ends up looking at their own location instead of the requested stop.
+         *
+         * We stash the focus coord here whenever we move the camera programmatically; the next
+         * [onCameraIdle] is dropped unless its centre is within [PROGRAMMATIC_IDLE_TOLERANCE_METERS]
+         * of the expected coord. The first idle that lands on the expected coord clears the slot
+         * and normal idle handling resumes — so the suppression is one-shot and a subsequent
+         * user-driven pan is honoured as usual.
+         */
+        private var pendingProgrammaticCenter: Coordinates? = null
+
+        /**
          * LRU cache of every stop the user has fetched this session. Solves the disappear/reappear
          * problem: panning into a region we've fetched before keeps those pins on-screen
          * immediately, instead of dropping them until the next fetch lands.
@@ -146,6 +175,26 @@ class NearbyViewModel
          * Caller (the screen) tells us the permission decision. Permission grant kicks off a
          * `lastKnown()` snapshot and centres the camera; denial keeps the CBD view and lets the
          * user pan.
+         *
+         * **Idempotent on re-affirmation (PR #139 follow-up).** The screen fires the pre-grant
+         * `LaunchedEffect(Unit)` every time `NearbyRoute` recomposes from a fresh navigation
+         * destination — including the "show on map" return path from stop-detail, which lands a
+         * brand-new `NearbyRoute` composition. If permission was already granted, that re-fires
+         * `onPermissionResult(true)` *after* `focusOn` has already moved the camera onto the
+         * requested stop. Without the in-coroutine guard below we'd rebuild the `Loaded` state
+         * with the `locationProvider.lastKnown()` camera and silently clobber the focus camera
+         * back to the user's location — exactly the bug PR #139 was meant to fix. The earlier
+         * "stale idle" / "gate clear on USER_GESTURE" attempts were chasing a symptom (a stale
+         * camera landing in state via MapLibre's idle callback) when the real cause was the VM
+         * itself overwriting the focus camera one tick after `focusOn` applied it. The fix is
+         * to make the second pre-grant fire a no-op when we're already in a Loaded state: the
+         * state already reflects "permission is granted" and the camera + follow-me + tracker
+         * jobs are correctly seeded — nothing to do.
+         *
+         * The same guard for `granted = false` falling onto an existing `PermissionDenied`
+         * state would be similarly correct, but the screen never calls
+         * `onPermissionResult(false)` automatically — that's only fired from explicit rationale
+         * dismissal, so the redundant-call case doesn't arise on that branch in practice.
          */
         fun onPermissionResult(granted: Boolean) {
             viewModelScope.launch {
@@ -156,20 +205,49 @@ class NearbyViewModel
                 // resolves; using the DEFAULT_FILTER here as a fall-back would silently lose the
                 // user's previous "trams only" choice on a slow first launch.
                 val seedFilter = persistedFilter.await()
+                if (granted && _uiState.value is NearbyUiState.Loaded) {
+                    // Already in the granted-Loaded shape — a recomposition-driven re-fire of the
+                    // screen's pre-grant LaunchedEffect. Re-running the granted branch would
+                    // issue a fresh Loaded with the user-location camera, wiping any focus
+                    // camera that [focusOn] just applied (and disarming the
+                    // [pendingProgrammaticCenter] slot). The state already reflects "permission
+                    // is granted" — nothing to do. Checked inside the coroutine (not at the call
+                    // site) so the snapshot is the state at the moment the redundant call would
+                    // execute, not at enqueue time — back-to-back revoke + re-grant calls in
+                    // tests / quick UI flips correctly see PermissionDenied between them and
+                    // proceed.
+                    return@launch
+                }
                 if (granted) {
                     val fix = locationProvider.lastKnown()
+                    // Issue #123: if the user navigated in from stop-detail's "show on map" while
+                    // the permission overlay was still up, [focusOn] will have stashed the focus
+                    // coordinate. Consume it here so the very first Loaded state lands framed on
+                    // the requested stop — otherwise we'd render the user-location camera first
+                    // and the screen-side LaunchedEffect wouldn't re-fire (it's keyed on the
+                    // focus pair, not on the state transition).
+                    val focus = pendingFocus
+                    pendingFocus = null
+                    pendingProgrammaticCenter = focus
                     val initialCamera =
-                        OpenPtvCameraState(
-                            centre = fix ?: MELBOURNE_CBD,
-                            zoom = INITIAL_ZOOM,
-                        )
+                        if (focus != null) {
+                            OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
+                        } else {
+                            OpenPtvCameraState(
+                                centre = fix ?: MELBOURNE_CBD,
+                                zoom = INITIAL_ZOOM,
+                            )
+                        }
                     _uiState.value =
                         NearbyUiState.Loaded(
                             camera = initialCamera,
                             pins = emptyList(),
                             userLocation = fix,
                             userBearing = null,
-                            isFollowingUser = fix != null,
+                            // A pending focus disengages follow-me — the user has named a specific
+                            // stop, not asked to chase their own location. Same semantics as a
+                            // direct [focusOn] call into an already-Loaded state.
+                            isFollowingUser = focus == null && fix != null,
                             pendingSheet = SheetState.Closed,
                             showEmptyHint = false,
                             routeTypeFilter = seedFilter,
@@ -184,16 +262,25 @@ class NearbyViewModel
                     startUserLocationTracking()
                     startUserBearingTracking()
                 } else {
+                    // Same pending-focus consumption on the denied branch — the user can still see
+                    // the map and we honour their "frame on this stop" intent even if location
+                    // permission was refused.
+                    val focus = pendingFocus
+                    pendingFocus = null
+                    pendingProgrammaticCenter = focus
+                    val initialCamera =
+                        if (focus != null) {
+                            OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
+                        } else {
+                            OpenPtvCameraState(centre = MELBOURNE_CBD, zoom = INITIAL_ZOOM)
+                        }
                     _uiState.value =
                         NearbyUiState.PermissionDenied(
-                            camera = OpenPtvCameraState(centre = MELBOURNE_CBD, zoom = INITIAL_ZOOM),
+                            camera = initialCamera,
                             pins = emptyList(),
                             routeTypeFilter = seedFilter,
                         )
-                    scheduleFetch(
-                        OpenPtvCameraState(MELBOURNE_CBD, INITIAL_ZOOM),
-                        seedFilter,
-                    )
+                    scheduleFetch(initialCamera, seedFilter)
                     // Permission denied — make sure neither tracker is still running from a prior
                     // grant within the same VM lifetime.
                     userLocationJob?.cancel()
@@ -250,6 +337,16 @@ class NearbyViewModel
 
         /** Called from MapLibre's camera-idle listener through the [OpenPtvMap] callback. */
         fun onCameraIdle(camera: OpenPtvCameraState) {
+            val expected = pendingProgrammaticCenter
+            if (expected != null) {
+                if (camera.centre.distanceTo(expected) > PROGRAMMATIC_IDLE_TOLERANCE_METERS) {
+                    // Stale frame from MapLibre's async setup window — drop it so it doesn't
+                    // clobber the focus camera back to the pre-animation viewport. Keep the slot
+                    // armed; the post-animation idle on the expected coord will clear it.
+                    return
+                }
+                pendingProgrammaticCenter = null
+            }
             val current = _uiState.value
             when (current) {
                 is NearbyUiState.Loaded -> {
@@ -273,10 +370,24 @@ class NearbyViewModel
          * for a typical drag-start, so the cancel is mostly defensive against the "fast pan,
          * then a long network round-trip lands mid-drag" case. Pins on screen are unaffected
          * because the LRU cache (#108) holds the previously-rendered set.
+         *
+         * **Gating on [reason] (PR #139 follow-up).** Cancelling the in-flight fetch is correct on
+         * any move (the camera is about to land somewhere else). But [pendingProgrammaticCenter]
+         * must ONLY be cleared on a user gesture — MapLibre fires move-started for our own
+         * `animateCamera` call too, and clearing the slot on that path would let the next stale
+         * pre-animation idle sail through the guard and overwrite the focus camera back to a
+         * non-focus value. That's the regression PR #139's `ee316ad` "stale idle" guard missed:
+         * it filtered idles but didn't gate the slot clear, so a programmatic move-started
+         * disarmed the filter before the stale idle arrived.
          */
-        fun onCameraMoveStarted() {
+        fun onCameraMoveStarted(reason: CameraMoveReason) {
             fetchJob?.cancel()
             fetchJob = null
+            if (reason == CameraMoveReason.USER_GESTURE) {
+                // The user has taken control of the camera — whatever idle lands next is theirs,
+                // not the stale pre-animation frame, so accept it on arrival.
+                pendingProgrammaticCenter = null
+            }
         }
 
         /**
@@ -359,6 +470,60 @@ class NearbyViewModel
             if (current is NearbyUiState.Loaded) {
                 _uiState.value = current.copy(pendingSheet = SheetState.Closed)
             }
+        }
+
+        /**
+         * One-shot "focus the map on this coordinate" entry point (issue #123). The stop-detail
+         * screen's "show on map" affordance calls this with the stop's `(lat, lon)` so the user
+         * jumps back to the Nearby surface already framed on the stop they were looking at.
+         *
+         * Re-centres at [FOCUS_ZOOM] — slightly tighter than the default initial zoom so the user
+         * lands on the unclustered "individual stops" view with the focused stop visible. Disengages
+         * follow-me: the user has expressed they want to look at a specific spot, not chase their
+         * own location.
+         *
+         * Schedules a fresh pin fetch immediately (rather than waiting for a camera-idle round-trip
+         * from the map view) so the focused viewport's stops are visible without a manual pan. The
+         * call is debounced through [scheduleFetch] for free — the existing 500 ms window is short
+         * enough that the user doesn't notice but cheap insurance against rapid re-entries.
+         *
+         * The screen calls this once per entry via a `LaunchedEffect` keyed on the focus pair, so
+         * a configuration change (rotation, dark-mode flip) doesn't re-fire the focus and reset
+         * the camera if the user has since panned away.
+         *
+         * **PermissionUnasked race fix (PR #139 follow-up).** When the user navigates in from
+         * stop-detail's "show on map", the screen's permission-resolve `LaunchedEffect` and the
+         * focus `LaunchedEffect` fire on the same dispatcher tick. The focus one usually wins
+         * the race — at which point [_uiState] is still [NearbyUiState.PermissionUnasked]. We
+         * can't move the camera yet (the overlay is up and there's no Loaded/Denied variant to
+         * copy into), but we MUST NOT drop the request: the screen's `LaunchedEffect` is keyed
+         * on the focus pair, not on the state, so it doesn't re-fire when Loaded lands. Stash
+         * the coordinate in [pendingFocus] and let [onPermissionResult] consume it when the
+         * permission flow finishes — that produces the very first Loaded camera at the requested
+         * stop, no second hop required.
+         */
+        fun focusOn(coordinates: Coordinates) {
+            val camera = OpenPtvCameraState(centre = coordinates, zoom = FOCUS_ZOOM)
+            val filter = currentFilter()
+            when (val current = _uiState.value) {
+                is NearbyUiState.Loaded ->
+                    _uiState.value =
+                        current.copy(
+                            camera = camera,
+                            isFollowingUser = false,
+                        )
+                is NearbyUiState.PermissionDenied ->
+                    _uiState.value = current.copy(camera = camera)
+                NearbyUiState.PermissionUnasked -> {
+                    // Buffer the request — [onPermissionResult] will consume it. The fetch is
+                    // also deferred; without a Loaded state there's nothing to render pins onto
+                    // yet, and the consumer will schedule its own fetch with the focused camera.
+                    pendingFocus = coordinates
+                    return
+                }
+            }
+            pendingProgrammaticCenter = coordinates
+            scheduleFetch(camera, filter)
         }
 
         /** Re-centre the camera on the user's last known fix. */
@@ -543,6 +708,13 @@ class NearbyViewModel
             /** Follow-me FAB re-centres at a tighter zoom (~street level). */
             internal const val FOLLOW_ME_ZOOM: Double = 15.0
 
+            /**
+             * Zoom for the issue #123 "show stop on map" entry. One step tighter than the initial
+             * zoom — the user has named a specific stop, so we frame closer to it than the broad
+             * "where am I?" entry zoom.
+             */
+            internal const val FOCUS_ZOOM: Double = 16.0
+
             /** Camera-idle debounce, per the issue's acceptance criterion. */
             internal const val CAMERA_IDLE_DEBOUNCE_MS: Long = 500L
 
@@ -561,6 +733,15 @@ class NearbyViewModel
              * camera-idle event but smaller than a deliberate pan.
              */
             internal const val FOLLOW_LEASH_METERS: Double = 50.0
+
+            /**
+             * Tolerance for matching an `onCameraIdle` against [pendingProgrammaticCenter]
+             * (issue #123 / PR #139 follow-up). MapLibre's animate-to settles to within a few
+             * metres of the requested centre; a stale pre-animation frame is hundreds of metres
+             * to kilometres away. Picked tight enough to reject the stale frame and loose enough
+             * to absorb settling jitter.
+             */
+            internal const val PROGRAMMATIC_IDLE_TOLERANCE_METERS: Double = 25.0
 
             /**
              * Cap on the LRU stop cache. Sized so an hour of pan/zoom across central Melbourne

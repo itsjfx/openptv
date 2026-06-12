@@ -85,6 +85,11 @@ fun StopDetailRoute(
     routeType: RouteType,
     focusDestinationKey: String? = null,
     onDepartureClicked: (Departure) -> Unit = {},
+    // Issue #123: jump back to the Nearby map screen centred on this stop. The lambda receives
+    // the stop's `(lat, lon)` from the resolved header — the screen passes them through verbatim
+    // to whatever caller is wired up in `:app`. Default no-op so the existing `:feature:*` tests
+    // that don't drive the action don't have to know it exists.
+    onShowOnMap: (latitude: Double, longitude: Double) -> Unit = { _, _ -> },
     viewModel: StopDetailViewModel =
         hiltViewModel<StopDetailViewModel, StopDetailViewModel.Factory>(
             // The focus arg is part of the ViewModel store key so tapping the same favourite
@@ -122,12 +127,14 @@ fun StopDetailRoute(
         onToggleExpand = viewModel::toggleExpand,
         onToggleFavourite = viewModel::toggleFavourite,
         onReachedEnd = viewModel::loadMore,
+        onShowOnMap = onShowOnMap,
         timeFormatter = viewModel.timeFormatter,
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList")
 internal fun StopDetailScreenContent(
     uiState: StopDetailUiState,
     onRefresh: () -> Unit,
@@ -136,6 +143,7 @@ internal fun StopDetailScreenContent(
     onToggleExpand: (GroupKey) -> Unit,
     onToggleFavourite: (destinationName: String) -> Unit,
     onReachedEnd: () -> Unit,
+    onShowOnMap: (latitude: Double, longitude: Double) -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
@@ -190,6 +198,31 @@ internal fun StopDetailScreenContent(
                 // Favourite affordance lives in `GroupHeader` per destination block (issue #137).
                 // The favourite unit is `(stopId, destinationKey)` — a destination at this stop —
                 // so the star belongs at the group's granularity.
+                actions = {
+                    // Issue #123: "show on map" — jumps to the Nearby destination with this
+                    // stop's coordinate as a one-shot focus hint. Only enabled once the header
+                    // has resolved (we don't have a coordinate before then). Uses a Unicode
+                    // glyph for the icon to keep `:feature:stop-detail` off the
+                    // `compose-material-icons-extended` artifact — same trade as the chevron /
+                    // star / settings gear elsewhere in the codebase.
+                    val loadedHeader = uiState.header as? HeaderState.Loaded
+                    if (loadedHeader != null) {
+                        val stop = loadedHeader.detail.stop
+                        val description = stringResource(R.string.feature_stop_detail_show_on_map)
+                        IconButton(
+                            onClick = { onShowOnMap(stop.latitude, stop.longitude) },
+                            modifier =
+                                Modifier
+                                    .testTag(TestTagShowOnMap)
+                                    .semantics { contentDescription = description },
+                        ) {
+                            Text(
+                                text = "🗺",
+                                style = MaterialTheme.typography.titleLarge,
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },
@@ -870,3 +903,4 @@ internal const val TestTagShowMore: String = "stop-detail-show-more"
 internal const val TestTagDateDivider: String = "stop-detail-date-divider"
 internal const val TestTagLoadMoreSpinner: String = "stop-detail-load-more-spinner"
 internal const val TestTagPinIndicator: String = "stop-detail-pin-indicator"
+internal const val TestTagShowOnMap: String = "stop-detail-show-on-map"

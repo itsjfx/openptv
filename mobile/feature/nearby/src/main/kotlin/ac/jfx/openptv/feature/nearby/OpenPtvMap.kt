@@ -33,11 +33,14 @@ interface OpenPtvMap {
      *   propagate through `factory = { ... }`.
      * @param onCameraIdle called whenever MapLibre's camera-idle listener fires; the screen's
      *   ViewModel debounces this stream and re-queries [NearbyStopsRepository].
-     * @param onCameraMoveStarted called the moment the camera begins moving (user gesture or
-     *   programmatic animation). The ViewModel uses this to cancel any in-flight pin fetch so a
-     *   slow drag doesn't keep burning the PTV rate limit on viewports the user is panning past —
-     *   issue #109. Paired with [onCameraIdle] which fires the eventual fetch once the camera
-     *   settles.
+     * @param onCameraMoveStarted called the moment the camera begins moving, with a
+     *   [CameraMoveReason] that distinguishes a user gesture from a programmatic animation we
+     *   kicked off ourselves. The ViewModel uses this to cancel any in-flight pin fetch so a slow
+     *   drag doesn't keep burning the PTV rate limit on viewports the user is panning past —
+     *   issue #109. The reason is needed because the "show on map" focus path (issue #123 /
+     *   PR #139) animates the camera programmatically; that programmatic move-started must not
+     *   tear down the focus-suppression slot the VM uses to drop MapLibre's stale pre-animation
+     *   idle. Paired with [onCameraIdle] which fires the eventual fetch once the camera settles.
      * @param onPinClicked called when the user taps a pin; the screen renders a bottom sheet
      *   from this.
      */
@@ -50,10 +53,30 @@ interface OpenPtvMap {
         pins: List<Stop>,
         isDark: Boolean,
         onCameraIdle: (OpenPtvCameraState) -> Unit,
-        onCameraMoveStarted: () -> Unit,
+        onCameraMoveStarted: (CameraMoveReason) -> Unit,
         onPinClicked: (Stop) -> Unit,
         modifier: Modifier,
     )
+}
+
+/**
+ * Domain-typed reason for a camera-move-started callback. MapLibre exposes an `int` with three
+ * codes (gesture, developer animation, API animation); we collapse the two "we initiated this"
+ * codes into [PROGRAMMATIC] so the ViewModel only has to branch on "is this the user, or us?".
+ *
+ * Lives here rather than on [MapLibreOpenPtvMap] so the [OpenPtvMap] seam never leaks an
+ * `org.maplibre.android.*` type into the ViewModel / Screen layer.
+ */
+enum class CameraMoveReason {
+    /** User pan / pinch. The VM treats this as "the user has taken control of the camera". */
+    USER_GESTURE,
+
+    /**
+     * Move triggered by our own `animateCamera` / `setCameraPosition` call (issue #123 focus,
+     * style-load initial centre, etc.). The VM keeps its focus-suppression slot armed across
+     * these so MapLibre's stale pre-animation idle can still be dropped.
+     */
+    PROGRAMMATIC,
 }
 
 /**
