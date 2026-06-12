@@ -58,6 +58,12 @@ abstract class DataModule {
 
     @Binds
     @Singleton
+    internal abstract fun bindRunPatternRepository(
+        impl: RunPatternRepositoryImpl,
+    ): RunPatternRepository
+
+    @Binds
+    @Singleton
     internal abstract fun bindPtvUrlResolver(
         impl: SettingsPtvUrlResolver,
     ): PtvUrlResolver
