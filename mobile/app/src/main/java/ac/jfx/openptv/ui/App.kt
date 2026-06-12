@@ -4,10 +4,12 @@ import ac.jfx.openptv.R
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
 import ac.jfx.openptv.core.designsystem.ThemeMode
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.navigation.AppNavKey
 import ac.jfx.openptv.feature.favourites.FavouritesRoute
 import ac.jfx.openptv.feature.nearby.NearbyRoute
+import ac.jfx.openptv.feature.runpattern.RunPatternRoute
 import ac.jfx.openptv.feature.search.SearchScreen
 import ac.jfx.openptv.feature.settings.SettingsRoute
 import ac.jfx.openptv.feature.setup.SetupScreen
@@ -130,6 +132,18 @@ private fun MainNav() {
                         stopId = StopId(key.stopId),
                         routeType = RouteType.fromCode(key.routeTypeCode),
                         focusDestinationKey = key.focusDestinationKey,
+                        // Issue #132: tapping a departure row opens the run-pattern destination
+                        // for that service. `fromStopId` lets the pattern screen mark the stop
+                        // the user came from.
+                        onDepartureClicked = { departure ->
+                            backStack.add(
+                                AppNavKey.RunPattern(
+                                    runRef = departure.runRef.value,
+                                    routeTypeCode = key.routeTypeCode,
+                                    fromStopId = key.stopId,
+                                ),
+                            )
+                        },
                         // Issue #123: tapping the map icon on stop-detail jumps to the Nearby
                         // destination with the stop's lat/lon as a one-shot camera focus hint.
                         // The Nearby ViewModel re-centres the map at street zoom and the focus
@@ -143,6 +157,13 @@ private fun MainNav() {
                                 ),
                             )
                         },
+                    )
+                }
+                entry<AppNavKey.RunPattern> { key ->
+                    RunPatternRoute(
+                        runRef = RunRef(key.runRef),
+                        routeType = RouteType.fromCode(key.routeTypeCode),
+                        fromStopId = key.fromStopId?.let(::StopId),
                     )
                 }
                 entry<AppNavKey.Settings> {

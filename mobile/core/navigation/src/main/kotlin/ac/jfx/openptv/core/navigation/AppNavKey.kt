@@ -70,4 +70,21 @@ sealed interface AppNavKey : NavKey {
         val routeTypeCode: Int,
         val focusDestinationKey: String? = null,
     ) : AppNavKey
+
+    /**
+     * Run-pattern destination (issue #132): the stopping pattern of a single service run,
+     * reached by tapping a departure row on stop-detail. Carries the PTV `run_ref` (an opaque
+     * string — the only stable way to address a run) plus the raw `route_type` code, same
+     * primitive-serialisation trade as [StopDetail].
+     *
+     * `fromStopId` is the stop the user tapped through from, so the pattern screen can highlight
+     * "you are here" in the stop list. Nullable so future entry points that don't originate at a
+     * stop (e.g. a disruption banner) can omit it.
+     */
+    @Serializable
+    data class RunPattern(
+        val runRef: String,
+        val routeTypeCode: Int,
+        val fromStopId: Int? = null,
+    ) : AppNavKey
 }
