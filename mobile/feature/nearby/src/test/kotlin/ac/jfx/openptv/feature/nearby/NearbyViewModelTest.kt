@@ -85,6 +85,14 @@ class NearbyViewModelTest {
         storeScope.cancel()
     }
 
+    /**
+     * Fresh per test (not shared across tests) so the issue #146 session cache doesn't leak
+     * pins/camera between tests. Tests that exercise the survives-ViewModel-recreation path
+     * construct two ViewModels over this same instance — exactly what Hilt's `@Singleton`
+     * binding produces in production.
+     */
+    private val sessionCache = NearbyMapSessionCache()
+
     private fun newViewModel(): NearbyViewModel =
         NearbyViewModel(
             locationProvider = locationProvider,
@@ -93,6 +101,7 @@ class NearbyViewModelTest {
             stopDetailRepository = stopDetailRepo,
             departureRepository = departureRepo,
             userPreferences = userPreferences,
+            sessionCache = sessionCache,
         )
 
     /**
@@ -1043,6 +1052,169 @@ class NearbyViewModelTest {
             cache.put(third)
 
             assertThat(cache.snapshot().map { it.id }).containsExactly(first.id, third.id).inOrder()
+        }
+
+    // -------------------- Session cache across ViewModel recreation (issue #146) --------------------
+    //
+    // The stop LRU + last settled camera live in `NearbyMapSessionCache` (a `@Singleton`), so a
+    // fresh ViewModel — created when the user navigates away from the map and back — seeds its
+    // first Loaded state from wherever the previous one left off instead of an empty map at the
+    // default viewport.
+
+    @Test
+    fun `new ViewModel over the same session cache seeds pins from the previous session`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val flindersStop = StopMother.aStop().withId(1).withName("Flinders").build()
+            nearbyRepo.enqueueSuccess(listOf(flindersStop))
+            val first = newViewModel()
+            first.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            assertThat((first.uiState.value as NearbyUiState.Loaded).pins).contains(flindersStop)
+
+            // Simulate "map → stop-detail → back": the destination's ViewModel is destroyed and a
+            // fresh one is constructed over the same @Singleton session cache. Don't enqueue a
+            // fetch result — the assertion is that the pins render from cache BEFORE any network.
+            val second = newViewModel()
+            second.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val reloaded = second.uiState.value as NearbyUiState.Loaded
+            assertThat(reloaded.pins).contains(flindersStop)
+        }
+
+    @Test
+    fun `new ViewModel restores the previous session's camera and disengages follow-me`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            nearbyRepo.enqueueSuccess(emptyList())
+            nearbyRepo.enqueueSuccess(emptyList())
+            val first = newViewModel()
+            first.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            // The user pans somewhere specific before leaving the map.
+            val richmond = Coordinates(lat = -37.8265, lng = 144.9963)
+            first.onCameraIdle(OpenPtvCameraState(centre = richmond, zoom = 16.5))
+            advanceUntilIdle()
+
+            val second = newViewModel()
+            second.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val reloaded = second.uiState.value as NearbyUiState.Loaded
+            assertThat(reloaded.camera.centre).isEqualTo(richmond)
+            assertThat(reloaded.camera.zoom).isEqualTo(16.5)
+            // Restoring a viewport means "show me where I was", not "chase my location" — the
+            // fix would otherwise immediately re-centre the camera away from the restored frame.
+            assertThat(reloaded.isFollowingUser).isFalse()
+        }
+
+    @Test
+    fun `focus camera still wins over the restored session camera`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            nearbyRepo.enqueueSuccess(emptyList())
+            nearbyRepo.enqueueSuccess(emptyList())
+            val first = newViewModel()
+            first.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            first.onCameraIdle(
+                OpenPtvCameraState(centre = Coordinates(lat = -37.8265, lng = 144.9963), zoom = 16.5),
+            )
+            advanceUntilIdle()
+
+            // Issue #123 entry ("show on map") into a fresh ViewModel: the explicit focus must
+            // beat the issue #146 restore — the user just named a stop to look at.
+            val focusTarget = Coordinates(lat = -37.7000, lng = 144.9000)
+            val second = newViewModel()
+            second.focusOn(focusTarget)
+            second.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val reloaded = second.uiState.value as NearbyUiState.Loaded
+            assertThat(reloaded.camera.centre).isEqualTo(focusTarget)
+            assertThat(reloaded.camera.zoom).isEqualTo(NearbyViewModel.FOCUS_ZOOM)
+        }
+
+    @Test
+    fun `restored camera arms the stale-idle guard so a pre-animation idle cannot clobber it`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            nearbyRepo.enqueueSuccess(emptyList())
+            nearbyRepo.enqueueSuccess(emptyList())
+            val first = newViewModel()
+            first.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            val richmond = Coordinates(lat = -37.8265, lng = 144.9963)
+            first.onCameraIdle(OpenPtvCameraState(centre = richmond, zoom = 16.5))
+            advanceUntilIdle()
+
+            val second = newViewModel()
+            second.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            // MapLibre's async style-load can fire an idle carrying the pre-animation frame
+            // (e.g. the user-location camera) — same race PR #139 fixed for the focus path. It
+            // must not overwrite the restored viewport.
+            second.onCameraIdle(
+                OpenPtvCameraState(centre = CoordinatesMother.flindersStreet().build(), zoom = 15.0),
+            )
+            val reloaded = second.uiState.value as NearbyUiState.Loaded
+            assertThat(reloaded.camera.centre).isEqualTo(richmond)
+        }
+
+    @Test
+    fun `permission denied re-entry also seeds cached pins and camera`() =
+        runTest(dispatcher) {
+            locationProvider.seed(null)
+            val stop = StopMother.aStop().withId(7).build()
+            nearbyRepo.enqueueSuccess(listOf(stop))
+            val first = newViewModel()
+            first.onPermissionResult(granted = false)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+            val richmond = Coordinates(lat = -37.8265, lng = 144.9963)
+            nearbyRepo.enqueueSuccess(listOf(stop))
+            first.onCameraIdle(OpenPtvCameraState(centre = richmond, zoom = 16.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            val second = newViewModel()
+            second.onPermissionResult(granted = false)
+            advanceUntilIdle()
+
+            val reloaded = second.uiState.value as NearbyUiState.PermissionDenied
+            assertThat(reloaded.pins).contains(stop)
+            assertThat(reloaded.camera.centre).isEqualTo(richmond)
+        }
+
+    @Test
+    fun `filter toggle clears the shared session cache too`() =
+        runTest(dispatcher) {
+            locationProvider.seed(CoordinatesMother.flindersStreet().build())
+            val tramStop = StopMother.aTramStop().withId(1).build()
+            val busStop = StopMother.aBusStop().withId(2).build()
+            nearbyRepo.enqueueSuccess(listOf(tramStop, busStop))
+            nearbyRepo.enqueueSuccess(listOf(tramStop))
+            val first = newViewModel()
+            first.onPermissionResult(granted = true)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // Toggle bus off — the shared cache is purged, so a later ViewModel doesn't resurrect
+            // the stale-filter bus pin either.
+            first.onRouteTypeFilterToggled(RouteType.Bus)
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            val second = newViewModel()
+            second.onPermissionResult(granted = true)
+            advanceUntilIdle()
+            val reloaded = second.uiState.value as NearbyUiState.Loaded
+            assertThat(reloaded.pins).contains(tramStop)
+            assertThat(reloaded.pins).doesNotContain(busStop)
         }
 
     @Test
