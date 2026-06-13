@@ -82,10 +82,11 @@ fun NearbyRoute(
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int) -> Unit,
     onOpenSettings: () -> Unit,
     // Issue #123: optional one-shot focus coordinate, supplied by the stop-detail "show on map"
-    // affordance through the `AppNavKey.Nearby` destination args. When both are non-null the
-    // screen re-centres the map on the coordinate the first time this composition runs for the
-    // pair — see the `LaunchedEffect` below. Null in the bottom-nav tab path (which opens Nearby
-    // on whatever camera the VM already holds, unchanged from the existing behaviour).
+    // affordance. Since issue #154 these flow through `AppNavKey.Home`'s focus args into the Nearby
+    // tab of the bottom-nav scaffold (rather than a standalone Nearby destination), keeping the nav
+    // bar visible. When both are non-null the screen re-centres the map on the coordinate the first
+    // time this composition runs for the pair — see the `LaunchedEffect` below. Null in the
+    // bottom-nav tab path (which opens Nearby on whatever camera the VM already holds, unchanged).
     focusLat: Double? = null,
     focusLon: Double? = null,
     viewModel: NearbyViewModel = hiltViewModel(),

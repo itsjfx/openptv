@@ -63,15 +63,17 @@ fun App(appViewModel: AppViewModel = hiltViewModel()) {
 
 @Composable
 private fun MainNav() {
-    val backStack = rememberNavBackStack(AppNavKey.Home)
+    val backStack = rememberNavBackStack(AppNavKey.Home())
 
     NavDisplay(
         backStack = backStack,
         onBack = { backStack.removeLastOrNull() },
         entryProvider =
             entryProvider {
-                entry<AppNavKey.Home> {
+                entry<AppNavKey.Home> { key ->
                     HomeScaffold(
+                        focusLat = key.focusLat,
+                        focusLon = key.focusLon,
                         onOpenStopDetail = { stopId, routeTypeCode, focusDestinationKey ->
                             backStack.add(
                                 AppNavKey.StopDetail(
@@ -112,21 +114,6 @@ private fun MainNav() {
                         onOpenSettings = { backStack.add(AppNavKey.Settings) },
                     )
                 }
-                entry<AppNavKey.Nearby> { key ->
-                    NearbyRoute(
-                        focusLat = key.focusLat,
-                        focusLon = key.focusLon,
-                        onOpenStopDetail = { stopId, routeTypeCode ->
-                            backStack.add(
-                                AppNavKey.StopDetail(
-                                    stopId = stopId,
-                                    routeTypeCode = routeTypeCode,
-                                ),
-                            )
-                        },
-                        onOpenSettings = { backStack.add(AppNavKey.Settings) },
-                    )
-                }
                 entry<AppNavKey.StopDetail> { key ->
                     StopDetailRoute(
                         stopId = StopId(key.stopId),
@@ -144,18 +131,16 @@ private fun MainNav() {
                                 ),
                             )
                         },
-                        // Issue #123: tapping the map icon on stop-detail jumps to the Nearby
-                        // destination with the stop's lat/lon as a one-shot camera focus hint.
-                        // The Nearby ViewModel re-centres the map at street zoom and the focus
-                        // args are consumed once via a `LaunchedEffect` keyed on the pair, so
-                        // configuration changes don't re-focus the camera.
+                        // Issue #154: tapping the map icon on stop-detail returns the user to the
+                        // bottom-nav surface (Home) framed on the stop, instead of pushing a
+                        // standalone Nearby destination that hid the bottom nav bar. We reset the
+                        // back stack to a fresh Home carrying the focus coords; the Home entry
+                        // recomposes from scratch, lands on the Nearby tab, and forwards the coords
+                        // to NearbyRoute, which re-centres the camera at street zoom and consumes
+                        // the focus once via a `LaunchedEffect` keyed on the pair (issue #123).
                         onShowOnMap = { lat, lon ->
-                            backStack.add(
-                                AppNavKey.Nearby(
-                                    focusLat = lat,
-                                    focusLon = lon,
-                                ),
-                            )
+                            backStack.clear()
+                            backStack.add(AppNavKey.Home(focusLat = lat, focusLon = lon))
                         },
                     )
                 }
@@ -185,8 +170,11 @@ private fun MainNav() {
  * fires.
  *
  * `selectedTab` is saved via `rememberSaveable` so a configuration change (rotation, dark-mode
- * flip) keeps the user on the same tab; cold-launch always lands on Favourites because the issue
- * calls Favourites the user's primary surface.
+ * flip) keeps the user on the same tab; cold-launch lands on Favourites because the issue calls
+ * Favourites the user's primary surface. The exception is when [focusLat]/[focusLon] are supplied
+ * (stop-detail's "show on map", issue #154): the scaffold then opens on the Nearby tab framed on
+ * that coordinate. This works because that entry point recreates Home via `clear()`+`add()`, so
+ * the scaffold composes fresh and `rememberSaveable` re-initialises to Nearby.
  *
  * Search-tab clicks open the existing [SearchScreen] in place; selecting a stop inside it pushes
  * the stop-detail destination onto the back stack at the [MainNav] level. The Search destination
@@ -195,10 +183,16 @@ private fun MainNav() {
  */
 @Composable
 private fun HomeScaffold(
+    focusLat: Double?,
+    focusLon: Double?,
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusDestinationKey: String?) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    var selectedTab by rememberSaveable { mutableStateOf(HomeTab.Favourites) }
+    var selectedTab by rememberSaveable {
+        mutableStateOf(
+            if (focusLat != null && focusLon != null) HomeTab.Nearby else HomeTab.Favourites,
+        )
+    }
 
     Scaffold(
         bottomBar = {
@@ -243,11 +237,14 @@ private fun HomeScaffold(
                         onOpenSettings = onOpenSettings,
                     )
                 HomeTab.Nearby ->
-                    // Tab variant takes no focus args — the bottom-nav tap opens Nearby on
-                    // whatever camera the VM already holds, which is the existing UX. The
-                    // focus-driven entry (issue #123) lives on the `AppNavKey.Nearby` destination
-                    // pushed by stop-detail's map icon.
+                    // When the user taps the Nearby tab directly, focusLat/focusLon are null and
+                    // the map opens on whatever camera the VM already holds (existing UX). When the
+                    // scaffold was opened by stop-detail's "show on map" (issue #154), the coords
+                    // flow through here so the map re-centres on the stop at street zoom (issue
+                    // #123). NearbyRoute consumes the focus once via a `LaunchedEffect`.
                     NearbyRoute(
+                        focusLat = focusLat,
+                        focusLon = focusLon,
                         onOpenStopDetail = { stopId, routeTypeCode ->
                             onOpenStopDetail(stopId, routeTypeCode, null)
                         },

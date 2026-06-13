@@ -1325,7 +1325,7 @@ class NearbyViewModelTest {
     // -------------------- focus camera (issue #123) --------------------
     //
     // `focusOn(coordinates)` is the one-shot entry the stop-detail "show on map" action calls
-    // via the `AppNavKey.Nearby(focusLat, focusLon)` route. It re-centres the camera at
+    // via the `AppNavKey.Home(focusLat, focusLon)` route (issue #154). It re-centres the camera at
     // [FOCUS_ZOOM], disengages follow-me, and schedules a fresh fetch for the new viewport.
     // The screen calls it once per entry via a `LaunchedEffect` keyed on the focus pair, so the
     // ViewModel itself doesn't need to guard against multiple calls — each call honours the

@@ -13,8 +13,22 @@ import kotlinx.serialization.Serializable
  * across process death; the keys end up in `Bundle` form.
  */
 sealed interface AppNavKey : NavKey {
+    /**
+     * The bottom-nav surface (Favourites / Nearby / Search tabs). This is the app's root
+     * destination and the only place the bottom [androidx.compose.material3.NavigationBar] lives.
+     *
+     * `focusLat` / `focusLon` mirror the Nearby focus mechanism (issue #123): when both are
+     * non-null the scaffold opens on the Nearby tab framed on that coordinate. Stop-detail's
+     * "show on map" action uses this to drop the user back onto the bottom-nav surface with the
+     * map already centred on the stop, instead of pushing a standalone full-screen Nearby
+     * destination that hid the nav bar (issue #154). Default null keeps cold-launch on the
+     * Favourites tab and leaves every existing `AppNavKey.Home()` call site source-compatible.
+     */
     @Serializable
-    data object Home : AppNavKey
+    data class Home(
+        val focusLat: Double? = null,
+        val focusLon: Double? = null,
+    ) : AppNavKey
 
     @Serializable
     data object Search : AppNavKey
@@ -30,26 +44,9 @@ sealed interface AppNavKey : NavKey {
     @Serializable
     data object Favourites : AppNavKey
 
-    /**
-     * Nearby map screen (issue #37). MapLibre + OpenFreeMap tiles, user-location dot, clustered
-     * stop pins.
-     *
-     * `focusLat` / `focusLon` are optional one-shot camera-focus hints (issue #123). When both are
-     * non-null the screen centres the map on the coordinate at a street-level zoom the first time
-     * the destination composes after the key changes — the "show this stop on the map" affordance
-     * on stop-detail uses this to jump the user back to the map already framed on the stop they
-     * were looking at. Default null preserves the "open Nearby on whatever camera the VM already
-     * holds" behaviour for every existing call site (the bottom-nav tab, deep-linkless re-entry).
-     *
-     * Carrying the focus as primitive doubles keeps the key trivially `Bundle`-able across process
-     * death — same trade as [StopDetail]. The Nearby ViewModel converts these into the domain
-     * [`ac.jfx.openptv.core.model.Coordinates`] at the boundary.
-     */
-    @Serializable
-    data class Nearby(
-        val focusLat: Double? = null,
-        val focusLon: Double? = null,
-    ) : AppNavKey
+    // The Nearby map screen (issue #37) has no standalone destination key. It is only ever a tab
+    // inside [Home]'s scaffold; the "show this stop on the map" affordance (issue #123) routes to
+    // it via [Home]'s `focusLat`/`focusLon` so the bottom nav bar stays visible (issue #154).
 
     /**
      * Stop detail destination. Carries the `stopId` and `routeType` raw int values rather than the
