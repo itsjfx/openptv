@@ -27,7 +27,7 @@ interface OpenPtvMap {
      * @param userBearing device heading in degrees clockwise from north, normalised to
      *   `[0, 360)`. `null` means "no compass / haven't fired yet" — the dot still renders, but
      *   without a heading cone. Issue #99.
-     * @param pins stop markers to render; the impl decides clustering based on [camera.zoom].
+     * @param pins stop markers to render; the impl draws one circle per stop at every zoom.
      * @param isDark whether the host theme is in dark mode; used to pick the OpenFreeMap style
      *   variant. Passed from outside the `AndroidView` scope because composition locals don't
      *   propagate through `factory = { ... }`.

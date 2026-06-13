@@ -514,8 +514,8 @@ class NearbyViewModel
          * screen's "show on map" affordance calls this with the stop's `(lat, lon)` so the user
          * jumps back to the Nearby surface already framed on the stop they were looking at.
          *
-         * Re-centres at [FOCUS_ZOOM] — slightly tighter than the default initial zoom so the user
-         * lands on the unclustered "individual stops" view with the focused stop visible. Disengages
+         * Re-centres at [FOCUS_ZOOM] — slightly tighter than the default initial zoom so the
+         * focused stop sits front-and-centre with its neighbours visible around it. Disengages
          * follow-me: the user has expressed they want to look at a specific spot, not chase their
          * own location.
          *
@@ -601,8 +601,10 @@ class NearbyViewModel
                     // The user sees previously-fetched pins persist as they pan back into a
                     // region; the fresh fetch refreshes data for the current viewport.
                     // We keep every cached stop in `pins` (no viewport bbox filter) — MapLibre
-                    // clusters them and the per-pin overhead is negligible at the 2000-stop
-                    // bound, so the extra complexity of a bbox filter isn't worth it.
+                    // renders them as plain circle features and the per-pin overhead is negligible
+                    // at the MAX_CACHED_STOPS bound, so the extra complexity of a bbox filter isn't
+                    // worth it. Rendering the whole cache is also what makes a zoomed-out view show
+                    // the wider network now that clustering is off (issue #124).
                     val fresh =
                         when (result) {
                             is Result.Success -> result.data
@@ -735,10 +737,10 @@ class NearbyViewModel
             internal val MELBOURNE_CBD: Coordinates = Coordinates(lat = -37.8136, lng = 144.9631)
 
             /**
-             * Initial zoom on entry. Picked to be > the MapLibre cluster max-zoom (14) so the
-             * user lands on the unclustered "individual stops" view as soon as permission is
-             * granted — at zoom 12 every CBD pin would collapse into one cluster and the user
-             * would need to manually zoom in to see anything useful.
+             * Initial zoom on entry. Street level (~15) so the user lands looking at the
+             * individual stops around them rather than a region-wide view. Pins now render
+             * unclustered at every zoom (issue #124), so this is purely a "useful starting frame"
+             * choice rather than a threshold to clear any clustering band.
              */
             internal const val INITIAL_ZOOM: Double = 15.0
 

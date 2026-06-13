@@ -36,12 +36,19 @@ class NearbyMapSessionCache
 
         internal companion object {
             /**
-             * Cap on the LRU stop cache. Sized so an hour of pan/zoom across central Melbourne
-             * wouldn't evict — a single screen-width of dense CBD fetches a few hundred stops.
+             * Cap on the LRU stop cache. Sized so a long session of pan/zoom across metropolitan
+             * Melbourne wouldn't evict — a single screen-width of dense CBD fetches a few hundred
+             * stops, and now that the map renders pins unclustered (issue #124) the cache is also
+             * what populates a zoomed-out view: the more stops we retain, the more of the network
+             * the user sees when they pull back. Raised from 2000 to 10000 alongside the
+             * clustering removal so a metro-wide zoom-out stays densely populated instead of
+             * thinning out to whatever the last few fetches returned.
+             *
              * Far below memory pressure: each `Stop` is a handful of strings + two doubles
-             * (~150 bytes), so 2000 entries is ~300 KB.
+             * (~150 bytes), so 10000 entries is ~1.5 MB. MapLibre renders this many unclustered
+             * circle features comfortably.
              */
-            internal const val MAX_CACHED_STOPS: Int = 2000
+            internal const val MAX_CACHED_STOPS: Int = 10_000
         }
     }
 
