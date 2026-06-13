@@ -16,6 +16,22 @@ Requires the Android SDK installed locally with `ANDROID_HOME` (or `sdk.dir` in 
 ./gradlew test
 ```
 
+## Screenshots
+
+Regenerate the demo/README screenshots (Nearby map, Favourites, Flinders Street stop-detail) with a
+running emulator attached:
+
+```bash
+../bin/mobile-screenshots.sh            # builds the debug APK first
+../bin/mobile-screenshots.sh --skip-build
+```
+
+It pins every source of run-to-run drift — SystemUI demo-mode status bar (fixed clock, full
+battery/signal, no notifications), fixed Melbourne GPS, pre-granted location permission, and
+DB-seeded favourites — and drives the UI by accessibility element rather than fixed coordinates.
+PNGs land in `mobile/build/screenshots/` (gitignored). Boot the `pixel_api36` AOSP AVD first; see
+`--help` for options.
+
 ## Formatting
 
 Spotless (ktlint) is wired into every Kotlin module via the `openptv.spotless` convention plugin —
