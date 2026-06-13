@@ -60,6 +60,13 @@ Data Layer      :core:data             Repository interfaces + impls (SSOT)
 
 Material 3 with dynamic colour on Android 12+. Below that, fall back to a hand-tuned palette borrowed from ReadYou (`MaterialYouStandard.kt` and palette extraction code, Apache 2.0 compatible) so non-dynamic-colour devices feel intentional. The theme is owned by `:core:designsystem` and exposed as `OpenPtvTheme { content() }`.
 
+## PTV Timetable API (reference & troubleshooting)
+
+- **Authoritative spec**: `docs/ptv-timetable-api-v3-swagger.json` — the live v3 Swagger pulled from `https://timetableapi.ptv.vic.gov.au/swagger/docs/v3`. Use this, not third-party docs. **Only v3 exists**: the v2 API is decommissioned — PTV's edge load balancer (`awselb/2.0`) returns `403 Forbidden` to correctly-signed v2 requests, so there is no v2 fallback for data v3 omits.
+- **Troubleshooting a feature against real data**: hit the deployed proxy directly with `curl` — it signs upstream, so no key is needed: `curl -s 'https://ptv.jfx.ac/api/v3/<path>'`. This is the fastest way to confirm what PTV actually returns (e.g. which fields populate per route_type) before changing a DTO or mapper.
+- **Signed-direct access** (when you must bypass the proxy, e.g. to test a non-`/v3` path the proxy won't route): the dev id + key are in `.env` (`OPENPTV_PTV_DEV_ID` / `OPENPTV_PTV_KEY`); sign with HMAC-SHA1 per `backend/internal/ptv/signer.go` (append `devid`, hash the path, uppercase-hex `signature`).
+- **Known quirk — tram real-time**: `/pattern/run/{run_ref}/route_type/1` (trams) returns **no** `estimated_departure_utc` (all stops null, even with `expand=All`; the run comes back `status: scheduled`, `vehicle_position: null`). Trains (0) and buses (2) do populate it. Tram real-time (TramTracker/AVM) is only exposed via the per-stop `/departures` endpoint. No pattern param forces it — don't chase it in the mapper.
+
 ## GitHub SDLC
 
 GitHub repository: itsjfx/openptv
