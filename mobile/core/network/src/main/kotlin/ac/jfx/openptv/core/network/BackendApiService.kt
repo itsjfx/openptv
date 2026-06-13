@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.network
 
 import ac.jfx.openptv.core.network.model.DeparturesResponseDto
 import ac.jfx.openptv.core.network.model.NearbyStopsResponseDto
+import ac.jfx.openptv.core.network.model.PatternResponseDto
 import ac.jfx.openptv.core.network.model.SearchResponseDto
 import ac.jfx.openptv.core.network.model.StopResponseDto
 import retrofit2.http.GET
@@ -58,4 +59,15 @@ internal interface BackendApiService {
     suspend fun stopsNearLocation(
         @Url url: String,
     ): NearbyStopsResponseDto
+
+    /**
+     * PTV `GET /api/v3/pattern/run/{run_ref}/route_type/{route_type}` — the stopping pattern of
+     * a single service run (issue #132): one departure entry per stop on the run, chronological.
+     * The data source composes the absolute URL with `expand=Stop,Route,Direction` — the subset
+     * the mapper needs to resolve stop / route / direction display names client-side.
+     */
+    @GET
+    suspend fun getRunPattern(
+        @Url url: String,
+    ): PatternResponseDto
 }

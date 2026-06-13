@@ -11,7 +11,6 @@ import ac.jfx.openptv.core.datastore.preference.MapRouteTypeFilterPreference
 import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
-import ac.jfx.openptv.core.model.StopId
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -75,6 +74,7 @@ class NearbyViewModel
         private val stopDetailRepository: StopDetailRepository,
         private val departureRepository: DepartureRepository,
         private val userPreferences: UserPreferencesDataStore,
+        private val sessionCache: NearbyMapSessionCache,
     ) : ViewModel() {
         private val _uiState: MutableStateFlow<NearbyUiState> =
             MutableStateFlow(NearbyUiState.PermissionUnasked)
@@ -159,9 +159,10 @@ class NearbyViewModel
          * problem: panning into a region we've fetched before keeps those pins on-screen
          * immediately, instead of dropping them until the next fetch lands.
          *
-         * Bounded at [MAX_CACHED_STOPS] so an hour of panning across Melbourne can't blow out
-         * memory — a couple of thousand `Stop` records is trivial (each is a handful of strings +
-         * two doubles), but the bound is the principled stop-gap.
+         * Since issue #146 the cache lives in [NearbyMapSessionCache] (a `@Singleton`) rather
+         * than in this ViewModel, so it also survives the ViewModel being destroyed by
+         * navigation — leaving the map for a stop and coming back re-seeds the pins instead of
+         * starting from an empty map. See the holder's KDoc for the bound and lifetime rationale.
          *
          * **Filter-aware via clear-on-change.** A route-type chip toggle clears the cache (see
          * [onRouteTypeFilterToggled]) so a "trams only" tap doesn't keep bus pins on the map from
@@ -169,7 +170,7 @@ class NearbyViewModel
          * pins for nothing — the user has just expressed they don't want them. Clearing is
          * simpler and matches user intent.
          */
-        private val stopCache = LruStopCache(MAX_CACHED_STOPS)
+        private val stopCache: LruStopCache = sessionCache.stops
 
         /**
          * Caller (the screen) tells us the permission decision. Permission grant kicks off a
@@ -219,76 +220,105 @@ class NearbyViewModel
                     return@launch
                 }
                 if (granted) {
-                    val fix = locationProvider.lastKnown()
-                    // Issue #123: if the user navigated in from stop-detail's "show on map" while
-                    // the permission overlay was still up, [focusOn] will have stashed the focus
-                    // coordinate. Consume it here so the very first Loaded state lands framed on
-                    // the requested stop — otherwise we'd render the user-location camera first
-                    // and the screen-side LaunchedEffect wouldn't re-fire (it's keyed on the
-                    // focus pair, not on the state transition).
-                    val focus = pendingFocus
-                    pendingFocus = null
-                    pendingProgrammaticCenter = focus
-                    val initialCamera =
-                        if (focus != null) {
-                            OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
-                        } else {
-                            OpenPtvCameraState(
-                                centre = fix ?: MELBOURNE_CBD,
-                                zoom = INITIAL_ZOOM,
-                            )
-                        }
-                    _uiState.value =
-                        NearbyUiState.Loaded(
-                            camera = initialCamera,
-                            pins = emptyList(),
-                            userLocation = fix,
-                            userBearing = null,
-                            // A pending focus disengages follow-me — the user has named a specific
-                            // stop, not asked to chase their own location. Same semantics as a
-                            // direct [focusOn] call into an already-Loaded state.
-                            isFollowingUser = focus == null && fix != null,
-                            pendingSheet = SheetState.Closed,
-                            showEmptyHint = false,
-                            routeTypeFilter = seedFilter,
-                        )
-                    // Seed the debounce so the initial fetch lands without a manual pan.
-                    scheduleFetch(initialCamera, seedFilter)
-                    // Start tracking the user's location + heading for the blue-dot indicator
-                    // (issue #99). Both subscriptions are best-effort: a permission revocation or
-                    // missing sensor completes the flow cleanly, leaving `userLocation`/
-                    // `userBearing` at their last value (the dot freezes rather than vanishing,
-                    // which matches what every other map app does when GPS drops momentarily).
-                    startUserLocationTracking()
-                    startUserBearingTracking()
+                    enterGrantedState(seedFilter)
                 } else {
-                    // Same pending-focus consumption on the denied branch — the user can still see
-                    // the map and we honour their "frame on this stop" intent even if location
-                    // permission was refused.
-                    val focus = pendingFocus
-                    pendingFocus = null
-                    pendingProgrammaticCenter = focus
-                    val initialCamera =
-                        if (focus != null) {
-                            OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
-                        } else {
-                            OpenPtvCameraState(centre = MELBOURNE_CBD, zoom = INITIAL_ZOOM)
-                        }
-                    _uiState.value =
-                        NearbyUiState.PermissionDenied(
-                            camera = initialCamera,
-                            pins = emptyList(),
-                            routeTypeFilter = seedFilter,
-                        )
-                    scheduleFetch(initialCamera, seedFilter)
-                    // Permission denied — make sure neither tracker is still running from a prior
-                    // grant within the same VM lifetime.
-                    userLocationJob?.cancel()
-                    userLocationJob = null
-                    userBearingJob?.cancel()
-                    userBearingJob = null
+                    enterDeniedState(seedFilter)
                 }
             }
+        }
+
+        /**
+         * Build the first [NearbyUiState.Loaded] after a permission grant.
+         *
+         * Issue #123: if the user navigated in from stop-detail's "show on map" while the
+         * permission overlay was still up, [focusOn] will have stashed the focus coordinate —
+         * consume it here so the very first Loaded state lands framed on the requested stop
+         * (the screen-side LaunchedEffect is keyed on the focus pair, not the state transition,
+         * so it won't re-fire).
+         *
+         * Issue #146: a previous ViewModel in this process may have left the map on a specific
+         * viewport ([NearbyMapSessionCache.lastCamera]). Restoring it (when no explicit focus
+         * overrides) means "map → stop → back" reopens where the user left off instead of
+         * snapping back to their location. Camera precedence: focus > restored > fix > CBD.
+         */
+        private suspend fun enterGrantedState(seedFilter: Set<RouteType>) {
+            val fix = locationProvider.lastKnown()
+            val focus = pendingFocus
+            pendingFocus = null
+            val restored = sessionCache.lastCamera
+            val initialCamera =
+                when {
+                    focus != null -> OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
+                    restored != null -> restored
+                    else ->
+                        OpenPtvCameraState(
+                            centre = fix ?: MELBOURNE_CBD,
+                            zoom = INITIAL_ZOOM,
+                        )
+                }
+            // Arm the stale-idle guard for both programmatic camera writes (focus and restore)
+            // — same protection PR #139 added for the focus path, so MapLibre's pre-animation
+            // idle can't clobber the restored viewport either.
+            pendingProgrammaticCenter = focus ?: restored?.centre
+            _uiState.value =
+                NearbyUiState.Loaded(
+                    camera = initialCamera,
+                    // Seed previously-fetched pins (issue #146) so re-entry renders the map
+                    // populated immediately; the scheduled fetch below still refreshes the
+                    // viewport's data underneath.
+                    pins = stopCache.snapshot(),
+                    userLocation = fix,
+                    userBearing = null,
+                    // A pending focus or a restored viewport disengages follow-me — in both
+                    // cases the user is looking at a named place, not chasing their own
+                    // location. Same semantics as a direct [focusOn] call into an
+                    // already-Loaded state.
+                    isFollowingUser = focus == null && restored == null && fix != null,
+                    pendingSheet = SheetState.Closed,
+                    showEmptyHint = false,
+                    routeTypeFilter = seedFilter,
+                )
+            // Seed the debounce so the initial fetch lands without a manual pan.
+            scheduleFetch(initialCamera, seedFilter)
+            // Start tracking the user's location + heading for the blue-dot indicator
+            // (issue #99). Both subscriptions are best-effort: a permission revocation or
+            // missing sensor completes the flow cleanly, leaving `userLocation`/
+            // `userBearing` at their last value (the dot freezes rather than vanishing,
+            // which matches what every other map app does when GPS drops momentarily).
+            startUserLocationTracking()
+            startUserBearingTracking()
+        }
+
+        /**
+         * Build the [NearbyUiState.PermissionDenied] state. Same pending-focus consumption and
+         * camera restore + pin seed as [enterGrantedState] — the user can still see the map and
+         * we honour their "frame on this stop" intent even without location permission — minus
+         * the fix fallback.
+         */
+        private fun enterDeniedState(seedFilter: Set<RouteType>) {
+            val focus = pendingFocus
+            pendingFocus = null
+            val restored = sessionCache.lastCamera
+            val initialCamera =
+                when {
+                    focus != null -> OpenPtvCameraState(centre = focus, zoom = FOCUS_ZOOM)
+                    restored != null -> restored
+                    else -> OpenPtvCameraState(centre = MELBOURNE_CBD, zoom = INITIAL_ZOOM)
+                }
+            pendingProgrammaticCenter = focus ?: restored?.centre
+            _uiState.value =
+                NearbyUiState.PermissionDenied(
+                    camera = initialCamera,
+                    pins = stopCache.snapshot(),
+                    routeTypeFilter = seedFilter,
+                )
+            scheduleFetch(initialCamera, seedFilter)
+            // Permission denied — make sure neither tracker is still running from a prior
+            // grant within the same VM lifetime.
+            userLocationJob?.cancel()
+            userLocationJob = null
+            userBearingJob?.cancel()
+            userBearingJob = null
         }
 
         /**
@@ -356,9 +386,16 @@ class NearbyViewModel
                             current.userLocation != null &&
                             camera.centre.distanceTo(current.userLocation) < FOLLOW_LEASH_METERS
                     _uiState.value = current.copy(camera = camera, isFollowingUser = stillFollowing)
+                    // Issue #146: remember the settled viewport so the next ViewModel instance
+                    // (after navigating away and back) reopens here. Only accepted idles in a
+                    // map-visible state are recorded — the stale-frame guard above has already
+                    // filtered programmatic-animation artefacts.
+                    sessionCache.lastCamera = camera
                 }
-                is NearbyUiState.PermissionDenied ->
+                is NearbyUiState.PermissionDenied -> {
                     _uiState.value = current.copy(camera = camera)
+                    sessionCache.lastCamera = camera
+                }
                 NearbyUiState.PermissionUnasked -> Unit
             }
             scheduleFetch(camera, currentFilter())
@@ -742,49 +779,5 @@ class NearbyViewModel
              * to absorb settling jitter.
              */
             internal const val PROGRAMMATIC_IDLE_TOLERANCE_METERS: Double = 25.0
-
-            /**
-             * Cap on the LRU stop cache. Sized so an hour of pan/zoom across central Melbourne
-             * wouldn't evict — a single screen-width of dense CBD fetches a few hundred stops,
-             * a typical pan accumulates well under this number. Far below memory pressure: each
-             * `Stop` is a handful of strings + two doubles (~150 bytes), so 2000 entries is
-             * ~300 KB.
-             */
-            internal const val MAX_CACHED_STOPS: Int = 2000
         }
     }
-
-/**
- * Tiny insertion-order LRU keyed by [StopId]. A re-insert (i.e. a stop returned by a fresh fetch
- * we've already seen) bumps its recency by removing-then-re-adding under the same key. Eviction
- * fires synchronously on [putAll] / [put] once the size exceeds the bound.
- *
- * Not thread-safe — only touched from the ViewModel's coroutine scope (single Dispatcher.Main).
- * If that changes, wrap accesses in a Mutex; for now the cost of synchronisation is unjustified.
- */
-internal class LruStopCache(private val maxSize: Int) {
-    private val backing: LinkedHashMap<StopId, Stop> = LinkedHashMap()
-
-    fun putAll(stops: Collection<Stop>) {
-        stops.forEach(::put)
-    }
-
-    fun put(stop: Stop) {
-        // Remove-then-add bumps recency for a stop we've already cached. LinkedHashMap with
-        // `accessOrder = true` would also work, but we'd still need the explicit eviction.
-        backing.remove(stop.id)
-        backing[stop.id] = stop
-        while (backing.size > maxSize) {
-            val eldest = backing.keys.iterator().next()
-            backing.remove(eldest)
-        }
-    }
-
-    fun clear() {
-        backing.clear()
-    }
-
-    fun snapshot(): List<Stop> = backing.values.toList()
-
-    fun size(): Int = backing.size
-}

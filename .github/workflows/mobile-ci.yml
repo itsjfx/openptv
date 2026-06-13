@@ -103,6 +103,11 @@ jobs:
       # reviewers can grab a build without booting an emulator. The marker
       # comment lets the next CI run rewrite the same comment in place instead
       # of stacking a fresh one per push.
+      #
+      # The body carries the short commit hash AND a build timestamp (issue
+      # #145): GitHub's "edited" indicator on the rewritten comment is hidden
+      # on mobile, so without the inline timestamp there's no way to tell
+      # whether the linked APK is from the latest push.
       - name: Comment debug APK link on PR
         if: github.event_name == 'pull_request'
         env:
@@ -113,8 +118,9 @@ jobs:
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           marker='<!-- debug-apk-link -->'
+          built_at="$(date -u '+%Y-%m-%d %H:%M UTC')"
           body="${marker}
-          **Debug APK:** [app-debug-${SHA}.apk](${ARTIFACT_URL}) (built from \`${SHA:0:7}\`)
+          **Debug APK:** [app-debug-${SHA}.apk](${ARTIFACT_URL}) (built from \`${SHA:0:7}\` at ${built_at})
 
           <sub>Requires GitHub login. Artifact expires after 3 days.</sub>"
           existing="$(gh api "repos/${REPO}/issues/${PR}/comments" \

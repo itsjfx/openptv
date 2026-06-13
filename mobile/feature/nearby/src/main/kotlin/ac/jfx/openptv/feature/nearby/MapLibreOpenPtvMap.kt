@@ -134,6 +134,14 @@ internal class MapLibreOpenPtvMap
                             // (issue #123 focus consume during the permission round-trip).
                             mapReady = true
                             map.addOnCameraIdleListener {
+                                // Issue #146: drop idles fired before the composition has applied
+                                // its first camera — they carry MapLibre's default world frame
+                                // (0,0 zoom 0), not anything the user or the VM asked for. A tab
+                                // away/back recreates the MapView against a retained ViewModel
+                                // whose programmatic-idle guard has long been disarmed, so without
+                                // this gate the phantom frame lands in VM state, refetches "stops
+                                // near Null Island", and gets recorded as the session viewport.
+                                if (!mapViewRef.initialCameraApplied) return@addOnCameraIdleListener
                                 val pos = map.cameraPosition
                                 val target = pos.target ?: return@addOnCameraIdleListener
                                 onCameraIdleLatest(
@@ -244,14 +252,25 @@ internal class MapLibreOpenPtvMap
             // `onCameraIdle` had usually pushed a phantom centre into the VM state already.
             LaunchedEffect(camera, mapReady) {
                 if (mapReady) {
-                    mapViewRef.map?.animateCamera(
+                    val update =
                         CameraUpdateFactory.newCameraPosition(
                             CameraPosition.Builder()
                                 .target(LatLng(camera.centre.lat, camera.centre.lng))
                                 .zoom(camera.zoom)
                                 .build(),
-                        ),
-                    )
+                        )
+                    val map = mapViewRef.map ?: return@LaunchedEffect
+                    if (mapViewRef.initialCameraApplied) {
+                        map.animateCamera(update)
+                    } else {
+                        // First application after (re)creation: jump instantly instead of
+                        // animating from MapLibre's default world frame (issue #146). The
+                        // instant move means the camera position is the target before any
+                        // subsequent idle fires, so the idle gate above can safely open —
+                        // and re-entering the map doesn't replay a globe-to-street zoom.
+                        map.moveCamera(update)
+                        mapViewRef.initialCameraApplied = true
+                    }
                 }
             }
 
@@ -560,6 +579,16 @@ internal class MapLibreOpenPtvMap
         private class MapViewRef {
             var view: MapView? = null
             var map: MapLibreMap? = null
+
+            /**
+             * Flips true once the composition has pushed the first camera into this MapView
+             * (issue #146). A brand-new MapView sits at MapLibre's default frame (centre 0,0,
+             * zoom 0) until then, and fires camera-idle events for that frame during async
+             * setup — the idle listener drops everything until this flag flips so a phantom
+             * "Null Island" centre never reaches the ViewModel (where it would overwrite the
+             * real camera state and get recorded as the session's last viewport).
+             */
+            var initialCameraApplied: Boolean = false
         }
 
         private companion object {

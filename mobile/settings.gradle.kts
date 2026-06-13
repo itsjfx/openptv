@@ -52,6 +52,7 @@ include(":core:testing")
 // a no-op, not a build break).
 include(":feature:favourites")
 include(":feature:nearby")
+include(":feature:run-pattern")
 include(":feature:search")
 include(":feature:settings")
 include(":feature:stop-detail")
