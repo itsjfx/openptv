@@ -38,6 +38,11 @@ class NearbyMapSessionCache
             /**
              * Cap on the LRU stop cache. Sized so an hour of pan/zoom across central Melbourne
              * wouldn't evict — a single screen-width of dense CBD fetches a few hundred stops.
+             * Now that the map renders pins unclustered (issue #124) the cache is also what
+             * populates a zoomed-out view; rather than retaining an ever-larger history, each
+             * fetch pulls more stops up front (`max_results=100`, see
+             * `RetrofitNearbyStopsDataSource`) so a single viewport is already dense.
+             *
              * Far below memory pressure: each `Stop` is a handful of strings + two doubles
              * (~150 bytes), so 2000 entries is ~300 KB.
              */

@@ -31,7 +31,6 @@ import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.SymbolLayer
-import org.maplibre.android.style.sources.GeoJsonOptions
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.geojson.Feature
 import org.maplibre.geojson.FeatureCollection
@@ -54,11 +53,17 @@ import javax.inject.Singleton
  * screen pauses tile rendering when backgrounded. Without this MapView leaks the EGL context on
  * config change.
  *
- * **Rendering scheme.** Stops land on a single [GeoJsonSource] with native clustering enabled.
- * Three layers sit on top:
- *  1. [CircleLayer] for unclustered stops, coloured per [RouteType] via a `match` expression.
- *  2. [CircleLayer] for cluster halos (sized by point count).
- *  3. [SymbolLayer] for the cluster count text label.
+ * **Rendering scheme.** Stops land on a single [GeoJsonSource] and render as one [CircleLayer]
+ * per stop, coloured per [RouteType] via a `match` expression.
+ *
+ * **No clustering (issue #124).** MapLibre's native GeoJSON clustering was enabled originally, but
+ * its supercluster tile index dropped every point outside a narrow zoom band: zooming far out
+ * collapsed the metro into nothing visible, and zooming far in returned an empty tile so the pins
+ * vanished entirely (both reproducible on the emulator). Rendering the raw [GeoJsonSource]
+ * unclustered shows every cached stop at every zoom, which is what the issue actually wants ("see
+ * stops way more"). The LRU stop cache ([NearbyMapSessionCache.MAX_CACHED_STOPS]) bounds how many
+ * pins can be on screen at once, so the unclustered point count stays well within MapLibre's
+ * comfort zone.
  *
  * Going with [CircleLayer] (rather than icon bitmaps) keeps the impl asset-free — every colour
  * is derivable from a constant, and adding a route type is one row in [routeTypeColor]. If a
@@ -315,59 +320,21 @@ internal class MapLibreOpenPtvMap
         }
 
         /**
-         * One-time install: a clustering-enabled [GeoJsonSource] plus the three layers that
-         * project it to circles + cluster labels. Idempotent — a no-op if the source is already
+         * One-time install: a plain (unclustered) [GeoJsonSource] plus the single circle layer
+         * that projects each stop to a coloured dot. Idempotent — a no-op if the source is already
          * present (style reloads on theme flip). The source starts empty; [applyPins] swaps the
          * `FeatureCollection` in on every camera-idle update.
+         *
+         * Clustering was removed in issue #124 — see the class KDoc for why. With no clustering
+         * every feature is a stop, so there's no `point_count` filter to apply.
          */
         private fun installPinLayers(style: Style) {
             if (style.getSource(SOURCE_PINS) != null) return
 
-            val options =
-                GeoJsonOptions()
-                    .withCluster(true)
-                    .withClusterMaxZoom(CLUSTER_MAX_ZOOM)
-                    .withClusterRadius(CLUSTER_RADIUS_PX)
-            style.addSource(GeoJsonSource(SOURCE_PINS, options))
+            style.addSource(GeoJsonSource(SOURCE_PINS))
 
-            // Cluster halo — a soft circle behind the count label. Sized in two steps so a busy
-            // CBD area still looks distinguishable from a quiet suburb pair. Wrapping the
-            // colour in `Expression.color` matches the same fix the unclustered layer uses —
-            // a raw int works with `PropertyFactory.circleColor(int)` directly but NOT inside
-            // a parent expression.
-            val clusterCircle =
-                CircleLayer(LAYER_CLUSTERS, SOURCE_PINS).withProperties(
-                    PropertyFactory.circleColor(CLUSTER_COLOR),
-                    PropertyFactory.circleRadius(
-                        Expression.step(
-                            Expression.get(GEOJSON_PROP_POINT_COUNT),
-                            Expression.literal(CLUSTER_RADIUS_SMALL_PX),
-                            Expression.literal(CLUSTER_STEP_MID),
-                            Expression.literal(CLUSTER_RADIUS_MID_PX),
-                            Expression.literal(CLUSTER_STEP_LARGE),
-                            Expression.literal(CLUSTER_RADIUS_LARGE_PX),
-                        ),
-                    ),
-                    PropertyFactory.circleStrokeColor(STROKE_COLOR),
-                    PropertyFactory.circleStrokeWidth(CLUSTER_STROKE_WIDTH_PX),
-                )
-            clusterCircle.setFilter(Expression.has(GEOJSON_PROP_POINT_COUNT))
-            style.addLayer(clusterCircle)
-
-            // Cluster count label sitting on top of the halo.
-            val clusterCount =
-                SymbolLayer(LAYER_CLUSTER_COUNT, SOURCE_PINS).withProperties(
-                    PropertyFactory.textField(Expression.toString(Expression.get(GEOJSON_PROP_POINT_COUNT))),
-                    PropertyFactory.textSize(CLUSTER_LABEL_SIZE_SP),
-                    PropertyFactory.textColor(LABEL_COLOR),
-                    PropertyFactory.textIgnorePlacement(true),
-                    PropertyFactory.textAllowOverlap(true),
-                )
-            clusterCount.setFilter(Expression.has(GEOJSON_PROP_POINT_COUNT))
-            style.addLayer(clusterCount)
-
-            // Unclustered single-stop circle, colour driven by the stop's route type. The match
-            // expression maps each PTV wire code to a constant; falls back to grey for Unknown.
+            // Single-stop circle, colour driven by the stop's route type. The match expression
+            // maps each PTV wire code to a constant; falls back to grey for Unknown.
             val pinCircle =
                 CircleLayer(LAYER_UNCLUSTERED, SOURCE_PINS).withProperties(
                     PropertyFactory.circleRadius(PIN_RADIUS_PX),
@@ -404,14 +371,13 @@ internal class MapLibreOpenPtvMap
                         ),
                     ),
                 )
-            pinCircle.setFilter(Expression.not(Expression.has(GEOJSON_PROP_POINT_COUNT)))
             style.addLayer(pinCircle)
         }
 
         /**
          * Swap in the latest pin set. Builds a [FeatureCollection] of [Point]s with `routeType`
-         * + `stopId` properties so the styling expressions in [installPinLayers] can colour and
-         * cluster without us having to maintain per-type sources.
+         * + `stopId` properties so the styling expression in [installPinLayers] can colour each
+         * stop by route type without us having to maintain per-type sources.
          *
          * No-op if the style hasn't loaded yet (the source isn't installed until the style's
          * `setStyle` callback fires); the next `applyPins` call after style-load will catch up.
@@ -595,7 +561,7 @@ internal class MapLibreOpenPtvMap
             /**
              * Tap within ~80 m of a pin counts as a hit. Original Phase 05 default of 30 m was
              * tuned to the metric "one stop's worth of granularity" but in practice that's only
-             * 5-10 screen pixels at the unclustered zoom (14+), which is below a finger-tip
+             * 5-10 screen pixels at a typical map zoom (14+), which is below a finger-tip
              * tap's accuracy on a typical phone. Bumping to ~80 m gives the tap surface enough
              * slop that a deliberate tap on a pin actually lands. PTV stops in central
              * Melbourne are typically 100-200 m apart, so a tap still resolves to the right
@@ -631,8 +597,6 @@ internal class MapLibreOpenPtvMap
             // GeoJSON source + layer ids
             private const val SOURCE_PINS = "openptv-stops"
             private const val LAYER_UNCLUSTERED = "openptv-stops-unclustered"
-            private const val LAYER_CLUSTERS = "openptv-stops-clusters"
-            private const val LAYER_CLUSTER_COUNT = "openptv-stops-cluster-count"
 
             // User-location source + layers (issue #99).
             private const val SOURCE_USER = "openptv-user"
@@ -646,34 +610,17 @@ internal class MapLibreOpenPtvMap
             private const val GEOJSON_PROP_STOP_ID = "stopId"
             private const val GEOJSON_PROP_BEARING = "bearing"
 
-            // MapLibre-supplied property on cluster features — fixed name in the SDK contract.
-            private const val GEOJSON_PROP_POINT_COUNT = "point_count"
-
-            // Clustering tunables
-            private const val CLUSTER_MAX_ZOOM: Int = 14
-            private const val CLUSTER_RADIUS_PX: Int = 50
-
             // Circle radii in pixels — tuned visually on a 411-dp device. Constants rather than
             // theme-derived because the map is tile-rendered and Compose's `dp` doesn't apply.
             private const val PIN_RADIUS_PX: Float = 7f
             private const val PIN_STROKE_WIDTH_PX: Float = 2f
-            private const val CLUSTER_STROKE_WIDTH_PX: Float = 2f
-            private const val CLUSTER_RADIUS_SMALL_PX: Float = 16f
-            private const val CLUSTER_RADIUS_MID_PX: Float = 22f
-            private const val CLUSTER_RADIUS_LARGE_PX: Float = 28f
-            private const val CLUSTER_STEP_MID: Int = 10
-            private const val CLUSTER_STEP_LARGE: Int = 50
-            private const val CLUSTER_LABEL_SIZE_SP: Float = 12f
 
             // ARGB ints. Picked to read on both light and dark map styles.
             private const val STROKE_COLOR: Int = 0xFFFFFFFF.toInt()
-            private const val LABEL_COLOR: Int = 0xFFFFFFFF.toInt()
-            private const val CLUSTER_COLOR: Int = 0xFF1976D2.toInt() // Material blue 700
 
             // User-location indicator colours + sizes (issue #99). Material blue 500 keeps the
-            // dot in the same "current location" colour family every other map app uses, while
-            // staying distinct from the cluster colour (700) so the two don't visually merge if
-            // the user is standing on top of a cluster.
+            // dot in the same "current location" colour family every other map app uses, and
+            // reads clearly against the route-type stop colours it sits among.
             private const val USER_DOT_COLOR: Int = 0xFF1E88E5.toInt() // Material blue 500
             private const val USER_CONE_COLOR: Int = 0xFF1E88E5.toInt()
             private const val USER_HALO_COLOR: Int = 0xFF1E88E5.toInt()

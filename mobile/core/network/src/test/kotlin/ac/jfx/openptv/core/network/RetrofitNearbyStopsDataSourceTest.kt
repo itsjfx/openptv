@@ -105,15 +105,17 @@ class RetrofitNearbyStopsDataSourceTest {
         }
 
     @Test
-    fun `request URL formats lat,lng with six-decimal precision and forwards max_distance`() =
+    fun `request URL formats lat,lng with six-decimal precision and forwards max_distance plus max_results`() =
         runTest {
             server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
 
             dataSource.stopsNear(Coordinates(lat = -37.8183, lng = 144.9671), 750)
 
             val recorded = server.takeRequest()
+            // max_results pinned to 100 (PTV default is 30) so an unclustered viewport fills in a
+            // single round-trip — issue #124.
             assertThat(recorded.path)
-                .isEqualTo("/api/v3/stops/location/-37.818300,144.967100?max_distance=750")
+                .isEqualTo("/api/v3/stops/location/-37.818300,144.967100?max_distance=750&max_results=100")
         }
 
     @Test
@@ -133,7 +135,7 @@ class RetrofitNearbyStopsDataSourceTest {
             assertThat(recorded.path)
                 .isEqualTo(
                     "/api/v3/stops/location/-37.818300,144.967100?max_distance=$RADIUS_M" +
-                        "&route_types=0&route_types=1&route_types=2",
+                        "&max_results=100&route_types=0&route_types=1&route_types=2",
                 )
         }
 
