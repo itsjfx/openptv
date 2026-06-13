@@ -198,10 +198,13 @@ private fun PatternState.titleText(): String =
         is PatternState.Loaded -> {
             val destination = directionName.ifBlank { stringResource(R.string.feature_run_pattern_title) }
             val route = routeLabel
-            if (route != null) {
-                stringResource(R.string.feature_run_pattern_title_format, route, destination)
-            } else {
-                destination
+            when {
+                route == null -> destination
+                // Loop / terminus runs where the line and its destination share a name (e.g. the
+                // Lilydale line terminating at Lilydale) read as "Lilydale to Lilydale" — collapse
+                // the redundant half to just the name; keep "X to Y" when they genuinely differ.
+                route.equals(destination, ignoreCase = true) -> route
+                else -> stringResource(R.string.feature_run_pattern_title_format, route, destination)
             }
         }
         else -> stringResource(R.string.feature_run_pattern_title)

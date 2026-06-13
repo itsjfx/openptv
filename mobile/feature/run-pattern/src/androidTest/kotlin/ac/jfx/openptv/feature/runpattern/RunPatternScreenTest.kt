@@ -78,6 +78,27 @@ class RunPatternScreenTest {
     }
 
     @Test
+    fun title_collapsesWhenRouteAndDestinationShareAName() {
+        composeTestRule.setContent {
+            RunPatternRoute(
+                runRef = RunRef(RUN_REF),
+                routeType = RouteType.Train,
+            )
+        }
+
+        runBlocking {
+            // A run whose line and terminus share a name (the Lilydale line terminating at
+            // Lilydale) would otherwise render "Lilydale to Lilydale".
+            runPatternRepository.emitSuccess(
+                RunPatternMother.aRunPattern().withDirectionName("Lilydale").build(),
+            )
+        }
+
+        composeTestRule.onNodeWithText("Lilydale").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Lilydale to Lilydale").assertDoesNotExist()
+    }
+
+    @Test
     fun errorState_rendersReasonAndRetryRecovers() {
         composeTestRule.setContent {
             RunPatternRoute(
