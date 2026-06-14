@@ -131,15 +131,17 @@ demo_off() { demo -e command exit; }
 
 launch() { adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; }
 
-# Denormalised display fields mean these render with no network call. Tapping the first
-# row (Flinders Street, a train station) opens its stop-detail screen.
+# One train, one tram, one bus. Denormalised display fields mean the list renders with no
+# network call; the destinationKeys match real PTV direction names so each row shows a live
+# next departure. Display names are kept short so they don't truncate mid-word. Tapping the
+# first row (Flinders Street, a train station) opens its stop-detail screen.
 seed_favourites() {
   adb shell run-as "$pkg" sqlite3 "databases/$db_name" <<SQL
 DELETE FROM favourite_destinations_at_stop;
 INSERT INTO favourite_destinations_at_stop VALUES
- (1071,'pakenham','Train','Flinders Street','Melbourne City','Pakenham',-37.8183,144.9671,0,$added_at),
- (1235,'sunbury','Train','Town Hall','Melbourne City','Sunbury',-37.8136,144.9665,1,$added_at),
- (2722,'box hill','Tram','Flinders St Station/Elizabeth St #1','Melbourne City','Box Hill',-37.8175,144.9655,2,$added_at);
+ (1071,'sandringham','Train','Flinders Street','Melbourne City','Sandringham',-37.8183,144.9671,0,$added_at),
+ (2206,'melbourne university','Tram','Bourke St Mall','Melbourne City','Melbourne University',-37.8136,144.9648,1,$added_at),
+ (14163,'la trobe university','Bus','Bourke St/Queen St','Melbourne City','La Trobe University',-37.8146,144.9614,2,$added_at);
 SQL
 }
 
@@ -182,7 +184,7 @@ log "relaunching with seeded favourites"
 launch
 
 log "capturing favourites"
-wait_for "to Pakenham"
+wait_for "to Sandringham"
 sleep 1
 screenshot favourites
 
