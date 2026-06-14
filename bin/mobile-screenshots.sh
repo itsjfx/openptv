@@ -110,8 +110,8 @@ tap() {
 }
 
 screenshot() {
-  adb exec-out screencap -p > "$out_dir/$1.png"
-  log "saved $out_dir/$1.png"
+  adb exec-out screencap -p > "$1"
+  log "saved $1"
 }
 
 demo() { adb shell am broadcast -a com.android.systemui.demo "$@" >/dev/null 2>&1; }
@@ -143,6 +143,45 @@ INSERT INTO favourite_destinations_at_stop VALUES
  (2206,'melbourne university','Tram','Bourke St Mall','Melbourne City','Melbourne University',-37.8136,144.9648,1,$added_at),
  (14163,'la trobe university','Bus','Bourke St/Queen St','Melbourne City','La Trobe University',-37.8146,144.9614,2,$added_at);
 SQL
+}
+
+# Capture all three screens for one UI mode ("light" or "dark") into $out_dir/<mode>/.
+# Theme defaults to "System" on a fresh install, so `cmd uimode night` flips the app.
+capture_set() {
+  local mode="$1" night dir
+  [[ "$mode" == dark ]] && night=yes || night=no
+  dir="$out_dir/$mode"
+  mkdir -p "$dir"
+
+  log "[$mode] uimode night = $night"
+  adb shell cmd uimode night "$night" >/dev/null
+  adb shell am force-stop "$pkg"
+  demo_on # re-assert the clean status bar — a uimode change can reset SystemUI
+  launch
+
+  log "[$mode] capturing favourites"
+  wait_for "to Sandringham"
+  sleep 1
+  screenshot "$dir/favourites.png"
+
+  log "[$mode] capturing stop-detail (Flinders Street)"
+  tap "Flinders Street · Melbourne City"
+  wait_for "Routes serving this stop"
+  sleep 2
+  screenshot "$dir/stop-detail.png"
+
+  log "[$mode] capturing nearby map"
+  adb shell input keyevent KEYCODE_BACK
+  tap "Nearby tab"
+  wait_for "Nearby stops"
+  sleep 3 # initial camera-idle fetch + tiles
+  # Zoom out for a wider CBD spread, then nudge: scroll-wheel zoom alone doesn't fire
+  # MapLibre's onCameraIdle, so a tiny drag is needed to trigger the re-fetch.
+  adb shell input mouse scroll 540 1100 --axis VSCROLL,-2 || true
+  sleep 1
+  adb shell input swipe 540 1100 548 1108 250
+  sleep 4 # let tiles + stop pins render after the re-fetch
+  screenshot "$dir/nearby-map.png"
 }
 
 adb get-state &>/dev/null || {
@@ -183,29 +222,9 @@ seed_favourites
 log "relaunching with seeded favourites"
 launch
 
-log "capturing favourites"
-wait_for "to Sandringham"
-sleep 1
-screenshot favourites
+capture_set light
+capture_set dark
 
-log "capturing stop-detail (Flinders Street)"
-tap "Flinders Street · Melbourne City"
-wait_for "Routes serving this stop"
-sleep 2
-screenshot stop-detail
-
-log "capturing nearby map"
-adb shell input keyevent KEYCODE_BACK
-tap "Nearby tab"
-wait_for "Nearby stops"
-sleep 3 # initial camera-idle fetch + tiles
-# Zoom out for a wider CBD spread, then nudge: scroll-wheel zoom alone doesn't fire
-# MapLibre's onCameraIdle, so a tiny drag is needed to trigger the re-fetch.
-adb shell input mouse scroll 540 1100 --axis VSCROLL,-2 || true
-sleep 1
-adb shell input swipe 540 1100 548 1108 250
-sleep 4 # let tiles + stop pins render after the re-fetch
-screenshot nearby-map
-
+adb shell cmd uimode night no >/dev/null # leave the device back in light mode
 demo_off
-log "done — screenshots in $out_dir"
+log "done — screenshots in $out_dir/{light,dark}"

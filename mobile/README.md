@@ -29,7 +29,8 @@ running emulator attached:
 It pins every source of run-to-run drift — SystemUI demo-mode status bar (fixed clock, full
 battery/signal, no notifications), fixed Melbourne GPS, pre-granted location permission, and
 DB-seeded favourites — and drives the UI by accessibility element rather than fixed coordinates.
-PNGs land in `mobile/build/screenshots/` (gitignored). Boot the `pixel_api36` AOSP AVD first; see
+Each screen is captured in both light and dark mode (toggled via `cmd uimode night`); PNGs land in
+`mobile/build/screenshots/{light,dark}/` (gitignored). Boot the `pixel_api36` AOSP AVD first; see
 `--help` for options.
 
 ## Formatting
