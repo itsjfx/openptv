@@ -174,13 +174,9 @@ capture_set() {
   adb shell input keyevent KEYCODE_BACK
   tap "Nearby tab"
   wait_for "Nearby stops"
-  sleep 3 # initial camera-idle fetch + tiles
-  # Zoom out for a wider CBD spread, then nudge: scroll-wheel zoom alone doesn't fire
-  # MapLibre's onCameraIdle, so a tiny drag is needed to trigger the re-fetch.
-  adb shell input mouse scroll 540 1100 --axis VSCROLL,-2 || true
-  sleep 1
-  adb shell input swipe 540 1100 548 1108 250
-  sleep 4 # let tiles + stop pins render after the re-fetch
+  # Default zoom frames ~2-3 CBD blocks with the stops nicely spread. The initial camera-idle
+  # fetch populates the pins on load, so no zoom/nudge is needed.
+  sleep 5 # let map tiles + stop pins render
   screenshot "$dir/nearby-map.png"
 }
 
