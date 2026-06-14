@@ -11,6 +11,7 @@ import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.feature.stopdetail.R
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
@@ -471,16 +473,23 @@ private fun StopHeader(
                 style = MaterialTheme.typography.labelMedium,
             )
             Spacer(modifier = Modifier.height(4.dp))
-            // A Row instead of FlowRow keeps the dep surface tight. For long route lists this
-            // will scroll horizontally via LazyRow in a follow-up — Flinders has dozens of routes.
+            // Horizontally scrollable so long route lists (Flinders has dozens) keep each chip at
+            // its natural width. Without the scroll, a non-wrapping Row squeezes the overflow chip
+            // into the leftover width and its label wraps vertically into a very tall chip — which
+            // stretched the whole header and left a big blank gap above the departures (issue #158).
+            // `maxLines = 1` on the label is belt-and-suspenders against the same vertical wrap.
             Row(
-                modifier = Modifier.fillMaxWidth().testTag(TestTagRouteChips),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .testTag(TestTagRouteChips),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 routes.take(MAX_INLINE_ROUTE_CHIPS).forEach { route ->
                     AssistChip(
                         onClick = { /* route detail lands in Phase 06 */ },
-                        label = { Text(route.displayLabel) },
+                        label = { Text(route.displayLabel, maxLines = 1) },
                     )
                 }
             }
