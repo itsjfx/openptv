@@ -4,14 +4,14 @@ A third-party open-source alternative for the Public Transport Victoria (PTV) An
 
 OpenPTV is presented in [Material You](https://m3.material.io) style
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/9cfe6244-0f70-45d6-9606-0c431cac3608" width="33.0%" alt="light-favourites" />
-  <img src="https://github.com/user-attachments/assets/04939830-76c3-4ff6-8548-6cb823117177" width="33.0%" alt="light-nearby-map" />
-  <img src="https://github.com/user-attachments/assets/8bbf13c6-5301-4ff1-ae76-e5fe960c0591" width="33.0%" alt="light-stop-detail" />
+  <img src="https://github.com/user-attachments/assets/9cfe6244-0f70-45d6-9606-0c431cac3608" width="32.0%" alt="light-favourites" />
+  <img src="https://github.com/user-attachments/assets/04939830-76c3-4ff6-8548-6cb823117177" width="32.0%" alt="light-nearby-map" />
+  <img src="https://github.com/user-attachments/assets/8bbf13c6-5301-4ff1-ae76-e5fe960c0591" width="32.0%" alt="light-stop-detail" />
   <p>Light mode</p>
   <br>
-  <img src="https://github.com/user-attachments/assets/e876095d-b6c7-4837-9b5c-b253571eaba7" width="33.0%" alt="dark-favourites" />
-  <img src="https://github.com/user-attachments/assets/63037a21-bc59-4695-b6a1-eed159df479c" width="33.0%" alt="dark-nearby-map" />
-  <img src="https://github.com/user-attachments/assets/99e0953e-0ee9-475a-9e44-df202f6634f3" width="33.0%" alt="dark-stop-detail" />
+  <img src="https://github.com/user-attachments/assets/e876095d-b6c7-4837-9b5c-b253571eaba7" width="32.0%" alt="dark-favourites" />
+  <img src="https://github.com/user-attachments/assets/63037a21-bc59-4695-b6a1-eed159df479c" width="32.0%" alt="dark-nearby-map" />
+  <img src="https://github.com/user-attachments/assets/99e0953e-0ee9-475a-9e44-df202f6634f3" width="32.0%" alt="dark-stop-detail" />
   <p>Dark mode</p>
 </div>
 
