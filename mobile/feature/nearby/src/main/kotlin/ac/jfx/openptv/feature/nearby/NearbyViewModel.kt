@@ -396,7 +396,14 @@ class NearbyViewModel
                     _uiState.value = current.copy(camera = camera)
                     sessionCache.lastCamera = camera
                 }
-                NearbyUiState.PermissionUnasked -> Unit
+                NearbyUiState.PermissionUnasked ->
+                    // No permission decision yet — there's no Loaded/Denied variant to render the
+                    // result onto, so any fetch we fired here would just be discarded by
+                    // [scheduleFetch]'s `PermissionUnasked -> Unit` branch (issue #160). MapLibre
+                    // still fires idles while the permission prompt is up; bail before scheduling so
+                    // we don't spend a `stops/location` request (+ PTV rate limit) on a result we
+                    // can't show. The grant/deny path seeds its own first fetch on transition.
+                    return
             }
             scheduleFetch(camera, currentFilter())
         }

@@ -126,9 +126,14 @@ fun NearbyRoute(
             viewModel.onPermissionResult(granted)
         }
 
-    // Pre-grant check: a user who already granted on a previous launch (either coarse OR fine —
-    // a user who picked "Precise" in the system dialog has fine; "Approximate" gets coarse) should
-    // land in `Loaded` immediately. Fired once on entry.
+    // Pre-grant check + first-run prompt (issue #160). A user who already granted on a previous
+    // launch (either coarse OR fine — "Precise" in the system dialog gives fine, "Approximate"
+    // gives coarse) should land in `Loaded` immediately. A user who hasn't been asked yet gets the
+    // system permission prompt auto-launched on entry, rather than being left staring at an empty
+    // CBD map whose only affordance is the error-tinted crosshair FAB. Fired once on entry; the
+    // launcher's callback drives the VM from there, and a recomposition (rotation, returning to the
+    // tab) keys identically so the prompt isn't re-fired — Android also suppresses re-prompts once
+    // the user has actively denied, so the FAB → app-settings path remains the recovery for that.
     LaunchedEffect(Unit) {
         val granted =
             ContextCompat.checkSelfPermission(
@@ -141,6 +146,13 @@ fun NearbyRoute(
                 ) == PackageManager.PERMISSION_GRANTED
         if (granted) {
             viewModel.onPermissionResult(true)
+        } else {
+            permissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ),
+            )
         }
     }
 
@@ -269,8 +281,19 @@ internal fun NearbyScreen(
                 scaffoldState = scaffoldState,
                 sheetPeekHeight = SheetPeekHeight,
                 sheetContent = {
+                    // In PermissionUnasked the list is empty because we have no location to anchor
+                    // the search — not because the filter excluded everything (issue #160). Surface
+                    // the real cause so the peek sheet reads "Enable location to see nearby stops"
+                    // rather than the misleading "No stops match the current filter".
+                    val emptyText =
+                        if (uiState is NearbyUiState.PermissionUnasked) {
+                            stringResource(R.string.feature_nearby_list_empty_permission)
+                        } else {
+                            stringResource(R.string.feature_nearby_list_empty)
+                        }
                     NearbyStopsList(
                         rows = nearbyRows,
+                        emptyText = emptyText,
                         distanceFormatter = distanceFormatter,
                         onRowClicked = onPinClicked,
                         listState = nearbyListState,
@@ -516,6 +539,7 @@ private fun EmptyStateHint(modifier: Modifier = Modifier) {
 @Composable
 private fun NearbyStopsList(
     rows: List<NearbyListRow>,
+    emptyText: String,
     distanceFormatter: DistanceFormatter,
     onRowClicked: (Stop) -> Unit,
     listState: LazyListState,
@@ -547,7 +571,7 @@ private fun NearbyStopsList(
 
         if (rows.isEmpty()) {
             Text(
-                text = stringResource(R.string.feature_nearby_list_empty),
+                text = emptyText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier =
