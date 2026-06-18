@@ -274,7 +274,16 @@ class StopDetailViewModel
             }
         }
 
+        /**
+         * One-shot header fetch. Idempotent on a successful load: once the header is
+         * [HeaderState.Loaded] we don't re-fetch, so a config change (rotation) that recreates the
+         * ViewModel — or simply re-enters `init` — never re-hits `stops/{id}/route_type/{rt}`
+         * (issue #161). The genuine first load still runs (header is `Loading`), and
+         * [retryHeader] resets the state back to `Loading` before calling, so retry-after-error
+         * still re-fetches.
+         */
         private fun loadHeader() {
+            if (_uiState.value.header is HeaderState.Loaded) return
             viewModelScope.launch {
                 val result: Result<StopDetail> = getStopDetail(stopId, routeType)
                 _uiState.update { current ->
@@ -292,7 +301,15 @@ class StopDetailViewModel
 
         private fun StopDetailUiState.applyDepartureResult(result: Result<List<Departure>>): StopDetailUiState =
             when (result) {
-                is Result.Loading -> copy(departures = DeparturesState.Loading)
+                is Result.Loading ->
+                    // Don't blow away an already-loaded list when the poll restarts. On a config
+                    // change (rotation) `repeatOnLifecycle(RESUMED)` re-subscribes, and the
+                    // repository's first re-emission is `Loading`; flipping back to the loading
+                    // skeleton there is the visible "reload flicker" from issue #161. Keep the
+                    // last-good `Loaded` rows on screen — the fresh data lands on the next
+                    // `Success` tick and replaces them in place. Only the genuine first load (no
+                    // rows yet) shows the skeleton.
+                    if (departures is DeparturesState.Loaded) this else copy(departures = DeparturesState.Loading)
                 is Result.Success -> {
                     lastHeadPoll = result.data
                     val merged = mergeDepartures(headPoll = result.data)
