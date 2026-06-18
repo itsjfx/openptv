@@ -280,6 +280,40 @@ class StopDetailViewModelTest {
         }
 
     @Test
+    fun `resume single-flights the observe — a pause then resume leaves exactly one live collector — issue 162`() =
+        runTest(dispatcher) {
+            // Issue #162: foreground (Pause -> Resume via repeatOnLifecycle) intermittently fired
+            // TWO departures fetches ~66 ms apart. Root cause: the old `cancel()` only *requested*
+            // cancellation, so a not-yet-stopped collector overlapped the fresh `startObserving()`.
+            // The fix `cancelAndJoin`s the prior job before subscribing, so a resume yields exactly
+            // one live subscription — and a single tick lands on UI state once, not twice.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+
+            // First resume: one subscription.
+            viewModel.startObserving()
+            advanceUntilIdle()
+            assertThat(departureRepository.observedKeys).hasSize(1)
+
+            // Pause -> Resume fired back-to-back, the way repeatOnLifecycle drives it. The previous
+            // observe job is cancelled-and-joined before the new collection subscribes, so this
+            // adds exactly one more subscription — never two from an overlapping start.
+            viewModel.stopObserving()
+            viewModel.startObserving()
+            advanceUntilIdle()
+            assertThat(departureRepository.observedKeys).hasSize(2)
+
+            // The single live collector applies one tick once. (The torn-down collector is gone, so
+            // the emission isn't double-applied.)
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("ONE").build()))
+            advanceUntilIdle()
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.flatMap { it.departures }.map { it.runRef.value })
+                .containsExactly("ONE")
+        }
+
+    @Test
     fun `first loading emission shows the loading skeleton`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())

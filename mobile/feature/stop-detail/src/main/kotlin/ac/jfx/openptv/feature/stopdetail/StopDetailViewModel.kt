@@ -21,6 +21,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -157,11 +158,22 @@ class StopDetailViewModel
          * inside a `repeatOnLifecycle(Lifecycle.State.RESUMED)` block, so it runs on every
          * Pause→Resume cycle. Idempotent — re-entry while a previous job is still active cancels
          * the previous one (mirrors the "fresh collector lifetime drives polling" contract).
+         *
+         * Single-flight on resume (issue #162): the new job first `cancelAndJoin()`s the prior one
+         * *before* it subscribes to [observeDepartures]. Plain `cancel()` only *requests*
+         * cooperative cancellation — the previous coroutine can still be parked inside the
+         * suspending fetch and fire a departures request while the fresh collection also starts,
+         * producing the intermittent duplicate fetch (~66 ms apart) seen on foreground. Joining
+         * guarantees the old subscription is fully torn down, so exactly one fetch starts per
+         * resume. `previous` is captured before reassigning `observeJob`, so the join never targets
+         * the coroutine it lives in (no self-join deadlock). The genuine first start has no prior
+         * job, so it subscribes immediately.
          */
         fun startObserving() {
-            observeJob?.cancel()
+            val previous = observeJob
             observeJob =
                 viewModelScope.launch {
+                    previous?.cancelAndJoin()
                     observeDepartures(stopId, routeType).collect { result ->
                         _uiState.update { current -> current.applyDepartureResult(result) }
                     }
