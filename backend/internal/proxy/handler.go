@@ -2,6 +2,8 @@
 package proxy
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +17,11 @@ import (
 // apiPrefix is the inbound path prefix the handler responds to. Anything
 // outside this returns 404.
 const apiPrefix = "/api/v3/"
+
+// stopsLocationPrefix is the upstream path prefix for the nearby-stops
+// endpoint (/v3/stops/location/{lat},{lng}). For this endpoint we strip the
+// per-stop `routes` array from the response — see trimStopsLocation.
+const stopsLocationPrefix = "/v3/stops/location/"
 
 // maxUpstreamBytes caps how much of PTV's response we'll copy back to the
 // client. PTV responses are JSON and well under this in practice; the cap is
@@ -112,6 +119,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if ct := resp.Header.Get("Content-Type"); ct != "" {
 		w.Header().Set("Content-Type", ct)
 	}
+
+	// For the nearby-stops endpoint, trim the heavy per-stop `routes` array the
+	// mobile pins never read. We only attempt this on a 2xx JSON response; on
+	// any decode failure we fall back to a verbatim copy so the endpoint can
+	// never be broken by an unexpected upstream shape. PTV has no query param
+	// to omit `routes` upstream, so trimming here is the only lever. This is
+	// the dominant bytes-on-wire cost for that endpoint (~39 KB -> ~7.5 KB).
+	if resp.StatusCode == http.StatusOK && strings.HasPrefix(upstreamPath, stopsLocationPrefix) {
+		body, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamBytes))
+		if err != nil {
+			h.logger.WarnContext(r.Context(), "response read interrupted", slog.String("err", err.Error()))
+			w.WriteHeader(resp.StatusCode)
+			_, _ = w.Write(body)
+			return
+		}
+		if trimmed, ok := trimStopsLocation(body); ok {
+			body = trimmed
+		} else {
+			h.logger.WarnContext(r.Context(), "stops/location trim skipped; passing through verbatim",
+				slog.String("path", upstreamPath),
+			)
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(body)
+		return
+	}
+
 	w.WriteHeader(resp.StatusCode)
 	n, err := io.Copy(w, io.LimitReader(resp.Body, maxUpstreamBytes))
 	if err != nil {
@@ -124,4 +158,60 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			slog.Int64("bytes", n),
 		)
 	}
+}
+
+// trimStopsLocation removes the per-stop `routes` array from a
+// /v3/stops/location response body. The nearby map pins consume only
+// stop_id/stop_name/stop_latitude/stop_longitude/route_type, so `routes`
+// (each carrying route_name, route_gtfs_id, geopath, etc.) is dead weight on
+// the wire.
+//
+// It is deliberately surgical: it decodes the top level and the `stops` array
+// as raw messages, deletes only the `routes` key from each stop object, and
+// leaves every other field — top-level (disruptions, status) and per-stop —
+// byte-for-byte intact. It returns (body, false) on any structural surprise
+// (not an object, stops not an array, a stop that isn't an object, or a
+// re-marshal error) so the caller can fall back to a verbatim copy.
+func trimStopsLocation(body []byte) ([]byte, bool) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return body, false
+	}
+	rawStops, ok := top["stops"]
+	if !ok {
+		// No stops key at all (e.g. an error envelope) — nothing to trim.
+		return body, false
+	}
+	var stops []map[string]json.RawMessage
+	if err := json.Unmarshal(rawStops, &stops); err != nil {
+		return body, false
+	}
+
+	changed := false
+	for _, stop := range stops {
+		if _, has := stop["routes"]; has {
+			delete(stop, "routes")
+			changed = true
+		}
+	}
+	if !changed {
+		// Nothing to strip; avoid re-marshalling (which would also reorder
+		// keys for no benefit).
+		return body, true
+	}
+
+	newStops, err := json.Marshal(stops)
+	if err != nil {
+		return body, false
+	}
+	top["stops"] = newStops
+
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(top); err != nil {
+		return body, false
+	}
+	// Encoder appends a trailing newline; trim it to keep the body tight.
+	return bytes.TrimRight(buf.Bytes(), "\n"), true
 }
