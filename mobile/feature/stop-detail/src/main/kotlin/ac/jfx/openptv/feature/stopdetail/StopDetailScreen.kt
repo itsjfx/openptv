@@ -4,14 +4,12 @@ import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
 import ac.jfx.openptv.core.model.Departure
-import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.feature.stopdetail.R
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,9 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -391,7 +387,7 @@ private fun HeaderSection(
             }
         }
         is HeaderState.Loaded -> {
-            StopHeader(stop = state.detail.stop, routes = state.detail.servingRoutes)
+            StopHeader(stop = state.detail.stop)
         }
         is HeaderState.Error -> {
             Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -409,57 +405,34 @@ private fun HeaderSection(
 }
 
 @Composable
-private fun StopHeader(
-    stop: Stop,
-    routes: List<Route>,
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+private fun StopHeader(stop: Stop) {
+    // Issue #168: the per-stop "serving routes" chip list was removed. At big interchanges
+    // (Richmond, Flinders) it dominated the header and pushed the departures off-screen, and
+    // every departure row already carries its own route badge — so the list was largely
+    // redundant. The header now just identifies the stop.
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stop.routeType.label(),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(end = 8.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = stop.routeType.label(),
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.padding(end = 8.dp),
+                text = stop.name,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
             )
-            Column(modifier = Modifier.weight(1f)) {
+            if (stop.suburb.isNotBlank()) {
                 Text(
-                    text = stop.name,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
+                    text = stop.suburb,
+                    style = MaterialTheme.typography.bodyMedium,
                 )
-                if (stop.suburb.isNotBlank()) {
-                    Text(
-                        text = stop.suburb,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-        }
-        if (routes.isNotEmpty()) {
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = stringResource(R.string.feature_stop_detail_serving_routes),
-                style = MaterialTheme.typography.labelMedium,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            // Horizontally scrollable so long route lists (Flinders has dozens) keep each chip at
-            // its natural width. Without the scroll, a non-wrapping Row squeezes the overflow chip
-            // into the leftover width and its label wraps vertically into a very tall chip — which
-            // stretched the whole header and left a big blank gap above the departures (issue #158).
-            // `maxLines = 1` on the label is belt-and-suspenders against the same vertical wrap.
-            Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .testTag(TestTagRouteChips),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                routes.take(MAX_INLINE_ROUTE_CHIPS).forEach { route ->
-                    AssistChip(
-                        onClick = { /* route detail lands in Phase 06 */ },
-                        label = { Text(route.displayLabel, maxLines = 1) },
-                    )
-                }
             }
         }
     }
@@ -842,11 +815,9 @@ private fun RouteType.label(): String =
         RouteType.Unknown -> stringResource(R.string.feature_stop_detail_route_type_unknown)
     }
 
-private const val MAX_INLINE_ROUTE_CHIPS = 6
 private const val SKELETON_ROWS = 5
 
 internal const val TestTagRoot: String = "stop-detail-root"
-internal const val TestTagRouteChips: String = "stop-detail-route-chips"
 internal const val TestTagGroupHeader: String = "stop-detail-group-header"
 internal const val TestTagFavouriteToggle: String = "stop-detail-favourite-toggle"
 internal const val TestTagDepartureRow: String = "stop-detail-departure-row"

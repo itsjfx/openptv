@@ -26,7 +26,6 @@
     <string name="feature_stop_detail_show_more">Show more</string>
     <string name="feature_stop_detail_disruption">Disruption affects this route</string>
     <string name="feature_stop_detail_disruption_snackbar">Disruption details land in Phase 10.</string>
-    <string name="feature_stop_detail_serving_routes">Routes serving this stop</string>
 
     <!-- Top-bar action that jumps back to the Nearby map screen centred on this stop (issue #123). -->
     <string name="feature_stop_detail_show_on_map">Show stop on map</string>
