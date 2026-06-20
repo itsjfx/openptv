@@ -71,8 +71,20 @@ internal data class RouteDto(
  * Map the PTV wire envelope into the domain [StopDetail]. Returns `null` when the response has
  * no stop block — the repository surfaces that as `Result.Error` so the UI can show "stop not
  * found" rather than rendering a half-empty header.
+ *
+ * [requestedRouteType] filters the serving-routes list to the mode the caller asked for. PTV's
+ * `/stops/{id}/route_type/{type}` endpoint IGNORES the `route_type` path param for the `routes`
+ * array and returns *every* route serving the physical `stop_id`. At co-located stops that share
+ * a `stop_id` (Richmond is the canonical case: the metro platforms and the V/Line platform are
+ * one `stop_id` 1162) this mixes modes, so a V/Line stop comes back carrying metro train routes
+ * (issue #175 — the Nearby sheet rendered Alamein/Belgrave/… chips on the V/Line pin).
+ * Departures are already fetched per `(stopId, routeType)` and are correct, so filtering the
+ * routes here keeps `servingRoutes` consistent with the mode every caller requested.
+ * [RouteType.Unknown] disables the filter (we never put Unknown on the wire — this only guards
+ * against an unexpected upstream value, where dropping every route would be worse than passing
+ * the raw list through).
  */
-internal fun StopResponseDto.toDomain(): StopDetail? {
+internal fun StopResponseDto.toDomain(requestedRouteType: RouteType): StopDetail? {
     val s = stop ?: return null
     // Pick the nested `stop_location.gps` pair when the top-level fields are absent (= default
     // 0.0) — the single-stop endpoint only populates the nested shape. The nearby endpoint
@@ -94,7 +106,10 @@ internal fun StopResponseDto.toDomain(): StopDetail? {
                 latitude = lat,
                 longitude = lng,
             ),
-        servingRoutes = s.routes.map { it.toDomain() },
+        servingRoutes =
+            s.routes
+                .map { it.toDomain() }
+                .filter { requestedRouteType == RouteType.Unknown || it.routeType == requestedRouteType },
     )
 }
 
