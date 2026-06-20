@@ -39,9 +39,11 @@ import java.io.IOException
  *     [androidx.lifecycle.Lifecycle.State.RESUMED] and cancelled when it leaves. The UI driver is
  *     [startObserving] / [stopObserving]; the Compose layer wraps these in `repeatOnLifecycle`.
  *  3. Pull-to-refresh, which forces a new collection cycle ([refresh]).
- *  4. Pagination — per-group expansion ([toggleExpand]) and "scrolled to the tail" ([loadMore]).
- *     Pagination uses a separate read path that appends to the in-memory tail, deduping by
- *     `runRef`. The head poll keeps running underneath so the top of the list stays live.
+ *  4. Incremental "show more" ([showMore]). Each tap reveals the next [SHOW_MORE_STEP] rows of a
+ *     group and, only when the tap runs past the rows already cached for that group, fetches one
+ *     more page anchored at the group's tail (deduped by `runRef`). There is no scroll-triggered
+ *     or background paging — the head poll keeps the top of the list live, and nothing more is
+ *     pulled from PTV until the user explicitly asks (issue #126).
  *
  * `Clock` and `RelativeTimeFormatter` come from Hilt's `SingletonComponent`; `stopId` and
  * `routeType` are assisted so the Compose layer can hand the destination key into the ViewModel
@@ -114,7 +116,7 @@ class StopDetailViewModel
         /** Tracks the active observation coroutine so `startObserving` is idempotent. */
         private var observeJob: Job? = null
 
-        /** Tracks the active loadMore coroutine so concurrent scroll triggers coalesce. */
+        /** Tracks the active "show more" fetch so concurrent taps coalesce into one request. */
         private var loadMoreJob: Job? = null
 
         /**
@@ -131,14 +133,19 @@ class StopDetailViewModel
         private var lastHeadPoll: List<Departure> = emptyList()
 
         /**
-         * Which group keys the user has expanded. Persists across head emissions. Indexed by
-         * destination (issue #87) — the same key shape the visible [Group] uses.
-         *
-         * Issue #90: the pinned destination is *not* auto-expanded any more. Tapping a favourite
-         * just hoists its destination block to the top — the visible departure count stays the
-         * same as every other group until the user taps to expand it themselves.
+         * How many rows each group is currently showing (issue #126). Absent keys default to
+         * [INITIAL_VISIBLE]; a "Show more" tap bumps the entry by [SHOW_MORE_STEP]. Persists across
+         * head emissions so the user's reveal depth survives the 30 s tick. Indexed by destination
+         * (issue #87) — the same key shape the visible [Group] uses.
          */
-        private val expandedGroups: MutableSet<GroupKey> = mutableSetOf()
+        private val groupVisibleCounts: MutableMap<GroupKey, Int> = mutableMapOf()
+
+        /**
+         * Group keys that have reached the end of service — a "show more" fetch anchored at the
+         * group's tail came back without growing it. The "Show more" affordance is dropped for
+         * these so the user isn't offered a button that can only return nothing.
+         */
+        private val exhaustedGroups: MutableSet<GroupKey> = mutableSetOf()
 
         /**
          * Snapshot of every destination key at the current stop the user has favourited. Updated
@@ -189,37 +196,42 @@ class StopDetailViewModel
         }
 
         /**
-         * Toggle the per-group expanded state. Expanding for the first time kicks off a
-         * [loadMore] so the user sees more than the head poll provides (the head poll only asks
-         * for [ac.jfx.openptv.core.data.DepartureRepository.INITIAL_PAGE_SIZE_PER_ROUTE] rows
-         * per route).
+         * Reveal the next [SHOW_MORE_STEP] rows of a group (issue #126). The cached rows are shown
+         * immediately; a fetch is only kicked off when the tap runs past what's already cached for
+         * this group and the group isn't known to be exhausted. Replaces the old expand-to-show-
+         * everything + scroll-to-paginate behaviour — the user now reveals departures a small,
+         * bounded step at a time and we only hit PTV when they ask.
          */
-        fun toggleExpand(key: GroupKey) {
-            val nowExpanded = !expandedGroups.contains(key)
-            if (nowExpanded) {
-                expandedGroups += key
-            } else {
-                expandedGroups -= key
-            }
-            _uiState.update { it.copy(departures = it.departures.applyExpansion()) }
-            if (nowExpanded) {
-                loadMore()
+        fun showMore(key: GroupKey) {
+            val loaded = _uiState.value.departures as? DeparturesState.Loaded ?: return
+            val cachedCount = loaded.groups.firstOrNull { it.key == key }?.departures?.size ?: return
+            val next = (groupVisibleCounts[key] ?: INITIAL_VISIBLE) + SHOW_MORE_STEP
+            groupVisibleCounts[key] = next
+            // Reveal any rows we already hold for this group right away.
+            _uiState.update { it.rebuildGroups() }
+            // Only fetch when the reveal outran the cache and the group might still have services.
+            if (next > cachedCount && !exhaustedGroups.contains(key)) {
+                fetchMoreFor(key, before = cachedCount)
             }
         }
 
         /**
-         * Request the next page of departures. Called by the UI when the user scrolls past the
-         * tail of the list, and by [toggleExpand] when a group is first opened. Coalesces
-         * concurrent calls — if a page is already in flight, the trigger is a no-op.
+         * Fetch one more page for the group keyed by [key], anchored at that group's last cached
+         * departure so the new rows continue *this* destination rather than wherever the busiest
+         * route happens to reach (PTV's `/departures` is per-stop/per-route, not per-destination).
+         * Coalesces concurrent taps — a fetch already in flight wins. If the group doesn't grow,
+         * it's reached the end of service, so we stop offering "Show more" for it.
          */
-        fun loadMore() {
+        private fun fetchMoreFor(
+            key: GroupKey,
+            before: Int,
+        ) {
             if (loadMoreJob?.isActive == true) return
-            val tail = currentTailAnchor() ?: return
+            val anchor = currentGroupTail(key) ?: return
             loadMoreJob =
                 viewModelScope.launch {
                     _uiState.update { it.copy(departures = it.departures.withLoadingMore(true)) }
-                    val result = loadMoreDepartures(stopId, routeType, tail, PAGE_SIZE)
-                    when (result) {
+                    when (val result = loadMoreDepartures(stopId, routeType, anchor, SHOW_MORE_STEP)) {
                         is Result.Success -> {
                             result.data.forEach { dep -> pagedByRunRef[dep.runRef.value] = dep }
                         }
@@ -229,6 +241,12 @@ class StopDetailViewModel
                         current.copy(
                             departures = current.departures.withLoadingMore(false),
                         ).rebuildGroups()
+                    }
+                    // The group didn't grow → no more services down this destination. Drop its
+                    // "Show more" so the user isn't offered a button that can only return nothing.
+                    if (currentGroupSize(key) <= before) {
+                        exhaustedGroups += key
+                        _uiState.update { it.rebuildGroups() }
                     }
                 }
         }
@@ -326,23 +344,6 @@ class StopDetailViewModel
             return map.values.toList()
         }
 
-        /**
-         * Apply the latest [expandedGroups] set to whatever groups the UI is currently rendering.
-         * Used by [toggleExpand] which mutates expansion *without* fetching new data —
-         * re-running the full merge / sort would be wasteful when only one boolean changed.
-         */
-        private fun DeparturesState.applyExpansion(): DeparturesState =
-            when (this) {
-                is DeparturesState.Loaded ->
-                    copy(
-                        groups =
-                            groups.map { g ->
-                                g.copy(expanded = expandedGroups.contains(g.key))
-                            },
-                    )
-                else -> this
-            }
-
         private fun DeparturesState.withLoadingMore(value: Boolean): DeparturesState =
             when (this) {
                 is DeparturesState.Loaded -> copy(isLoadingMore = value)
@@ -369,14 +370,19 @@ class StopDetailViewModel
         }
 
         /**
-         * Anchor instant for the next [loadMore] call — the latest known departure across all
-         * groups. Returns null if we have no rows yet (which means there's nothing to anchor
-         * paging on; either wait for the head poll or skip the trigger).
+         * The effective departure instant of the tapped group's last cached row — the anchor for
+         * its next "show more" fetch. Null when the group has no rows to anchor on.
          */
-        private fun currentTailAnchor(): Instant? {
-            val state = _uiState.value.departures as? DeparturesState.Loaded ?: return null
-            val all = state.groups.flatMap { it.departures }
-            return all.maxOfOrNull { it.effectiveDepartureUtc() }
+        private fun currentGroupTail(key: GroupKey): Instant? {
+            val loaded = _uiState.value.departures as? DeparturesState.Loaded ?: return null
+            val group = loaded.groups.firstOrNull { it.key == key } ?: return null
+            return group.departures.lastOrNull()?.effectiveDepartureUtc()
+        }
+
+        /** How many rows the tapped group currently holds — used to detect end-of-service. */
+        private fun currentGroupSize(key: GroupKey): Int {
+            val loaded = _uiState.value.departures as? DeparturesState.Loaded ?: return 0
+            return loaded.groups.firstOrNull { it.key == key }?.departures?.size ?: 0
         }
 
         /**
@@ -450,14 +456,17 @@ class StopDetailViewModel
                         routeType = groupRoutes.firstOrNull()?.routeType ?: routeType,
                         headerLabel = displayDestination,
                         departures = sortedDepartures,
-                        expanded = expandedGroups.contains(key),
+                        visibleCount = groupVisibleCounts[key] ?: INITIAL_VISIBLE,
+                        // Offer "Show more" until a fetch anchored at this group's tail proves it
+                        // has reached the end of service (issue #126).
+                        canShowMore = !exhaustedGroups.contains(key),
                         isFavourite = isFavourite,
                         isPinned = containsFocus,
                     )
                 }
-            // Issue #90: the pinned destination is no longer auto-expanded. Tapping a favourite
-            // only hoists its block to the top — the visible row count matches the other groups,
-            // and the user can still tap the chevron to expand it themselves.
+            // Issue #90 + #126: the pinned destination is not auto-expanded or pre-paged. Tapping a
+            // favourite only hoists its block to the top — it shows the same INITIAL_VISIBLE rows as
+            // every other group, and the user taps "Show more" to reveal more itself.
             //
             // Issue #100 + #137: all favourited groups (`isFavourite == true`) pin above
             // non-favourited groups. Within the favourite band the focus destination — the

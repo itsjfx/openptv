@@ -63,10 +63,11 @@ interface DepartureRepository {
     companion object {
         /**
          * Head-poll `max_results` parameter. PTV applies this per route, so a stop with N routes
-         * returns up to `N * INITIAL_PAGE_SIZE_PER_ROUTE` rows on each tick. Sized to comfortably
-         * cover the collapsed "show 3" affordance plus a small expansion buffer before the user
-         * has to fall back to [loadMore].
+         * returns up to `N * INITIAL_PAGE_SIZE_PER_ROUTE` rows on each tick. Sized to exactly cover
+         * the initial "show 3" window (issue #126) and no more — extra rows are fetched lazily by
+         * [loadMore] only when the user taps "Show more", so a quiet stop with many routes doesn't
+         * pull a wall of departures it never displays.
          */
-        const val INITIAL_PAGE_SIZE_PER_ROUTE: Int = 5
+        const val INITIAL_PAGE_SIZE_PER_ROUTE: Int = 3
     }
 }
