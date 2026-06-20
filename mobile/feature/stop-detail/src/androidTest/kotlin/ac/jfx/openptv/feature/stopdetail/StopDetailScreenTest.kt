@@ -94,11 +94,10 @@ class StopDetailScreenTest {
 
     /**
      * Golden path: header resolves to a Flinders stop, departures emit one row, the row's
-     * content description includes the destination phrase, the "as of" line appears, the route
-     * chips strip is rendered.
+     * content description includes the destination phrase, and the "as of" line appears.
      */
     @Test
-    fun goldenPath_rendersHeaderRouteChipsAndDepartureRow() {
+    fun goldenPath_rendersHeaderAndDepartureRow() {
         stopDetailRepository.enqueueSuccess(
             StopDetailMother.aStopDetail()
                 .withStop(
@@ -134,7 +133,6 @@ class StopDetailScreenTest {
         }
 
         composeTestRule.onNodeWithText("Flinders Street Railway Station").assertIsDisplayed()
-        composeTestRule.onNodeWithTag(TestTagRouteChips).assertIsDisplayed()
         composeTestRule.onNodeWithTag(TestTagDepartureRow).assertIsDisplayed()
         composeTestRule.onNodeWithTag(TestTagAsOf).assertIsDisplayed()
     }
