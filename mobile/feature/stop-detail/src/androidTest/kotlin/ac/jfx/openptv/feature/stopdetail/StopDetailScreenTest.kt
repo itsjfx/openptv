@@ -256,12 +256,12 @@ class StopDetailScreenTest {
     }
 
     /**
-     * Collapsed-by-default groups (issue #68). A successful emission with more than three rows in
-     * one group renders only the first three plus a "Show N more" affordance — tapping the row
-     * expands the group and reveals every loaded row.
+     * Initial window + incremental "show more" (issue #126). A successful emission with more than
+     * three rows in one group renders only the first [INITIAL_VISIBLE] rows plus a generic
+     * "Show more" affordance — tapping it reveals the next step of cached rows.
      */
     @Test
-    fun collapsedGroup_showsFirstThreeRowsAndShowMoreAffordance() {
+    fun group_showsInitialWindowThenRevealsMoreOnShowMore() {
         stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
 
         composeTestRule.setContent {
@@ -287,12 +287,12 @@ class StopDetailScreenTest {
             composeTestRule.onAllNodesWithTag(TestTagDepartureRow).fetchSemanticsNodes().isNotEmpty()
         }
 
-        // Only the first three rows render while collapsed; the show-more affordance is visible.
+        // Only the initial window renders up front; the show-more affordance is visible.
         assertThat(composeTestRule.onAllNodesWithTag(TestTagDepartureRow).fetchSemanticsNodes())
-            .hasSize(COLLAPSED_VISIBLE)
+            .hasSize(INITIAL_VISIBLE)
         composeTestRule.onNodeWithTag(TestTagShowMore).assertIsDisplayed()
 
-        // Tap it — every row is now visible.
+        // Tap it — the cached rows beyond the initial window are revealed.
         composeTestRule.onNodeWithTag(TestTagShowMore).performClick()
         composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
             composeTestRule.onAllNodesWithTag(TestTagDepartureRow).fetchSemanticsNodes().size >= rows.size
@@ -337,7 +337,7 @@ class StopDetailScreenTest {
             )
         runBlocking { departureRepository.emitSuccess(rows) }
 
-        // Group has 2 rows, both visible while collapsed (≤ COLLAPSED_VISIBLE), so we don't need
+        // Group has 2 rows, both within the initial window (≤ INITIAL_VISIBLE), so we don't need
         // to tap show-more. The date divider is keyed by the next-day local date.
         composeTestRule.waitUntil(timeoutMillis = WAIT_TIMEOUT_MILLIS) {
             composeTestRule.onAllNodesWithTag(TestTagDateDivider).fetchSemanticsNodes().isNotEmpty()

@@ -571,7 +571,7 @@ class StopDetailViewModelTest {
         }
 
     @Test
-    fun `pinned group is not auto-expanded — issue #90`() =
+    fun `pinned group is not auto-expanded or pre-paged — issue #90 and #126`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel = newViewModel(focusDestinationKey = "north coburg")
@@ -603,12 +603,19 @@ class StopDetailViewModelTest {
             val first = loaded.groups.first()
             assertThat(first.isPinned).isTrue()
             assertThat(first.key.destination).isEqualTo("north coburg")
-            assertThat(first.expanded).isFalse()
-            assertThat(loaded.groups[1].expanded).isFalse()
-            viewModel.toggleExpand(first.key)
+            // Pinned shows the same initial window as every other group, and opening via a
+            // favourite pulls nothing extra from PTV (issue #126).
+            assertThat(first.visibleCount).isEqualTo(INITIAL_VISIBLE)
+            assertThat(loaded.groups[1].visibleCount).isEqualTo(INITIAL_VISIBLE)
+            assertThat(departureRepository.loadMoreCalls).isEmpty()
+
+            // The six pinned rows are already cached, so the first Show more reveals more
+            // without a fetch.
+            viewModel.showMore(first.key)
             advanceUntilIdle()
             val afterToggle = viewModel.uiState.value.departures as DeparturesState.Loaded
-            assertThat(afterToggle.groups.first().expanded).isTrue()
+            assertThat(afterToggle.groups.first().visibleCount).isEqualTo(INITIAL_VISIBLE + SHOW_MORE_STEP)
+            assertThat(departureRepository.loadMoreCalls).isEmpty()
         }
 
     @Test
@@ -942,8 +949,9 @@ class StopDetailViewModelTest {
             departureRepository.emitSuccess(listOf(initialHead))
             advanceUntilIdle()
 
+            val key = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single().key
             departureRepository.enqueueLoadMoreSuccess(listOf(stalePage))
-            viewModel.loadMore()
+            viewModel.showMore(key)
             advanceUntilIdle()
 
             departureRepository.emitSuccess(listOf(initialHead))
@@ -954,10 +962,10 @@ class StopDetailViewModelTest {
                 .containsExactly("OPS-HEAD")
         }
 
-    // ---------- paging (issues #68 + #69) ----------
+    // ---------- incremental "show more" (issues #69 + #126) ----------
 
     @Test
-    fun `groups are collapsed by default — expanded flag is false`() =
+    fun `groups start at the initial window and offer Show more`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel = newViewModel()
@@ -968,12 +976,43 @@ class StopDetailViewModelTest {
             departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().build()))
             advanceUntilIdle()
 
-            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
-            assertThat(loaded.groups.single().expanded).isFalse()
+            val group = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single()
+            assertThat(group.visibleCount).isEqualTo(INITIAL_VISIBLE)
+            assertThat(group.canShowMore).isTrue()
         }
 
     @Test
-    fun `toggleExpand flips the group expanded flag and triggers a loadMore page fetch`() =
+    fun `showMore within the cached rows reveals more without fetching`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            // Six rows already cached for one group; revealing +3 stays within the cache.
+            val rows =
+                (1..6).map { i ->
+                    DepartureMother.aDeparture()
+                        .withRunRef("R-$i")
+                        .withScheduledDepartureUtc(clock.now() + (i + 5).minutes)
+                        .withEstimatedDepartureUtc(clock.now() + (i + 5).minutes)
+                        .build()
+                }
+            departureRepository.emitSuccess(rows)
+            advanceUntilIdle()
+
+            val key = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single().key
+            viewModel.showMore(key)
+            advanceUntilIdle()
+
+            val group = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single()
+            assertThat(group.visibleCount).isEqualTo(INITIAL_VISIBLE + SHOW_MORE_STEP)
+            assertThat(departureRepository.loadMoreCalls).isEmpty()
+        }
+
+    @Test
+    fun `showMore past the cache fetches one page anchored at the group tail`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel = newViewModel()
@@ -997,23 +1036,27 @@ class StopDetailViewModelTest {
                     .build()
             departureRepository.enqueueLoadMoreSuccess(listOf(pageRow))
 
-            viewModel.toggleExpand(key)
+            // Only one row cached, so revealing +3 runs past the cache and triggers a fetch.
+            viewModel.showMore(key)
             advanceUntilIdle()
 
             val after = viewModel.uiState.value.departures as DeparturesState.Loaded
-            assertThat(after.groups.first().expanded).isTrue()
+            val group = after.groups.first()
+            assertThat(group.visibleCount).isEqualTo(INITIAL_VISIBLE + SHOW_MORE_STEP)
+            assertThat(group.canShowMore).isTrue()
             assertThat(departureRepository.loadMoreCalls).hasSize(1)
             val call = departureRepository.loadMoreCalls.single()
-            assertThat(call.maxResults).isEqualTo(PAGE_SIZE)
+            // Fetches a small step, not a big page; anchored at this group's last cached row.
+            assertThat(call.maxResults).isEqualTo(SHOW_MORE_STEP)
             val head1 = head.first()
             val expectedAnchor = head1.estimatedDepartureUtc ?: head1.scheduledDepartureUtc
             assertThat(call.after).isEqualTo(expectedAnchor)
-            val runRefs = after.groups.flatMap { it.departures }.map { it.runRef.value }
+            val runRefs = group.departures.map { it.runRef.value }
             assertThat(runRefs).containsAtLeast("HEAD-1", "PAGE-1")
         }
 
     @Test
-    fun `loadMore coalesces concurrent triggers — second call while one is active is dropped`() =
+    fun `showMore that returns nothing marks the group exhausted and drops Show more`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel = newViewModel()
@@ -1021,11 +1064,34 @@ class StopDetailViewModelTest {
             viewModel.startObserving()
             advanceUntilIdle()
 
-            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().build()))
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("HEAD-1").build()))
             advanceUntilIdle()
 
-            viewModel.loadMore()
-            viewModel.loadMore()
+            val key = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single().key
+            // The fake's loadMore defaults to an empty page → the group can't grow.
+            viewModel.showMore(key)
+            advanceUntilIdle()
+
+            val group = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single()
+            assertThat(departureRepository.loadMoreCalls).hasSize(1)
+            assertThat(group.canShowMore).isFalse()
+        }
+
+    @Test
+    fun `showMore coalesces concurrent taps — a tap while a fetch is active is dropped`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("HEAD-1").build()))
+            advanceUntilIdle()
+
+            val key = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single().key
+            viewModel.showMore(key)
+            viewModel.showMore(key)
             advanceUntilIdle()
 
             assertThat(departureRepository.loadMoreCalls).hasSize(1)
@@ -1061,8 +1127,9 @@ class StopDetailViewModelTest {
                     .withScheduledDepartureUtc(clock.now() + 1.hours)
                     .withEstimatedDepartureUtc(clock.now() + 1.hours)
                     .build()
+            val key = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single().key
             departureRepository.enqueueLoadMoreSuccess(listOf(later2, later1))
-            viewModel.loadMore()
+            viewModel.showMore(key)
             advanceUntilIdle()
 
             val merged = viewModel.uiState.value.departures as DeparturesState.Loaded
@@ -1071,7 +1138,7 @@ class StopDetailViewModelTest {
         }
 
     @Test
-    fun `loadMore is a no-op when there are no current rows to anchor against`() =
+    fun `showMore is a no-op before any rows have loaded`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel = newViewModel()
@@ -1079,7 +1146,8 @@ class StopDetailViewModelTest {
             viewModel.startObserving()
             advanceUntilIdle()
 
-            viewModel.loadMore()
+            // Departures are still Loading — there's no group to reveal, so nothing is fetched.
+            viewModel.showMore(GroupKey("nope"))
             advanceUntilIdle()
 
             assertThat(departureRepository.loadMoreCalls).isEmpty()

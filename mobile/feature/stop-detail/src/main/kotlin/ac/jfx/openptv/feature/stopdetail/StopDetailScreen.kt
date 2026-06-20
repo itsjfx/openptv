@@ -40,11 +40,9 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -59,7 +57,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -122,9 +119,8 @@ fun StopDetailRoute(
         onRefresh = viewModel::refresh,
         onRetry = viewModel::retryHeader,
         onDepartureClicked = onDepartureClicked,
-        onToggleExpand = viewModel::toggleExpand,
+        onShowMore = viewModel::showMore,
         onToggleFavourite = viewModel::toggleFavourite,
-        onReachedEnd = viewModel::loadMore,
         onShowOnMap = onShowOnMap,
         timeFormatter = viewModel.timeFormatter,
     )
@@ -138,39 +134,18 @@ internal fun StopDetailScreenContent(
     onRefresh: () -> Unit,
     onRetry: () -> Unit,
     onDepartureClicked: (Departure) -> Unit,
-    onToggleExpand: (GroupKey) -> Unit,
+    onShowMore: (GroupKey) -> Unit,
     onToggleFavourite: (destinationName: String) -> Unit,
-    onReachedEnd: () -> Unit,
     onShowOnMap: (latitude: Double, longitude: Double) -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val disruptionMessage = stringResource(R.string.feature_stop_detail_disruption_snackbar)
+    // Retains scroll position across recomposition. There is no scroll-triggered paging any more
+    // (issue #126) — the user pulls more rows in via the explicit "Show more" button.
     val listState = rememberLazyListState()
 
-    // Pagination trigger — observe the last visible row index and fire `onReachedEnd` when it
-    // gets within END_TRIGGER_BUFFER of the tail. `derivedStateOf` keeps the snapshot subscription
-    // cheap (only fires when the predicate flips). `collectLatest` keeps the trigger from
-    // re-firing in a tight loop while the ViewModel is fulfilling the request.
-    val totalItems by remember { derivedStateOf { listState.layoutInfo.totalItemsCount } }
-    val lastVisibleIndex by remember {
-        derivedStateOf {
-            listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-        }
-    }
-    LaunchedEffect(onReachedEnd) {
-        snapshotFlow {
-            // Only trigger when the list actually has items and the user is near the end. Skip
-            // the very-small-list case where `totalItems < END_TRIGGER_BUFFER` would always be
-            // true and we'd page-storm at the bottom of a five-row list.
-            val total = totalItems
-            val last = lastVisibleIndex
-            total > END_TRIGGER_BUFFER && last >= total - END_TRIGGER_BUFFER
-        }.collectLatest { atEnd ->
-            if (atEnd) onReachedEnd()
-        }
-    }
     // Compute "today" once outside LazyListScope. The asOf timestamp anchors the calendar so the
     // banner stays correct when tests inject a fixed clock; in production it tracks wall-clock
     // via the head poll's `clock.now()` write.
@@ -255,7 +230,7 @@ internal fun StopDetailScreenContent(
                     state = uiState.departures,
                     today = todayLocal,
                     timeFormatter = timeFormatter,
-                    onToggleExpand = onToggleExpand,
+                    onShowMore = onShowMore,
                     onToggleFavourite = onToggleFavourite,
                     onDepartureClicked = onDepartureClicked,
                     onRefresh = onRefresh,
@@ -279,7 +254,7 @@ private fun LazyListScope.departuresSection(
     state: DeparturesState,
     today: LocalDate,
     timeFormatter: RelativeTimeFormatter,
-    onToggleExpand: (GroupKey) -> Unit,
+    onShowMore: (GroupKey) -> Unit,
     onToggleFavourite: (destinationName: String) -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onRefresh: () -> Unit,
@@ -311,7 +286,7 @@ private fun LazyListScope.departuresSection(
                     group = group,
                     today = today,
                     timeFormatter = timeFormatter,
-                    onToggleExpand = onToggleExpand,
+                    onShowMore = onShowMore,
                     onToggleFavourite = onToggleFavourite,
                     onDepartureClicked = onDepartureClicked,
                     onDisruptionClicked = onDisruptionClicked,
@@ -330,7 +305,7 @@ private fun LazyListScope.groupSection(
     group: Group,
     today: LocalDate,
     timeFormatter: RelativeTimeFormatter,
-    onToggleExpand: (GroupKey) -> Unit,
+    onShowMore: (GroupKey) -> Unit,
     onToggleFavourite: (destinationName: String) -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onDisruptionClicked: () -> Unit,
@@ -338,16 +313,12 @@ private fun LazyListScope.groupSection(
     item(key = "group-${group.key.destination}") {
         GroupHeader(
             group = group,
-            onToggleExpand = { onToggleExpand(group.key) },
             onToggleFavourite = { onToggleFavourite(group.headerLabel) },
         )
     }
-    val visible =
-        if (group.expanded) {
-            group.departures
-        } else {
-            group.departures.take(COLLAPSED_VISIBLE)
-        }
+    // Show only the rows the group has revealed so far (issue #126). "Show more" bumps
+    // `visibleCount`; nothing is rendered or fetched beyond what the user has asked for.
+    val visible = group.departures.take(group.visibleCount)
     // Pre-index routes by id so each row can look up its own badge in O(1). The list is small
     // (one per route serving the stop in this direction) so the map allocation is cheap.
     val routesById = group.routes.associateBy { it.id.value }
@@ -385,12 +356,9 @@ private fun LazyListScope.groupSection(
             HorizontalDivider()
         }
     }
-    if (!group.expanded && group.departures.size > COLLAPSED_VISIBLE) {
+    if (group.canShowMore) {
         item(key = "show-more-${group.key.destination}") {
-            ShowMoreRow(
-                hiddenCount = group.departures.size - COLLAPSED_VISIBLE,
-                onClick = { onToggleExpand(group.key) },
-            )
+            ShowMoreRow(onClick = { onShowMore(group.key) })
             HorizontalDivider()
         }
     }
@@ -473,7 +441,6 @@ private fun StopHeader(stop: Stop) {
 @Composable
 private fun GroupHeader(
     group: Group,
-    onToggleExpand: () -> Unit,
     onToggleFavourite: () -> Unit,
 ) {
     // PTV's train feed sometimes returns blank route numbers + names — `Route.displayLabel`
@@ -491,7 +458,6 @@ private fun GroupHeader(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .clickable(onClick = onToggleExpand)
                 .testTag(TestTagGroupHeader),
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
@@ -558,20 +524,12 @@ private fun GroupHeader(
                     )
                 }
             }
-            // Chevron glyph: closed when collapsed, open when expanded.
-            Text(
-                text = if (group.expanded) "˅" else "›",
-                style = MaterialTheme.typography.titleMedium,
-            )
         }
     }
 }
 
 @Composable
-private fun ShowMoreRow(
-    hiddenCount: Int,
-    onClick: () -> Unit,
-) {
+private fun ShowMoreRow(onClick: () -> Unit) {
     Surface(
         modifier =
             Modifier
@@ -580,7 +538,7 @@ private fun ShowMoreRow(
                 .testTag(TestTagShowMore),
     ) {
         Text(
-            text = pluralStringResource(R.plurals.feature_stop_detail_show_more, hiddenCount, hiddenCount),
+            text = stringResource(R.string.feature_stop_detail_show_more),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
@@ -858,14 +816,6 @@ private fun RouteType.label(): String =
     }
 
 private const val SKELETON_ROWS = 5
-
-/**
- * How many items from the tail of the list count as "the user is near the end" and should
- * trigger the next page fetch. Tuned so the page lands before the user actually runs out of
- * rows, but not so eager that we page on every screen scroll. Mirrors the same heuristic
- * Paging 3 ships with by default.
- */
-private const val END_TRIGGER_BUFFER = 3
 
 internal const val TestTagRoot: String = "stop-detail-root"
 internal const val TestTagGroupHeader: String = "stop-detail-group-header"

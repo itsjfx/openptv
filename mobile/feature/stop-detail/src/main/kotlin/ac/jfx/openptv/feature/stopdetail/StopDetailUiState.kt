@@ -81,10 +81,15 @@ sealed interface DeparturesState {
  * (route filtering disagreement between endpoints); rather than drop the row, we render it with
  * a placeholder badge and log the discrepancy later.
  *
- * `expanded` tracks the per-group disclosure state (issue #68). Collapsed groups render the
- * first [COLLAPSED_VISIBLE] entries plus a "show N more" affordance; expanded groups render
- * every loaded entry. Paging only kicks in once a group is expanded — the user pulled the trigger
- * by tapping "show more", and now scrolling deeper into that group consumes more pages.
+ * `visibleCount` is how many of the group's [departures] to render right now (issue #126). It
+ * starts at [INITIAL_VISIBLE] and grows by [SHOW_MORE_STEP] every time the user taps "Show more".
+ * There is no "expand to show everything" or scroll-triggered paging any more — the user reveals
+ * exactly the next [SHOW_MORE_STEP] rows per tap, and the ViewModel fetches another page from PTV
+ * only when a tap runs past the rows already cached for this group.
+ *
+ * `canShowMore` is whether to render the generic "Show more" affordance under the group. It stays
+ * true until a fetch anchored at this group's tail comes back empty (the group has reached the end
+ * of service), at which point the button is dropped.
  */
 data class Group(
     val key: GroupKey,
@@ -92,7 +97,8 @@ data class Group(
     val routeType: RouteType,
     val headerLabel: String,
     val departures: List<Departure>,
-    val expanded: Boolean = false,
+    val visibleCount: Int = INITIAL_VISIBLE,
+    val canShowMore: Boolean = false,
     /**
      * Whether the user has favourited the `(stopId, destinationKey)` represented by this group.
      * Populated by the ViewModel from `ObserveFavouritesUseCase`. Defaults to `false`.
@@ -114,15 +120,16 @@ data class Group(
 data class GroupKey(val destination: String)
 
 /**
- * How many entries a collapsed [Group] shows by default (issue #68). The PTV app uses 3; we
- * mirror that. Tweakable in one place if the design changes.
+ * How many entries a [Group] shows on first render (issue #126). The PTV app uses 3; we mirror
+ * that. Matches [ac.jfx.openptv.core.data.DepartureRepository.INITIAL_PAGE_SIZE_PER_ROUTE] so the
+ * head poll fetches exactly what the initial window shows.
  */
-const val COLLAPSED_VISIBLE: Int = 3
+const val INITIAL_VISIBLE: Int = 3
 
 /**
- * How many entries each paginated [loadMore] call asks PTV for (per route, since the API applies
- * `max_results` per route once `route_id` is omitted). Sized so a single page reliably crosses
- * midnight on quieter routes — the V/Line lines run an hourly service after 23:00, so a 10-row
- * page is good for several hours of headway.
+ * How many more entries each "Show more" tap reveals — and how many per route the follow-up
+ * [loadMore] fetch asks PTV for when the tap runs past the cached rows (issue #126). The API
+ * applies `max_results` per route once `route_id` is omitted, so a tap on one destination pulls
+ * the next [SHOW_MORE_STEP] for every route and tops up the other groups' caches for free.
  */
-const val PAGE_SIZE: Int = 10
+const val SHOW_MORE_STEP: Int = 3
