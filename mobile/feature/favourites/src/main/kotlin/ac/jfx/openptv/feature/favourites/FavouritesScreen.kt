@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,6 +53,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -401,14 +403,20 @@ private fun FavouriteRowContent(
                 // the row on its own.
                 val liveBadge = (row.nextDeparture as? NextDepartureState.Loaded)?.routeBadge
                 if (!liveBadge.isNullOrBlank()) {
+                    // Issue #171: cap the badge so a long V/Line line name wraps down instead of
+                    // squeezing the destination label off the row. Mirrors the stop-detail row.
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
                         shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier.widthIn(max = FAVOURITE_BADGE_MAX_WIDTH),
                     ) {
                         Text(
                             text = liveBadge,
                             style = MaterialTheme.typography.labelMedium,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            softWrap = true,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                     Spacer(modifier = Modifier.width(8.dp))
@@ -607,6 +615,9 @@ internal fun FavouriteKey.asLazyListKey(): String = "$stopId|$destinationKey"
 
 /** How many pixels of vertical drag count as one row-swap. Tuned for a typical ~64.dp row. */
 private const val REORDER_THRESHOLD_PX: Float = 80f
+
+// Issue #171: keep the favourite row's route badge from growing unbounded on long V/Line names.
+private val FAVOURITE_BADGE_MAX_WIDTH = 140.dp
 
 internal const val TestTagRoot: String = "favourites-root"
 internal const val TestTagEmpty: String = "favourites-empty"

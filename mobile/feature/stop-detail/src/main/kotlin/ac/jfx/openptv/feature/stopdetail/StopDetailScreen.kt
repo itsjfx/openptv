@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -51,6 +52,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -631,14 +633,23 @@ private fun DepartureRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Route badge — borders/colours land with the designsystem polish; this is the v1
             // text-only badge so the row composes without a theme dependency leak.
+            // Issue #171: long line names (V/Line, e.g. "Bairnsdale - Melbourne via Sale &
+            // Traralgon") must not eat the row. Cap the badge width and let the text wrap by
+            // word onto extra lines (growing down the Y axis), ellipsizing past the cap so the
+            // destination/time columns keep their horizontal space instead of collapsing to
+            // one-character-per-line.
             Surface(
                 color = MaterialTheme.colorScheme.primaryContainer,
                 shape = RoundedCornerShape(4.dp),
+                modifier = Modifier.widthIn(max = ROUTE_BADGE_MAX_WIDTH),
             ) {
                 Text(
                     text = routeBadge,
                     style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    softWrap = true,
+                    maxLines = ROUTE_BADGE_MAX_LINES,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -816,6 +827,12 @@ private fun RouteType.label(): String =
     }
 
 private const val SKELETON_ROWS = 5
+
+// Issue #171: cap the route badge so a long line name wraps down (Y) instead of pushing the
+// destination/time columns off the row (X). ~2 lines at this width fits "Bairnsdale - Melbourne
+// via …" before ellipsis while leaving the rest of the row readable on a narrow phone.
+private val ROUTE_BADGE_MAX_WIDTH = 160.dp
+private const val ROUTE_BADGE_MAX_LINES = 2
 
 internal const val TestTagRoot: String = "stop-detail-root"
 internal const val TestTagGroupHeader: String = "stop-detail-group-header"
