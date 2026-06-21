@@ -295,13 +295,13 @@ private fun PatternStopRow(
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.Medium,
                     color = contentColor,
-                    // On the origin row the name stays left-aligned on a single line (ellipsised if
-                    // too long) and `weight(1f)` fills the leftover width, pushing the "This stop"
-                    // chip to the trailing edge instead of letting it be crushed against the name
-                    // (CLAUDE.md UI conventions). Other rows wrap down, bounded at 2 lines.
-                    maxLines = if (row.isOrigin) 1 else 2,
+                    // Names overflow *down*, bounded at 2 lines + ellipsis, rather than *out*
+                    // (CLAUDE.md UI conventions). On the origin row `weight(1f, fill = false)` hands
+                    // the name only the leftover width so the "This stop" chip beside it keeps its
+                    // space — the name wraps to a second line instead of crushing the chip.
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = if (row.isOrigin) Modifier.weight(1f) else Modifier,
+                    modifier = if (row.isOrigin) Modifier.weight(1f, fill = false) else Modifier,
                 )
                 if (row.isOrigin) {
                     Spacer(modifier = Modifier.width(8.dp))
