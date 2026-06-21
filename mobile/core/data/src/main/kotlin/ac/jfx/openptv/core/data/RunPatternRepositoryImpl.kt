@@ -82,8 +82,12 @@ internal class RunPatternRepositoryImpl
          * resolvable `route_id` or the companion call fails — the map degrades to "stops only" /
          * hidden, the timeline is unaffected. [CancellationException] still propagates so the
          * collector tears down cleanly.
+         *
+         * `SwallowedException` is suppressed deliberately: the geopath is a non-critical
+         * enhancement, so a failure fetching it must NOT surface as an error — swallowing it to
+         * [RouteShape.EMPTY] is the whole point.
          */
-        @Suppress("TooGenericExceptionCaught")
+        @Suppress("TooGenericExceptionCaught", "SwallowedException")
         private suspend fun fetchRouteShape(
             pattern: RunPattern,
             routeType: RouteType,

@@ -1,7 +1,6 @@
 package ac.jfx.openptv.feature.runpattern
 
 import ac.jfx.openptv.core.model.Bounds
-import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.RouteType
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
