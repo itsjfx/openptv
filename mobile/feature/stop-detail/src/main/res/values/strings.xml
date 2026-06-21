@@ -11,6 +11,8 @@
     <string name="feature_stop_detail_error">Couldn\'t load departures.</string>
     <string name="feature_stop_detail_retry">Retry</string>
     <string name="feature_stop_detail_as_of">As of %1$s</string>
+    <string name="feature_stop_detail_around">Departures around %1$s</string>
+    <string name="feature_stop_detail_departing_now">Departing now</string>
     <string name="feature_stop_detail_scheduled">scheduled %1$s</string>
     <string name="feature_stop_detail_platform">platform %1$s</string>
     <plurals name="feature_stop_detail_delay_late">

@@ -20,6 +20,11 @@ dependencies {
     // Compose deps come from `openptv.android.library.compose`. ReadYou palette / typography
     // land in the phase that ships them.
 
+    // The shared custom-time selector (issue #182) speaks `kotlinx.datetime.Instant` /
+    // `LocalDateTime` at its public seam so feature modules pass domain time types straight in
+    // without converting to `java.time` at the boundary.
+    implementation(libs.kotlinx.datetime)
+
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.androidx.compose.ui.test.junit4)
