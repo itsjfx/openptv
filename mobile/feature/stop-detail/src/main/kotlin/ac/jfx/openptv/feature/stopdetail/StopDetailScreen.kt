@@ -3,6 +3,7 @@ package ac.jfx.openptv.feature.stopdetail
 import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
+import ac.jfx.openptv.core.designsystem.DepartureTimeSelector
 import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.Disruption
 import ac.jfx.openptv.core.model.RouteType
@@ -129,6 +130,8 @@ fun StopDetailRoute(
         onShowMore = viewModel::showMore,
         onToggleFavourite = viewModel::toggleFavourite,
         onShowOnMap = onShowOnMap,
+        onSelectTime = viewModel::setSelectedTime,
+        onClearTime = viewModel::clearSelectedTime,
         timeFormatter = viewModel.timeFormatter,
     )
 }
@@ -144,6 +147,8 @@ internal fun StopDetailScreenContent(
     onShowMore: (GroupKey) -> Unit,
     onToggleFavourite: (destinationName: String) -> Unit,
     onShowOnMap: (latitude: Double, longitude: Double) -> Unit,
+    onSelectTime: (Instant) -> Unit,
+    onClearTime: () -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
     // The disruption bottom sheet is opened from two places — the stop-level banner and a per-row
@@ -229,8 +234,16 @@ internal fun StopDetailScreenContent(
                     HorizontalDivider()
                 }
 
+                item(key = "time-selector") {
+                    TimeSelectorRow(
+                        selectedTime = uiState.selectedTime,
+                        onSelectTime = onSelectTime,
+                        onClearTime = onClearTime,
+                    )
+                }
+
                 item(key = "as-of") {
-                    AsOfRow(asOf = uiState.asOf)
+                    AsOfRow(asOf = uiState.asOf, selectedTime = uiState.selectedTime)
                 }
 
                 if (uiState.disruptions.isNotEmpty()) {
@@ -873,20 +886,58 @@ private fun DisruptionDetail(
 }
 
 @Composable
-private fun AsOfRow(asOf: Instant?) {
+private fun AsOfRow(
+    asOf: Instant?,
+    selectedTime: Instant?,
+) {
     if (asOf == null) {
         Spacer(modifier = Modifier.height(8.dp))
         return
     }
     val use24Hour = rememberUse24Hour()
+    val clock = AbsoluteTimeFormatter.format(asOf, use24Hour)
+    // Issue #182: when a custom time is pinned, the footer reads "Departures around HH:mm" so the
+    // user is never confused into thinking they're seeing live data. Live "now" keeps "As of HH:mm".
+    val text =
+        if (selectedTime != null) {
+            stringResource(R.string.feature_stop_detail_around, clock)
+        } else {
+            stringResource(R.string.feature_stop_detail_as_of, clock)
+        }
     Text(
-        text = stringResource(R.string.feature_stop_detail_as_of, AbsoluteTimeFormatter.format(asOf, use24Hour)),
+        text = text,
         style = MaterialTheme.typography.labelSmall,
         modifier =
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .testTag(TestTagAsOf),
+    )
+}
+
+/**
+ * Custom-time chip row (issue #182). Renders the shared [DepartureTimeSelector] under the header so
+ * the user can pin the departures list to a chosen moment or reset to live now. The chip formats
+ * the selected time with the user's 12/24-hour preference.
+ */
+@Composable
+private fun TimeSelectorRow(
+    selectedTime: Instant?,
+    onSelectTime: (Instant) -> Unit,
+    onClearTime: () -> Unit,
+) {
+    val use24Hour = rememberUse24Hour()
+    DepartureTimeSelector(
+        selectedTime = selectedTime,
+        nowLabel = stringResource(R.string.feature_stop_detail_departing_now),
+        formatTime = { AbsoluteTimeFormatter.format(it, use24Hour) },
+        use24Hour = use24Hour,
+        onTimeSelected = onSelectTime,
+        onCleared = onClearTime,
+        modifier =
+            Modifier
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .testTag(TestTagTimeSelector),
     )
 }
 
@@ -999,6 +1050,7 @@ internal const val TestTagDisruptionSheet: String = "stop-detail-disruption-shee
 internal const val TestTagDisruptionLink: String = "stop-detail-disruption-link"
 internal const val TestTagPlatform: String = "stop-detail-platform"
 internal const val TestTagAsOf: String = "stop-detail-as-of"
+internal const val TestTagTimeSelector: String = "stop-detail-time-selector"
 internal const val TestTagLoading: String = "stop-detail-loading"
 internal const val TestTagEmpty: String = "stop-detail-empty"
 internal const val TestTagError: String = "stop-detail-error"

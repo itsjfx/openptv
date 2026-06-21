@@ -23,6 +23,12 @@ import kotlinx.datetime.Instant
  * `disruptions` is the de-duplicated union of every disruption attached to the current departures
  * (issue #177) — the stop-level banner above the list. Empty when nothing affects this stop's
  * services. Sourced from the same departures poll the rows render, so no extra network call.
+ *
+ * `selectedTime` (issue #182) is the custom instant the user picked to view departures "around".
+ * Null means live "now" — the screen polls every 30 s as usual. Non-null means the list is a
+ * static snapshot anchored at that instant: auto-polling and resume are suppressed so a tick never
+ * snaps the view back to now, and the header chip / `asOf` reflect the chosen time instead of the
+ * wall clock.
  */
 data class StopDetailUiState(
     val header: HeaderState,
@@ -30,6 +36,7 @@ data class StopDetailUiState(
     val isRefreshing: Boolean = false,
     val asOf: Instant? = null,
     val disruptions: List<Disruption> = emptyList(),
+    val selectedTime: Instant? = null,
 ) {
     companion object {
         val Initial: StopDetailUiState =

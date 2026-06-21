@@ -41,11 +41,21 @@ interface DepartureRepository {
     suspend fun getDepartures(
         stopId: StopId,
         routeType: RouteType,
+        at: Instant? = null,
     ): Result<DeparturesAtStop>
 
+    /**
+     * @param at optional time anchor (issue #182). When `null` (the default) the stream behaves
+     *   exactly as it always has — every tick anchors `date_utc` at live "now" minus the grace
+     *   window. When a non-null instant is supplied, every fetch anchors `date_utc` at that fixed
+     *   instant so the user can view departures "around" a chosen moment. The polling cadence is
+     *   unchanged at the repository seam; the ViewModel decides whether to keep a custom-time
+     *   collector alive (it doesn't — a pinned time is a static snapshot, no live polling).
+     */
     fun observeDepartures(
         stopId: StopId,
         routeType: RouteType,
+        at: Instant? = null,
     ): Flow<Result<List<Departure>>>
 
     /**

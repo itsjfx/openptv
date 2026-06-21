@@ -2,6 +2,7 @@ package ac.jfx.openptv.feature.favourites
 
 import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
 import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
+import ac.jfx.openptv.core.designsystem.DepartureTimeSelector
 import ac.jfx.openptv.core.designsystem.ScreenHeading
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.feature.favourites.R
@@ -61,6 +62,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.datetime.Instant
 import kotlin.math.roundToInt
 
 /**
@@ -102,12 +104,14 @@ fun FavouritesRoute(
         onOpenSettings = onOpenSettings,
         onToggleEditMode = viewModel::toggleEditMode,
         onRefresh = viewModel::refresh,
+        onSelectTime = viewModel::setSelectedTime,
+        onClearTime = viewModel::clearSelectedTime,
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-@Suppress("LongMethod") // Scaffold + list + empty / loading branches — kept inline so the screen reads top-to-bottom
+@Suppress("LongMethod", "LongParameterList") // Scaffold + list + empty / loading branches — kept inline so the screen reads top-to-bottom
 internal fun FavouritesScreen(
     uiState: FavouritesUiState,
     onRowClicked: (FavouriteRow) -> Unit,
@@ -119,6 +123,8 @@ internal fun FavouritesScreen(
     onOpenSettings: () -> Unit,
     onToggleEditMode: () -> Unit,
     onRefresh: () -> Unit,
+    onSelectTime: (Instant) -> Unit = {},
+    onClearTime: () -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     val removedCopy = stringResource(R.string.feature_favourites_removed)
@@ -127,6 +133,10 @@ internal fun FavouritesScreen(
     val pendingUndo = loaded?.pendingUndo
     val editMode = loaded?.editMode ?: false
     val isRefreshing = loaded?.isRefreshing ?: false
+    val selectedTime = loaded?.selectedTime
+    // Single source of truth for "are there rows" — reused by the edit toggle and the custom-time
+    // chip so neither adds its own compound condition to the screen's cyclomatic complexity.
+    val hasRows = loaded != null && loaded.rows.isNotEmpty()
 
     // Wire the pending-undo state to the snackbar host. When the VM stashes a pending undo we
     // show the snackbar; the snackbar's dismissal/action result feeds back into the VM through
@@ -162,22 +172,8 @@ internal fun FavouritesScreen(
                 actions = {
                     // Edit toggle (issue #78). A glyph stand-in keeps the dep surface tight —
                     // no Material Icons artifact pull, same trade as elsewhere in the app.
-                    if (loaded != null && loaded.rows.isNotEmpty()) {
-                        IconButton(
-                            onClick = onToggleEditMode,
-                            modifier = Modifier.testTag(TestTagEditToggle),
-                        ) {
-                            Text(
-                                text = if (editMode) "✓" else "✎",
-                                style = MaterialTheme.typography.titleLarge,
-                                color =
-                                    if (editMode) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
-                                    },
-                            )
-                        }
+                    if (hasRows) {
+                        EditToggleButton(editMode = editMode, onClick = onToggleEditMode)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(),
@@ -193,6 +189,15 @@ internal fun FavouritesScreen(
                     .padding(padding),
         ) {
             ScreenHeading(text = stringResource(R.string.feature_favourites_title))
+            // Issue #182: page-level custom-time chip. Every row's next-departure is computed
+            // relative to the chosen instant. Only shown once there are favourites to anchor.
+            if (hasRows) {
+                TimeSelectorRow(
+                    selectedTime = selectedTime,
+                    onSelectTime = onSelectTime,
+                    onClearTime = onClearTime,
+                )
+            }
             // PullToRefreshBox wraps the list so the user can drag down anywhere on the favourites
             // surface to trigger a manual fan-out (issue #78). Mirrors stop-detail's pattern.
             PullToRefreshBox(
@@ -227,6 +232,47 @@ internal fun FavouritesScreen(
             }
         }
     }
+}
+
+/** Edit-mode toggle glyph for the top bar (issue #78). Extracted to keep the screen's complexity down. */
+@Composable
+private fun EditToggleButton(
+    editMode: Boolean,
+    onClick: () -> Unit,
+) {
+    IconButton(onClick = onClick, modifier = Modifier.testTag(TestTagEditToggle)) {
+        Text(
+            text = if (editMode) "✓" else "✎",
+            style = MaterialTheme.typography.titleLarge,
+            color = if (editMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+/**
+ * Page-level custom-time chip row (issue #182). Wraps the shared [DepartureTimeSelector] with the
+ * favourites copy + the user's 12/24-hour preference. Pulled out of [FavouritesScreen] so the
+ * screen's cyclomatic complexity stays under detekt's threshold.
+ */
+@Composable
+private fun TimeSelectorRow(
+    selectedTime: Instant?,
+    onSelectTime: (Instant) -> Unit,
+    onClearTime: () -> Unit,
+) {
+    val use24Hour = rememberUse24Hour()
+    DepartureTimeSelector(
+        selectedTime = selectedTime,
+        nowLabel = stringResource(R.string.feature_favourites_departing_now),
+        formatTime = { AbsoluteTimeFormatter.format(it, use24Hour) },
+        use24Hour = use24Hour,
+        onTimeSelected = onSelectTime,
+        onCleared = onClearTime,
+        modifier =
+            Modifier
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .testTag(TestTagTimeSelector),
+    )
 }
 
 @Composable
@@ -627,3 +673,4 @@ internal const val TestTagDragHandle: String = "favourites-drag-handle"
 internal const val TestTagEditToggle: String = "favourites-edit-toggle"
 internal const val TestTagPullToRefresh: String = "favourites-pull-to-refresh"
 internal const val TestTagSettingsGear: String = "favourites-settings-gear"
+internal const val TestTagTimeSelector: String = "favourites-time-selector"

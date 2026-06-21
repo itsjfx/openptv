@@ -4,6 +4,7 @@
          `openptv.android.library` convention plugin: every string here starts with
          `feature_favourites_`. -->
     <string name="feature_favourites_title">Favourites</string>
+    <string name="feature_favourites_departing_now">Departing now</string>
 
     <!-- Empty state -->
     <string name="feature_favourites_empty">Star a destination at a stop to favourite it.</string>

@@ -26,6 +26,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
@@ -121,6 +122,9 @@ class StopDetailViewModel
         /** Tracks the active "show more" fetch so concurrent taps coalesce into one request. */
         private var loadMoreJob: Job? = null
 
+        /** Tracks the active custom-time snapshot fetch (issue #182) so re-selects coalesce. */
+        private var snapshotJob: Job? = null
+
         /**
          * Accumulated paginated departures — anything past the head-poll window. Stored keyed by
          * `runRef` so the merge step is O(1) per row and a row's existence is idempotent across
@@ -178,6 +182,11 @@ class StopDetailViewModel
          * job, so it subscribes immediately.
          */
         fun startObserving() {
+            // Issue #182: a custom time pins the list to a static snapshot. Resume (which calls
+            // startObserving) must NOT spin the live poll back up and snap the view to "now" — we
+            // already hold the snapshot for the chosen instant, so this is a no-op. The first
+            // snapshot is loaded by `setSelectedTime`; refresh re-loads it explicitly.
+            if (_uiState.value.selectedTime != null) return
             val previous = observeJob
             observeJob =
                 viewModelScope.launch {
@@ -194,13 +203,71 @@ class StopDetailViewModel
         }
 
         /**
-         * Pull-to-refresh handler. Cancels the active collector (the polling Flow is "hot" only
-         * for as long as a collector is attached) and re-subscribes, which forces a fresh fetch.
-         * Flips `isRefreshing` true; the next emission clears it.
+         * Pin the departures list to a custom instant (issue #182). Cancels the live poll, loads a
+         * one-shot snapshot anchored at [instant], and stamps `asOf`/`selectedTime` so the header
+         * chip and as-of footer read the chosen time. Re-selecting a new time just reloads the
+         * snapshot at the new anchor.
+         */
+        fun setSelectedTime(instant: Instant) {
+            stopObserving()
+            // Drop any paged rows accumulated under a different anchor (live now, or a previous
+            // custom time) so the snapshot is purely the rows PTV returns for this instant.
+            pagedByRunRef.clear()
+            lastHeadPoll = emptyList()
+            groupVisibleCounts.clear()
+            exhaustedGroups.clear()
+            _uiState.update { it.copy(selectedTime = instant) }
+            loadSnapshot(instant)
+        }
+
+        /**
+         * Return to live "now" (issue #182). Clears the pinned time and resumes the 30 s poll, so
+         * the very next tick replaces the snapshot with fresh data.
+         */
+        fun clearSelectedTime() {
+            if (_uiState.value.selectedTime == null) return
+            snapshotJob?.cancel()
+            _uiState.update { it.copy(selectedTime = null) }
+            // Wipe the paged cache so snapshot rows don't bleed into the live list.
+            pagedByRunRef.clear()
+            lastHeadPoll = emptyList()
+            startObserving()
+        }
+
+        /**
+         * One-shot fetch anchored at [instant] for the custom-time snapshot. Reuses the same head
+         * projection (`applyDepartureResult`) the live poll uses, so grouping / pinning / favourite
+         * stars behave identically; only the time anchor and the absence of polling differ.
+         */
+        private fun loadSnapshot(instant: Instant) {
+            snapshotJob?.cancel()
+            snapshotJob =
+                viewModelScope.launch {
+                    _uiState.update { current -> current.applyDepartureResult(Result.Loading) }
+                    // observeDepartures anchored at the chosen instant re-emits forever on the 30 s
+                    // tick, but a pinned snapshot only needs the first terminal result. Take it and
+                    // let the collector tear down — no live polling while a custom time is set.
+                    val result =
+                        observeDepartures(stopId, routeType, instant)
+                            .first { it !is Result.Loading }
+                    _uiState.update { current -> current.applyDepartureResult(result) }
+                }
+        }
+
+        /**
+         * Pull-to-refresh handler. With a custom time pinned, re-load the snapshot at that same
+         * instant (the data may have changed — e.g. a disruption appeared). Otherwise cancel the
+         * active collector and re-subscribe, forcing a fresh live fetch. Flips `isRefreshing` true;
+         * the next emission clears it.
          */
         fun refresh() {
             _uiState.update { it.copy(isRefreshing = true) }
-            startObserving()
+            val pinned = _uiState.value.selectedTime
+            if (pinned != null) {
+                loadSnapshot(pinned)
+            } else {
+                startObserving()
+            }
         }
 
         fun retryHeader() {
@@ -349,7 +416,10 @@ class StopDetailViewModel
                         departures =
                             if (groups.isEmpty()) DeparturesState.Empty else DeparturesState.Loaded(groups),
                         isRefreshing = false,
-                        asOf = clock.now(),
+                        // Issue #182: a pinned snapshot's "as of" is the chosen instant, not the
+                        // wall clock — the user is looking at a fixed moment, so the footer should
+                        // read that moment. Live "now" stamps the real fetch time as before.
+                        asOf = selectedTime ?: clock.now(),
                         disruptions = merged.collectDisruptions(),
                     )
                 }

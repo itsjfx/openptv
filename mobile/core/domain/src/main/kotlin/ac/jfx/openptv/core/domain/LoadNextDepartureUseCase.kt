@@ -8,6 +8,7 @@ import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.model.toDestinationKey
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 
 /**
@@ -31,6 +32,11 @@ import javax.inject.Inject
  *
  * The favourites screen joins the route name onto the badge so multi-route destinations like
  * "City" rotate the badge label as routes come up (issue #137).
+ *
+ * [at] (issue #182) optionally anchors the underlying fetch at a chosen instant so the favourites
+ * page can show "next departure after 8 am tomorrow" for every row. `null` keeps the live "now"
+ * behaviour. The pick-next filter is unchanged — PTV already trims to entries at/after the anchor
+ * via `look_backwards=false`, so "next" relative to the chosen time falls out for free.
  */
 class LoadNextDepartureUseCase
     @Inject
@@ -41,8 +47,9 @@ class LoadNextDepartureUseCase
             stopId: StopId,
             routeType: RouteType,
             destinationKey: String,
+            at: Instant? = null,
         ): Result<NextDeparture?> =
-            when (val result = repository.getDepartures(stopId, routeType)) {
+            when (val result = repository.getDepartures(stopId, routeType, at)) {
                 is Result.Success -> Result.Success(result.data.pickNext(destinationKey))
                 is Result.Error -> Result.Error(result.throwable)
                 Result.Loading -> Result.Loading

@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 import kotlin.time.Duration.Companion.seconds
 
@@ -60,6 +61,12 @@ class FavouritesViewModel
 
         private val isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
 
+        /**
+         * Page-level custom time (issue #182). Null means live "now". Combined into [uiState] so the
+         * chip reflects it and folded into every next-departure fetch so each row is relative to it.
+         */
+        private val selectedTime: MutableStateFlow<Instant?> = MutableStateFlow(null)
+
         private var tickJob: Job? = null
 
         val uiState: StateFlow<FavouritesUiState> =
@@ -71,14 +78,17 @@ class FavouritesViewModel
                 nextDepartures,
                 pendingUndo,
                 editMode,
-                isRefreshing,
-            ) { favourites, nexts, undo, edit, refreshing ->
+                // `combine` only takes five typed flows, so bundle the two booleans-ish tail flows
+                // (refreshing + selectedTime) into a Pair via an inner combine, then unpack below.
+                isRefreshing.combine(selectedTime) { refreshing, chosen -> refreshing to chosen },
+            ) { favourites, nexts, undo, edit, refreshingAndTime ->
                 projectState(
                     favourites = favourites,
                     nexts = nexts,
                     undo = undo,
                     editMode = edit,
-                    isRefreshing = refreshing,
+                    isRefreshing = refreshingAndTime.first,
+                    selectedTime = refreshingAndTime.second,
                 )
             }.stateIn(
                 scope = viewModelScope,
@@ -164,6 +174,22 @@ class FavouritesViewModel
             pendingUndo.value = null
         }
 
+        /**
+         * Pin every row's next-departure to a custom instant (issue #182). Sets the page-level
+         * anchor and immediately re-fans so the rows update without waiting for the 60 s tick.
+         */
+        fun setSelectedTime(instant: Instant) {
+            selectedTime.value = instant
+            viewModelScope.launch { refreshNextDepartures() }
+        }
+
+        /** Reset the favourites page back to live "now" (issue #182) and re-fan immediately. */
+        fun clearSelectedTime() {
+            if (selectedTime.value == null) return
+            selectedTime.value = null
+            viewModelScope.launch { refreshNextDepartures() }
+        }
+
         private suspend fun refreshNextDepartures() {
             val favourites: List<FavouriteDestinationAtStop> =
                 withTimeoutOrNull(SNAPSHOT_TIMEOUT_MILLIS) {
@@ -175,6 +201,10 @@ class FavouritesViewModel
             }
             val semaphore = Semaphore(PARALLEL_FETCH_LIMIT)
             val previous = nextDepartures.value
+            // Snapshot the anchor once per fan-out so every row in this tick is computed against the
+            // same instant (issue #182). The 60 s tick re-reads it each pass, so a pinned time keeps
+            // refreshing at that anchor rather than snapping to now.
+            val anchor = selectedTime.value
             val results: Map<FavouriteKey, NextDepartureState> =
                 coroutineScope {
                     favourites
@@ -182,7 +212,7 @@ class FavouritesViewModel
                             async {
                                 semaphore.withPermit {
                                     val key = fav.toKey()
-                                    val state = fetchOne(fav, previous[key])
+                                    val state = fetchOne(fav, previous[key], anchor)
                                     key to state
                                 }
                             }
@@ -196,12 +226,14 @@ class FavouritesViewModel
         private suspend fun fetchOne(
             favourite: FavouriteDestinationAtStop,
             previous: NextDepartureState?,
+            at: Instant?,
         ): NextDepartureState {
             val result =
                 loadNextDeparture(
                     stopId = favourite.stopId,
                     routeType = favourite.routeType,
                     destinationKey = favourite.destinationKey,
+                    at = at,
                 )
             return when (result) {
                 is Result.Success -> {
@@ -241,12 +273,14 @@ class FavouritesViewModel
             }
         }
 
+        @Suppress("LongParameterList") // projection folds every upstream flow into one state
         private fun projectState(
             favourites: List<FavouriteDestinationAtStop>,
             nexts: Map<FavouriteKey, NextDepartureState>,
             undo: PendingUndo?,
             editMode: Boolean,
             isRefreshing: Boolean,
+            selectedTime: Instant?,
         ): FavouritesUiState {
             if (favourites.isEmpty()) {
                 return if (undo != null) {
@@ -255,6 +289,7 @@ class FavouritesViewModel
                         pendingUndo = undo,
                         editMode = editMode,
                         isRefreshing = isRefreshing,
+                        selectedTime = selectedTime,
                     )
                 } else {
                     FavouritesUiState.Empty
@@ -269,6 +304,7 @@ class FavouritesViewModel
                 pendingUndo = undo,
                 editMode = editMode,
                 isRefreshing = isRefreshing,
+                selectedTime = selectedTime,
             )
         }
 

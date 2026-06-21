@@ -271,6 +271,57 @@ class DepartureRepositoryImplTest {
             assertThat(ds.lastLookBackwards.get()).isEqualTo(false)
         }
 
+    // ---------- custom time anchor (issue #182) ----------
+
+    @Test
+    fun `getDepartures with a custom anchor passes it as date_utc verbatim (no grace)`() =
+        runTest {
+            // A custom time is the exact instant the user wants to look around — `look_backwards
+            // =false` already trims earlier rows, so no 2-minute grace is subtracted. The anchor
+            // must reach PTV unchanged.
+            val ds = FakeDataSource(returning = listOf(DepartureMother.aDeparture().build()))
+            val repo = DepartureRepositoryImpl(ds, clock)
+            val chosen = Instant.parse("2026-05-15T08:00:00Z")
+
+            repo.getDepartures(StopId(1071), RouteType.Train, at = chosen)
+
+            assertThat(ds.lastDateUtc.get()).isEqualTo(chosen)
+            assertThat(ds.lastLookBackwards.get()).isEqualTo(false)
+        }
+
+    @Test
+    fun `getDepartures with a null anchor still applies the live now grace`() =
+        runTest {
+            // The default path is unchanged — null anchor means live now minus the grace window.
+            val ds = FakeDataSource(returning = listOf(DepartureMother.aDeparture().build()))
+            val repo = DepartureRepositoryImpl(ds, clock)
+
+            repo.getDepartures(StopId(1071), RouteType.Train, at = null)
+
+            assertThat(ds.lastDateUtc.get()).isEqualTo(fixedNow - 2.minutes)
+        }
+
+    @Test
+    fun `observe with a custom anchor pins every tick at the supplied instant`() =
+        runTest {
+            // Each poll re-fetches at the SAME custom anchor — the snapshot doesn't drift toward
+            // now between ticks.
+            val ds = FakeDataSource(returning = listOf(DepartureMother.aDeparture().build()))
+            val repo = DepartureRepositoryImpl(ds, clock)
+            val chosen = Instant.parse("2026-05-15T08:00:00Z")
+
+            repo.observeDepartures(StopId(1071), RouteType.Train, at = chosen).test {
+                awaitItem() // Loading
+                awaitItem() // Success
+                advanceTimeBy(30_001)
+                awaitItem() // Loading
+                awaitItem() // Success
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertThat(ds.lastDateUtc.get()).isEqualTo(chosen)
+        }
+
     @Test
     fun `loadMore passes look_backwards=false alongside the supplied anchor`() =
         runTest {
