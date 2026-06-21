@@ -12,6 +12,7 @@ import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ToggleFavouriteUseCase
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.testing.DepartureMother
+import ac.jfx.openptv.core.testing.DisruptionMother
 import ac.jfx.openptv.core.testing.FavouriteDestinationAtStopMother
 import ac.jfx.openptv.core.testing.RouteMother
 import ac.jfx.openptv.core.testing.StopDetailMother
@@ -143,6 +144,41 @@ class StopDetailViewModelTest {
                 assertThat(loaded.groups.first().departures).hasSize(1)
                 assertThat(tick.isRefreshing).isFalse()
                 assertThat(tick.asOf).isEqualTo(clock.now())
+                // No disruptions on a plain departure → no stop-level banner data (issue #177).
+                assertThat(tick.disruptions).isEmpty()
+
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `stop-level disruptions are the de-duped union across departures`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(StopDetailUiState.Initial)
+                advanceUntilIdle()
+                awaitItem() // header Loaded
+
+                viewModel.startObserving()
+                advanceUntilIdle()
+
+                // One disruption (id 1) attaches to two runs; a second (id 2) to one run. The
+                // banner the UI renders should list each once — deduped by id, not by run.
+                val shared = DisruptionMother.aDisruption().withId(1L).withTitle("Buses replace trains").build()
+                val lift = DisruptionMother.aDisruption().withId(2L).withTitle("Lift out of service").build()
+                departureRepository.emitSuccess(
+                    listOf(
+                        DepartureMother.aDeparture().withRunRef("A").withDisruptions(listOf(shared)).build(),
+                        DepartureMother.aDeparture().withRunRef("B").withDisruptions(listOf(shared, lift)).build(),
+                        DepartureMother.aDeparture().withRunRef("C").build(),
+                    ),
+                )
+                advanceUntilIdle()
+
+                val tick = awaitItem()
+                assertThat(tick.disruptions.map { it.id.value }).containsExactly(1L, 2L)
 
                 cancelAndIgnoreRemainingEvents()
             }

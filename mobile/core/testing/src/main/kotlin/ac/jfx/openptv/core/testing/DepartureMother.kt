@@ -1,9 +1,9 @@
 package ac.jfx.openptv.core.testing
 
 import ac.jfx.openptv.core.model.Departure
-import ac.jfx.openptv.core.model.DepartureFlags
 import ac.jfx.openptv.core.model.Direction
 import ac.jfx.openptv.core.model.DirectionId
+import ac.jfx.openptv.core.model.Disruption
 import ac.jfx.openptv.core.model.PlatformNumber
 import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RunRef
@@ -34,8 +34,9 @@ class DepartureMother private constructor() {
         /** A real-time prediction is missing — the formatter falls back to "scheduled". */
         fun aDepartureWithoutEstimate(): DepartureBuilder = DepartureBuilder().withEstimatedDepartureUtc(null)
 
-        /** A departure flagged with a disruption (the screen surfaces an indicator). */
-        fun aDisruptedDeparture(): DepartureBuilder = DepartureBuilder().withFlags(DepartureFlags(hasDisruption = true))
+        /** A departure carrying a disruption (the screen surfaces a warning indicator). */
+        fun aDisruptedDeparture(): DepartureBuilder =
+            DepartureBuilder().withDisruptions(listOf(DisruptionMother.aDisruption().build()))
     }
 
     class DepartureBuilder {
@@ -46,7 +47,7 @@ class DepartureMother private constructor() {
         private var scheduledDepartureUtc: Instant = DEFAULT_SCHEDULED
         private var estimatedDepartureUtc: Instant? = DEFAULT_ESTIMATED
         private var platform: String? = DEFAULT_PLATFORM
-        private var flags: DepartureFlags = DepartureFlags()
+        private var disruptions: List<Disruption> = emptyList()
 
         fun withRouteId(id: Int) = apply { this.routeId = id }
 
@@ -62,7 +63,7 @@ class DepartureMother private constructor() {
 
         fun withPlatform(value: String?) = apply { this.platform = value }
 
-        fun withFlags(value: DepartureFlags) = apply { this.flags = value }
+        fun withDisruptions(value: List<Disruption>) = apply { this.disruptions = value }
 
         fun build(): Departure =
             Departure(
@@ -72,7 +73,7 @@ class DepartureMother private constructor() {
                 estimatedDepartureUtc = estimatedDepartureUtc,
                 platform = platform?.let(::PlatformNumber),
                 direction = Direction(id = DirectionId(directionId), name = directionName),
-                flags = flags,
+                disruptions = disruptions,
             )
     }
 }

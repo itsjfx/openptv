@@ -8,6 +8,7 @@ import ac.jfx.openptv.core.domain.ObserveDeparturesUseCase
 import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ToggleFavouriteUseCase
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.Disruption
 import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteId
 import ac.jfx.openptv.core.model.RouteType
@@ -320,6 +321,7 @@ class StopDetailViewModel
                             if (groups.isEmpty()) DeparturesState.Empty else DeparturesState.Loaded(groups),
                         isRefreshing = false,
                         asOf = clock.now(),
+                        disruptions = merged.collectDisruptions(),
                     )
                 }
                 is Result.Error ->
@@ -366,8 +368,16 @@ class StopDetailViewModel
             val groups = merged.toGroupedList(currentHeader = header)
             val newDepartures =
                 if (groups.isEmpty()) DeparturesState.Empty else DeparturesState.Loaded(groups)
-            return copy(departures = newDepartures)
+            return copy(departures = newDepartures, disruptions = merged.collectDisruptions())
         }
+
+        /**
+         * The de-duplicated union of every disruption attached to the current departures — the
+         * stop-level banner (issue #177). Dedupe by disruption id because one PTV disruption (a
+         * weekend line closure, say) attaches to many runs; the banner should list it once.
+         */
+        private fun List<Departure>.collectDisruptions(): List<Disruption> =
+            flatMap { it.disruptions }.distinctBy { it.id.value }
 
         /**
          * The effective departure instant of the tapped group's last cached row — the anchor for

@@ -4,6 +4,7 @@ import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.Disruption
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.model.StopId
@@ -23,28 +24,33 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -57,7 +63,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
@@ -139,9 +144,10 @@ internal fun StopDetailScreenContent(
     onShowOnMap: (latitude: Double, longitude: Double) -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
-    val disruptionMessage = stringResource(R.string.feature_stop_detail_disruption_snackbar)
+    // The disruption bottom sheet is opened from two places — the stop-level banner and a per-row
+    // warning icon — so the screen owns the "which disruptions to show" state and both call-sites
+    // funnel into it. Empty list = sheet hidden (issue #177).
+    var sheetDisruptions by remember { mutableStateOf<List<Disruption>>(emptyList()) }
     // Retains scroll position across recomposition. There is no scroll-triggered paging any more
     // (issue #126) — the user pulls more rows in via the explicit "Show more" button.
     val listState = rememberLazyListState()
@@ -199,7 +205,6 @@ internal fun StopDetailScreenContent(
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         PullToRefreshBox(
             isRefreshing = uiState.isRefreshing,
@@ -226,6 +231,16 @@ internal fun StopDetailScreenContent(
                     AsOfRow(asOf = uiState.asOf)
                 }
 
+                if (uiState.disruptions.isNotEmpty()) {
+                    item(key = "disruptions-banner") {
+                        DisruptionBanner(
+                            count = uiState.disruptions.size,
+                            onClick = { sheetDisruptions = uiState.disruptions },
+                        )
+                        HorizontalDivider()
+                    }
+                }
+
                 departuresSection(
                     state = uiState.departures,
                     today = todayLocal,
@@ -234,9 +249,14 @@ internal fun StopDetailScreenContent(
                     onToggleFavourite = onToggleFavourite,
                     onDepartureClicked = onDepartureClicked,
                     onRefresh = onRefresh,
-                    onDisruptionClicked = {
-                        scope.launch { snackbarHostState.showSnackbar(disruptionMessage) }
-                    },
+                    onShowDisruptions = { disruptions -> sheetDisruptions = disruptions },
+                )
+            }
+
+            if (sheetDisruptions.isNotEmpty()) {
+                DisruptionSheet(
+                    disruptions = sheetDisruptions,
+                    onDismiss = { sheetDisruptions = emptyList() },
                 )
             }
         }
@@ -258,7 +278,7 @@ private fun LazyListScope.departuresSection(
     onToggleFavourite: (destinationName: String) -> Unit,
     onDepartureClicked: (Departure) -> Unit,
     onRefresh: () -> Unit,
-    onDisruptionClicked: () -> Unit,
+    onShowDisruptions: (List<Disruption>) -> Unit,
 ) {
     when (state) {
         DeparturesState.Loading -> {
@@ -289,7 +309,7 @@ private fun LazyListScope.departuresSection(
                     onShowMore = onShowMore,
                     onToggleFavourite = onToggleFavourite,
                     onDepartureClicked = onDepartureClicked,
-                    onDisruptionClicked = onDisruptionClicked,
+                    onShowDisruptions = onShowDisruptions,
                 )
             }
             if (state.isLoadingMore) {
@@ -308,7 +328,7 @@ private fun LazyListScope.groupSection(
     onShowMore: (GroupKey) -> Unit,
     onToggleFavourite: (destinationName: String) -> Unit,
     onDepartureClicked: (Departure) -> Unit,
-    onDisruptionClicked: () -> Unit,
+    onShowDisruptions: (List<Disruption>) -> Unit,
 ) {
     item(key = "group-${group.key.destination}") {
         GroupHeader(
@@ -350,7 +370,7 @@ private fun LazyListScope.groupSection(
                 departure = dep,
                 timeFormatter = timeFormatter,
                 routeBadge = routeBadge,
-                onDisruptionClicked = onDisruptionClicked,
+                onShowDisruptions = { onShowDisruptions(dep.disruptions) },
                 onClicked = { onDepartureClicked(dep) },
             )
             HorizontalDivider()
@@ -586,7 +606,7 @@ private fun DepartureRow(
     departure: Departure,
     timeFormatter: RelativeTimeFormatter,
     routeBadge: String,
-    onDisruptionClicked: () -> Unit,
+    onShowDisruptions: () -> Unit,
     onClicked: () -> Unit,
 ) {
     val relative =
@@ -653,6 +673,27 @@ private fun DepartureRow(
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
+            if (departure.hasDisruption) {
+                // Issue #177: a compact ⚠ glyph replaces the old "Disruption affects this route"
+                // text button — tapping it opens the bottom sheet with this run's disruption(s).
+                // Sits just left of the time so the disruption reads as part of "when is it / is it
+                // ok". Unicode glyph rather than a Material icon keeps this module off the
+                // `compose-material-icons-extended` artifact (same trade as 🗺 / ★ elsewhere).
+                val description = stringResource(R.string.feature_stop_detail_disruption_show)
+                Text(
+                    text = stringResource(R.string.feature_stop_detail_disruption_icon),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier =
+                        Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(onClick = onShowDisruptions)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .semantics { contentDescription = description }
+                            .testTag(TestTagDisruptionFlag),
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+            }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = relative,
@@ -678,29 +719,143 @@ private fun DepartureRow(
         }
         // Issue #122: drop the "no platform info" placeholder when PTV doesn't return a platform
         // for the run — the line was empty noise on tram/bus rows where platform data never exists.
-        // Disruption affordance still renders on its own if the platform line is suppressed.
+        // The disruption ⚠ now lives inline next to the time (above), so this line is platform-only.
         val platform = departure.platform
-        if (platform != null || departure.flags.hasDisruption) {
+        if (platform != null) {
             Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (platform != null) {
-                    Text(
-                        text = stringResource(R.string.feature_stop_detail_platform, platform.value),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.testTag(TestTagPlatform),
-                    )
+            Text(
+                text = stringResource(R.string.feature_stop_detail_platform, platform.value),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag(TestTagPlatform),
+            )
+        }
+    }
+}
+
+/**
+ * Stop-level disruption banner (issue #177). Rendered above the departures list when any current
+ * service at the stop is disrupted. Tapping it opens the bottom sheet listing every disruption —
+ * the de-duplicated union the ViewModel collects across the visible departures. Uses the error
+ * container colour so it reads as "needs attention" without shouting.
+ */
+@Composable
+private fun DisruptionBanner(
+    count: Int,
+    onClick: () -> Unit,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick)
+                .testTag(TestTagDisruptionBanner),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.feature_stop_detail_disruption_icon),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text =
+                    pluralStringResource(
+                        R.plurals.feature_stop_detail_disruptions_banner,
+                        count,
+                        count,
+                    ),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f),
+            )
+            // Chevron glyph hints the banner is tappable — same Unicode-glyph trade as elsewhere.
+            Text(text = "›", style = MaterialTheme.typography.titleLarge)
+        }
+    }
+}
+
+/**
+ * Bottom sheet showing the full detail for one or more disruptions (issue #177). Opened by the
+ * stop-level banner (all stop disruptions) or a departure row's warning icon (just that run's). The
+ * content scrolls because PTV descriptions can run several paragraphs; each disruption links out to
+ * its public PTV article via the system browser.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DisruptionSheet(
+    disruptions: List<Disruption>,
+    onDismiss: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(TestTagDisruptionSheet),
+    ) {
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 32.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.feature_stop_detail_disruptions_title),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            disruptions.forEachIndexed { index, disruption ->
+                if (index > 0) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
                 }
-                if (departure.flags.hasDisruption) {
-                    if (platform != null) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    androidx.compose.material3.TextButton(
-                        onClick = onDisruptionClicked,
-                        modifier = Modifier.testTag(TestTagDisruptionFlag),
-                    ) {
-                        Text(stringResource(R.string.feature_stop_detail_disruption))
-                    }
-                }
+                DisruptionDetail(
+                    disruption = disruption,
+                    onViewUrl = { url -> uriHandler.openUri(url) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DisruptionDetail(
+    disruption: Disruption,
+    onViewUrl: (String) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        if (disruption.type.isNotBlank()) {
+            Text(
+                text = disruption.type,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+        }
+        Text(
+            text = disruption.title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (disruption.description.isNotBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = disruption.description,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        val url = disruption.url
+        if (url != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            TextButton(
+                onClick = { onViewUrl(url) },
+                modifier = Modifier.testTag(TestTagDisruptionLink),
+            ) {
+                Text(stringResource(R.string.feature_stop_detail_disruption_view))
             }
         }
     }
@@ -822,6 +977,9 @@ internal const val TestTagGroupHeader: String = "stop-detail-group-header"
 internal const val TestTagFavouriteToggle: String = "stop-detail-favourite-toggle"
 internal const val TestTagDepartureRow: String = "stop-detail-departure-row"
 internal const val TestTagDisruptionFlag: String = "stop-detail-disruption-flag"
+internal const val TestTagDisruptionBanner: String = "stop-detail-disruption-banner"
+internal const val TestTagDisruptionSheet: String = "stop-detail-disruption-sheet"
+internal const val TestTagDisruptionLink: String = "stop-detail-disruption-link"
 internal const val TestTagPlatform: String = "stop-detail-platform"
 internal const val TestTagAsOf: String = "stop-detail-as-of"
 internal const val TestTagLoading: String = "stop-detail-loading"

@@ -1,10 +1,11 @@
 package ac.jfx.openptv.core.network.model
 
 import ac.jfx.openptv.core.model.Departure
-import ac.jfx.openptv.core.model.DepartureFlags
 import ac.jfx.openptv.core.model.DeparturesAtStop
 import ac.jfx.openptv.core.model.Direction
 import ac.jfx.openptv.core.model.DirectionId
+import ac.jfx.openptv.core.model.Disruption
+import ac.jfx.openptv.core.model.DisruptionId
 import ac.jfx.openptv.core.model.PlatformNumber
 import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteId
@@ -27,6 +28,12 @@ internal data class DeparturesResponseDto(
     @SerialName("departures") val departures: List<DepartureDto> = emptyList(),
     @SerialName("directions") val directions: Map<String, DirectionDto> = emptyMap(),
     @SerialName("routes") val routes: Map<String, RouteSideloadDto> = emptyMap(),
+    /**
+     * PTV sideloads the full disruption records here (with `expand=Disruption`), keyed by the
+     * stringified `disruption_id`. Each departure references them by id via [DepartureDto.disruptionIds];
+     * the mapper joins the two so the domain [Departure] carries its disruptions inline (issue #177).
+     */
+    @SerialName("disruptions") val disruptions: Map<String, DisruptionDto> = emptyMap(),
 )
 
 @Serializable
@@ -60,6 +67,22 @@ internal data class RouteSideloadDto(
 )
 
 /**
+ * Sideload row for a single disruption under the response's `disruptions` map. Carries the public
+ * fields the stop-detail sheet renders (issue #177); the noisier fields (`from_date`, `routes`,
+ * `display_on_board`, …) are dropped here because `Json { ignoreUnknownKeys = true }` lets us pick
+ * only what the UI needs. Mapped to the shared domain [Disruption] via [toDomain].
+ */
+@Serializable
+internal data class DisruptionDto(
+    @SerialName("disruption_id") val disruptionId: Long,
+    @SerialName("title") val title: String = "",
+    @SerialName("description") val description: String = "",
+    @SerialName("disruption_type") val disruptionType: String = "",
+    @SerialName("url") val url: String? = null,
+    @SerialName("colour") val colour: String? = null,
+)
+
+/**
  * Map the PTV envelope into [DeparturesAtStop] — both the [Departure] list and a list of [Route]
  * projections sideloaded under the response's `routes` map. The `directions` map is keyed by
  * stringified direction id; we look up each row's direction by id, falling back to a synthetic
@@ -68,8 +91,12 @@ internal data class RouteSideloadDto(
  * joins each departure's `routeId` back to a [Route] so it can render the line name on the badge
  * (issue #137 regression).
  */
-internal fun DeparturesResponseDto.toDomain(): DeparturesAtStop =
-    DeparturesAtStop(
+internal fun DeparturesResponseDto.toDomain(): DeparturesAtStop {
+    // Index the sideloaded disruption records by id so each departure's `disruption_ids` resolve in
+    // O(1). PTV keys the map by the stringified id; we re-key by the numeric id the departure rows
+    // carry. Records the departure references but the sideload omits are dropped (mapNotNull below).
+    val disruptionsById = disruptions.values.associateBy({ it.disruptionId }, { it.toDomain() })
+    return DeparturesAtStop(
         departures =
             departures.map { d ->
                 val directionDto = directions[d.directionId.toString()]
@@ -84,7 +111,7 @@ internal fun DeparturesResponseDto.toDomain(): DeparturesAtStop =
                             id = DirectionId(d.directionId),
                             name = directionDto?.directionName?.trim() ?: "",
                         ),
-                    flags = DepartureFlags(hasDisruption = d.disruptionIds.isNotEmpty()),
+                    disruptions = d.disruptionIds.mapNotNull { disruptionsById[it] },
                 )
             },
         routes =
@@ -98,4 +125,20 @@ internal fun DeparturesResponseDto.toDomain(): DeparturesAtStop =
                     )
                 }
             },
+    )
+}
+
+/**
+ * Map a sideloaded [DisruptionDto] into the domain [Disruption]. Title/description/type are trimmed
+ * at the boundary like every other PTV string; `url`/`colour` are passed through verbatim (the UI
+ * decides whether to render the link / accent).
+ */
+internal fun DisruptionDto.toDomain(): Disruption =
+    Disruption(
+        id = DisruptionId(disruptionId),
+        title = title.trim(),
+        description = description.trim(),
+        type = disruptionType.trim(),
+        url = url?.takeIf { it.isNotBlank() },
+        colour = colour?.takeIf { it.isNotBlank() },
     )

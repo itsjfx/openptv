@@ -24,8 +24,17 @@
     <!-- Generic "Show more" button under a route group; each tap reveals the next few
          departures and fetches another page only when needed (issue #126). -->
     <string name="feature_stop_detail_show_more">Show more</string>
-    <string name="feature_stop_detail_disruption">Disruption affects this route</string>
-    <string name="feature_stop_detail_disruption_snackbar">Disruption details land in Phase 10.</string>
+
+    <!-- Disruptions (issue #177). The per-row warning icon and the stop-level banner both open a
+         bottom sheet listing the affected services' disruptions. -->
+    <string name="feature_stop_detail_disruption_icon">⚠</string>
+    <string name="feature_stop_detail_disruption_show">Show disruption details</string>
+    <string name="feature_stop_detail_disruptions_title">Disruptions</string>
+    <plurals name="feature_stop_detail_disruptions_banner">
+        <item quantity="one">%d disruption affecting this stop</item>
+        <item quantity="other">%d disruptions affecting this stop</item>
+    </plurals>
+    <string name="feature_stop_detail_disruption_view">View on PTV website</string>
 
     <!-- Top-bar action that jumps back to the Nearby map screen centred on this stop (issue #123). -->
     <string name="feature_stop_detail_show_on_map">Show stop on map</string>

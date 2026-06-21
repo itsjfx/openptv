@@ -1,6 +1,7 @@
 package ac.jfx.openptv.feature.stopdetail
 
 import ac.jfx.openptv.core.model.Departure
+import ac.jfx.openptv.core.model.Disruption
 import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopDetail
@@ -18,12 +19,17 @@ import kotlinx.datetime.Instant
  *
  * `asOf` is the wall-clock instant the most recent successful list emission was observed; the UI
  * renders it as `As of HH:mm`. Null while the first successful fetch hasn't landed.
+ *
+ * `disruptions` is the de-duplicated union of every disruption attached to the current departures
+ * (issue #177) — the stop-level banner above the list. Empty when nothing affects this stop's
+ * services. Sourced from the same departures poll the rows render, so no extra network call.
  */
 data class StopDetailUiState(
     val header: HeaderState,
     val departures: DeparturesState,
     val isRefreshing: Boolean = false,
     val asOf: Instant? = null,
+    val disruptions: List<Disruption> = emptyList(),
 ) {
     companion object {
         val Initial: StopDetailUiState =

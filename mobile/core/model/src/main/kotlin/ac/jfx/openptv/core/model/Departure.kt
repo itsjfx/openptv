@@ -15,8 +15,10 @@ import kotlinx.datetime.Instant
  * `estimatedDepartureUtc` is nullable because PTV omits it when no real-time prediction is
  * available — formatters fall back to the scheduled time and label it accordingly.
  *
- * `flags` is reserved for future per-departure indicators (cancelled, replaced by bus, etc.).
- * Phase 03 wires only a placeholder; richer values land in Phase 08+.
+ * `disruptions` are the PTV disruptions affecting this specific run, joined from the response's
+ * sideloaded `disruptions` map at the `:core:network` boundary (issue #177). Empty when the run is
+ * running to plan. [hasDisruption] is the convenience predicate the stop-detail row reads to decide
+ * whether to render the warning indicator.
  */
 data class Departure(
     val routeId: RouteId,
@@ -25,8 +27,12 @@ data class Departure(
     val estimatedDepartureUtc: Instant?,
     val platform: PlatformNumber?,
     val direction: Direction,
-    val flags: DepartureFlags = DepartureFlags(),
-)
+    val disruptions: List<Disruption> = emptyList(),
+) {
+    /** True when at least one disruption affects this run — drives the row's warning indicator. */
+    val hasDisruption: Boolean
+        get() = disruptions.isNotEmpty()
+}
 
 /**
  * PTV route identifier. Stop detail groups departures by `(routeId, direction)` so a `value class`
@@ -62,15 +68,6 @@ data class Direction(
 
 @JvmInline
 value class DirectionId(val value: Int)
-
-/**
- * Per-departure flags. Reserved for future use — cancellation, replacement bus, skip-stop notice.
- * Phase 03 only models the disruption-flagged bit because the UI shows a placeholder icon for it
- * even though the disruption browser itself (Phase 10) isn't shipped yet.
- */
-data class DepartureFlags(
-    val hasDisruption: Boolean = false,
-)
 
 /**
  * Departures at a stop alongside the [Route] projections PTV sideloads in the same response. The

@@ -6,6 +6,7 @@ import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.network.model.DepartureDtoMother
 import ac.jfx.openptv.core.network.model.DeparturesResponseDto
 import ac.jfx.openptv.core.network.model.DirectionDto
+import ac.jfx.openptv.core.network.model.DisruptionDtoMother
 import ac.jfx.openptv.core.network.model.RouteSideloadDto
 import ac.jfx.openptv.core.network.model.toDomain
 import com.google.common.truth.Truth.assertThat
@@ -55,7 +56,8 @@ class DeparturesDtoMapperTest {
         assertThat(departure.platform?.value).isEqualTo("3")
         assertThat(departure.direction.name).isEqualTo("North Coburg")
         assertThat(departure.direction.id.value).isEqualTo(7)
-        assertThat(departure.flags.hasDisruption).isFalse()
+        assertThat(departure.hasDisruption).isFalse()
+        assertThat(departure.disruptions).isEmpty()
     }
 
     @Test
@@ -110,7 +112,10 @@ class DeparturesDtoMapperTest {
     }
 
     @Test
-    fun `non-empty disruption ids set hasDisruption flag`() {
+    fun `disruption ids join to the sideloaded disruption records`() {
+        // Issue #177: PTV sideloads the full disruption objects under `disruptions`, keyed by the
+        // stringified id; each departure references them by id. The mapper joins the two so the
+        // domain Departure carries the title/description the stop-detail sheet renders on tap.
         val dto =
             DeparturesResponseDto(
                 departures =
@@ -119,11 +124,64 @@ class DeparturesDtoMapperTest {
                             .withDisruptionIds(listOf(42L, 43L))
                             .build(),
                     ),
+                disruptions =
+                    mapOf(
+                        "42" to DisruptionDtoMother.aDisruptionDto().withDisruptionId(42L).withTitle("Buses replace trains").build(),
+                        "43" to DisruptionDtoMother.aDisruptionDto().withDisruptionId(43L).withTitle("Lift out of service").build(),
+                    ),
             )
 
         val departure = dto.toDomain().departures.single()
 
-        assertThat(departure.flags.hasDisruption).isTrue()
+        assertThat(departure.hasDisruption).isTrue()
+        assertThat(departure.disruptions.map { it.id.value }).containsExactly(42L, 43L).inOrder()
+        assertThat(departure.disruptions.map { it.title })
+            .containsExactly("Buses replace trains", "Lift out of service")
+    }
+
+    @Test
+    fun `disruption ids without a matching sideload record are dropped`() {
+        // Defensive: if a departure references a disruption id the `disruptions` map omits, we skip
+        // it rather than synthesise a blank record — the row simply shows no indicator for it.
+        val dto =
+            DeparturesResponseDto(
+                departures =
+                    listOf(
+                        DepartureDtoMother.aDepartureDto()
+                            .withDisruptionIds(listOf(42L, 99L))
+                            .build(),
+                    ),
+                disruptions =
+                    mapOf("42" to DisruptionDtoMother.aDisruptionDto().withDisruptionId(42L).build()),
+            )
+
+        val departure = dto.toDomain().departures.single()
+
+        assertThat(departure.disruptions.map { it.id.value }).containsExactly(42L)
+    }
+
+    @Test
+    fun `disruption strings are trimmed and blank url falls back to null`() {
+        val dto =
+            DeparturesResponseDto(
+                departures = listOf(DepartureDtoMother.aDepartureDto().withDisruptionIds(listOf(42L)).build()),
+                disruptions =
+                    mapOf(
+                        "42" to
+                            DisruptionDtoMother.aDisruptionDto()
+                                .withDisruptionId(42L)
+                                .withTitle("  Minor delays  ")
+                                .withDisruptionType("  Minor Delays  ")
+                                .withUrl("")
+                                .build(),
+                    ),
+            )
+
+        val disruption = dto.toDomain().departures.single().disruptions.single()
+
+        assertThat(disruption.title).isEqualTo("Minor delays")
+        assertThat(disruption.type).isEqualTo("Minor Delays")
+        assertThat(disruption.url).isNull()
     }
 
     @Test
