@@ -76,6 +76,11 @@ internal fun PatternResponseDto.toDomain(): RunPattern {
     return RunPattern(
         route = route,
         directionName = directionName,
+        // Captured from the first row so the data layer can pick the matching geopath segment from
+        // the `stops/route` endpoint (issue #187) — every row on one run shares route + direction.
+        directionId = first?.directionId,
+        // Geopath is intentionally left empty here: the pattern endpoint returns `geopath: null`
+        // even with `include_geopath=true`, so the data layer fills it from a companion fetch.
         stops =
             departures.map { d ->
                 val stopDto = stops[d.stopId.toString()]

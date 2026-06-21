@@ -6,9 +6,11 @@ import ac.jfx.openptv.core.network.DepartureDataSource
 import ac.jfx.openptv.core.network.NearbyStopsDataSource
 import ac.jfx.openptv.core.network.RetrofitDepartureDataSource
 import ac.jfx.openptv.core.network.RetrofitNearbyStopsDataSource
+import ac.jfx.openptv.core.network.RetrofitRouteShapeDataSource
 import ac.jfx.openptv.core.network.RetrofitRunPatternDataSource
 import ac.jfx.openptv.core.network.RetrofitStopDetailDataSource
 import ac.jfx.openptv.core.network.RetrofitStopSearchDataSource
+import ac.jfx.openptv.core.network.RouteShapeDataSource
 import ac.jfx.openptv.core.network.RunPatternDataSource
 import ac.jfx.openptv.core.network.StopDetailDataSource
 import ac.jfx.openptv.core.network.StopSearchDataSource
@@ -133,4 +135,10 @@ internal abstract class NetworkBindings {
     internal abstract fun bindRunPatternDataSource(
         impl: RetrofitRunPatternDataSource,
     ): RunPatternDataSource
+
+    @Binds
+    @Singleton
+    internal abstract fun bindRouteShapeDataSource(
+        impl: RetrofitRouteShapeDataSource,
+    ): RouteShapeDataSource
 }

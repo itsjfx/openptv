@@ -3,6 +3,7 @@ package ac.jfx.openptv.core.network
 import ac.jfx.openptv.core.network.model.DeparturesResponseDto
 import ac.jfx.openptv.core.network.model.NearbyStopsResponseDto
 import ac.jfx.openptv.core.network.model.PatternResponseDto
+import ac.jfx.openptv.core.network.model.RouteShapeResponseDto
 import ac.jfx.openptv.core.network.model.SearchResponseDto
 import ac.jfx.openptv.core.network.model.StopResponseDto
 import retrofit2.http.GET
@@ -70,4 +71,15 @@ internal interface BackendApiService {
     suspend fun getRunPattern(
         @Url url: String,
     ): PatternResponseDto
+
+    /**
+     * PTV `GET /api/v3/stops/route/{route_id}/route_type/{route_type}?include_geopath=true` — the
+     * route's stops (with lat/lng) plus its geopath polyline, one segment per direction. Used by
+     * the run-pattern map (issue #187) as a companion fetch to the pattern endpoint, which returns
+     * `geopath: null` itself. The data source composes the absolute URL before calling.
+     */
+    @GET
+    suspend fun getRouteShape(
+        @Url url: String,
+    ): RouteShapeResponseDto
 }
