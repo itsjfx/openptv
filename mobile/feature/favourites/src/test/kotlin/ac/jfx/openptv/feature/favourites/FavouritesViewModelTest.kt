@@ -508,6 +508,103 @@ class FavouritesViewModelTest {
             assertThat(restored.lng).isEqualTo(144.9671)
         }
 
+    // ---------- custom time selector (issue #182) ----------
+
+    @Test
+    fun `setSelectedTime threads the chosen instant into the next-departure fan-out`() =
+        runTest(dispatcher) {
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("city").withDestinationName("City").withPosition(0).build(),
+                ),
+            )
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+
+            val chosen = Instant.parse("2026-05-15T08:00:00Z")
+            departureRepository.enqueueSuccess(
+                listOf(DepartureMother.aDeparture().withDirectionName("City").withRunRef("F-1").build()),
+            )
+            viewModel.setSelectedTime(chosen)
+            advanceUntilIdle()
+
+            // The chosen instant reaches the repository seam and the UI reflects the pinned time.
+            assertThat(departureRepository.lastOneShotAt).isEqualTo(chosen)
+            assertThat((viewModel.uiState.value as FavouritesUiState.Loaded).selectedTime).isEqualTo(chosen)
+        }
+
+    @Test
+    fun `the 60s tick keeps fetching at the pinned time instead of snapping back to now`() =
+        runTest(dispatcher) {
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("city").withDestinationName("City").withPosition(0).build(),
+                ),
+            )
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+
+            val chosen = Instant.parse("2026-05-15T08:00:00Z")
+            departureRepository.enqueueSuccess(
+                listOf(DepartureMother.aDeparture().withDirectionName("City").withRunRef("F-1").build()),
+            )
+            viewModel.setSelectedTime(chosen)
+            advanceUntilIdle()
+            assertThat(departureRepository.lastOneShotAt).isEqualTo(chosen)
+
+            // Start the tick loop. Its immediate fan-out and the one a full interval later must
+            // both still anchor at the pinned instant — the tick never resets to live now.
+            departureRepository.enqueueSuccess(
+                listOf(DepartureMother.aDeparture().withDirectionName("City").withRunRef("F-2").build()),
+            )
+            viewModel.startObserving()
+            runCurrent()
+            assertThat(departureRepository.lastOneShotAt).isEqualTo(chosen)
+
+            departureRepository.enqueueSuccess(
+                listOf(DepartureMother.aDeparture().withDirectionName("City").withRunRef("F-3").build()),
+            )
+            advanceTimeBy(61.seconds.inWholeMilliseconds)
+            runCurrent()
+
+            assertThat(departureRepository.lastOneShotAt).isEqualTo(chosen)
+            assertThat((viewModel.uiState.value as FavouritesUiState.Loaded).selectedTime).isEqualTo(chosen)
+            viewModel.stopObserving()
+        }
+
+    @Test
+    fun `clearSelectedTime resets the anchor to live now`() =
+        runTest(dispatcher) {
+            favouritesRepository.seed(
+                listOf(
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1).withDestinationKey("city").withDestinationName("City").withPosition(0).build(),
+                ),
+            )
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+
+            val chosen = Instant.parse("2026-05-15T08:00:00Z")
+            departureRepository.enqueueSuccess(
+                listOf(DepartureMother.aDeparture().withDirectionName("City").withRunRef("F-1").build()),
+            )
+            viewModel.setSelectedTime(chosen)
+            advanceUntilIdle()
+            assertThat(departureRepository.lastOneShotAt).isEqualTo(chosen)
+
+            departureRepository.enqueueSuccess(
+                listOf(DepartureMother.aDeparture().withDirectionName("City").withRunRef("F-2").build()),
+            )
+            viewModel.clearSelectedTime()
+            advanceUntilIdle()
+
+            // Back to live now — the repository sees a null anchor and the chip is reset.
+            assertThat(departureRepository.lastOneShotAt).isNull()
+            assertThat((viewModel.uiState.value as FavouritesUiState.Loaded).selectedTime).isNull()
+        }
+
     private class FakeClock(private val instant: Instant) : Clock {
         override fun now(): Instant = instant
     }

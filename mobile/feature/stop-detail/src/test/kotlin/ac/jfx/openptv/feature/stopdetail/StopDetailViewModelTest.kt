@@ -1293,6 +1293,81 @@ class StopDetailViewModelTest {
             assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Empty)
         }
 
+    // ---------- custom time selector (issue #182) ----------
+
+    @Test
+    fun `setSelectedTime pins the chosen instant and stamps asOf at it`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+
+            val chosen = Instant.parse("2026-05-15T08:00:00Z")
+            // Seed the fake's replay cache so the snapshot's `observeDepartures().first {}` resolves.
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("SNAP-1").build()))
+            viewModel.setSelectedTime(chosen)
+            advanceUntilIdle()
+
+            val state = viewModel.uiState.value
+            assertThat(state.selectedTime).isEqualTo(chosen)
+            // The footer's as-of reflects the chosen instant, not the wall clock.
+            assertThat(state.asOf).isEqualTo(chosen)
+            assertThat(state.departures).isInstanceOf(DeparturesState.Loaded::class.java)
+            // The snapshot anchored the fetch at the chosen instant.
+            assertThat(departureRepository.lastObservedAt).isEqualTo(chosen)
+        }
+
+    @Test
+    fun `a poll tick does not clobber the pinned time — startObserving is a no-op while pinned`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+
+            val chosen = Instant.parse("2026-05-15T08:00:00Z")
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("SNAP-1").build()))
+            viewModel.setSelectedTime(chosen)
+            advanceUntilIdle()
+
+            val keysBefore = departureRepository.observedKeys.size
+
+            // Simulate a resume (repeatOnLifecycle re-enters and calls startObserving). It must NOT
+            // start a live collector while a custom time is pinned.
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            assertThat(departureRepository.observedKeys).hasSize(keysBefore)
+            // The pinned time and as-of survive the resume.
+            assertThat(viewModel.uiState.value.selectedTime).isEqualTo(chosen)
+            assertThat(viewModel.uiState.value.asOf).isEqualTo(chosen)
+        }
+
+    @Test
+    fun `clearSelectedTime resumes live polling and the next tick stamps asOf at the wall clock`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+
+            val chosen = Instant.parse("2026-05-15T08:00:00Z")
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("SNAP-1").build()))
+            viewModel.setSelectedTime(chosen)
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value.selectedTime).isEqualTo(chosen)
+
+            viewModel.clearSelectedTime()
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value.selectedTime).isNull()
+
+            // Live polling is back — a fresh emission lands and as-of stamps the live clock.
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("LIVE-1").build()))
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value.asOf).isEqualTo(clock.now())
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.flatMap { it.departures }.map { it.runRef.value })
+                .containsExactly("LIVE-1")
+        }
+
     /** Build a Caulfield-style "to City" departure. */
     private fun cityDeparture(routeId: Int, runRef: String, at: String) =
         DepartureMother.aDeparture()
