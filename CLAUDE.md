@@ -60,6 +60,10 @@ Data Layer      :core:data             Repository interfaces + impls (SSOT)
 
 Material 3 with dynamic colour on Android 12+. Below that, fall back to a hand-tuned palette borrowed from ReadYou (`MaterialYouStandard.kt` and palette extraction code, Apache 2.0 compatible) so non-dynamic-colour devices feel intentional. The theme is owned by `:core:designsystem` and exposed as `OpenPtvTheme { content() }`.
 
+## UI conventions
+
+- **Text overflow in columnar (`Row`-based) layouts.** Be deliberate about how long strings behave — this has bitten us more than once (e.g. issue #171, where a long V/Line line name collapsed sibling columns into one-character-per-line vertical text). A `Text`/badge with no width bound grows on the X axis and starves its `Row` siblings of horizontal space. **Rule of thumb: prefer overflowing *down* (Y) over *out* (X), bounded at a specific limit.** Concretely: cap the element's width (`Modifier.widthIn(max = …)`), let it wrap by word (`softWrap = true`), and bound the wrap with `maxLines` + `TextOverflow.Ellipsis`. Give the column that should keep its space a `weight(…)`. When adding any new `Row` with variable-length text (route names, destinations, suburbs), test it against the longest real value, not a short placeholder — V/Line route names ("Bairnsdale - Melbourne via Sale & Traralgon") are the canonical stress case.
+
 ## PTV Timetable API (reference & troubleshooting)
 
 - **Authoritative spec**: `docs/ptv-timetable-api-v3-swagger.json` — the live v3 Swagger pulled from `https://timetableapi.ptv.vic.gov.au/swagger/docs/v3`. Use this, not third-party docs. **Only v3 exists**: the v2 API is decommissioned — PTV's edge load balancer (`awselb/2.0`) returns `403 Forbidden` to correctly-signed v2 requests, so there is no v2 fallback for data v3 omits.
