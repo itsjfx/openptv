@@ -1352,9 +1352,11 @@ class NearbyViewModelTest {
     // `focusOn(coordinates)` is the one-shot entry the stop-detail "show on map" action calls
     // via the `AppNavKey.Home(focusLat, focusLon)` route (issue #154). It re-centres the camera at
     // [FOCUS_ZOOM], disengages follow-me, and schedules a fresh fetch for the new viewport.
-    // The screen calls it once per entry via a `LaunchedEffect` keyed on the focus pair, so the
-    // ViewModel itself doesn't need to guard against multiple calls — each call honours the
-    // most recent coordinate.
+    // The screen calls it from a `LaunchedEffect` keyed on the focus pair. A configuration change
+    // keys identically and doesn't re-fire, but a bottom-nav tab switch recomposes NearbyRoute and
+    // re-fires it with the same sticky focus args — so the ViewModel guards on `consumedFocus`
+    // (issue #180): the first call to a coordinate is honoured, repeats are no-ops so the user's
+    // subsequent pan / follow-me survives a return to the tab.
 
     @Test
     fun `focusOn re-centres camera on the coordinate at street zoom and disengages follow-me`() =
@@ -1677,6 +1679,102 @@ class NearbyViewModelTest {
 
             val loaded = viewModel.uiState.value as NearbyUiState.Loaded
             assertThat(loaded.camera.centre).isEqualTo(panned)
+        }
+
+    // -------------------- forget focus on tab return (issue #180) --------------------
+    //
+    // The "show on map" stop coordinate is baked into the sticky `AppNavKey.Home` focus args, and
+    // the screen re-fires `focusOn` from a `LaunchedEffect` whenever `NearbyRoute` (re)composes. A
+    // bottom-nav tab switch (Nearby → Favourites → Nearby) disposes and recomposes the route, so
+    // the effect runs again with the same coordinate. The VM survives the tab switch (it's scoped
+    // to the Home nav entry), so it guards on `consumedFocus`: the camera must stay where the user
+    // left it rather than snapping back to the stop.
+
+    @Test
+    fun `focusOn ignores a repeat to the same coordinate after a pan — issue 180`() =
+        runTest(dispatcher) {
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            // Arrive on the map framed on a stop ("show on map").
+            val stop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(stop)
+            advanceUntilIdle()
+            // Post-animation idle settles the camera on the stop and clears the programmatic guard.
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = stop, zoom = NearbyViewModel.FOCUS_ZOOM))
+            advanceUntilIdle()
+
+            // User pans the map elsewhere.
+            val panned = Coordinates(lat = -37.8500, lng = 145.0000)
+            viewModel.onCameraMoveStarted(CameraMoveReason.USER_GESTURE)
+            viewModel.onCameraIdle(OpenPtvCameraState(centre = panned, zoom = 13.0))
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre).isEqualTo(panned)
+
+            // Tab switch back to Nearby recomposes NearbyRoute → the keyed LaunchedEffect re-fires
+            // focusOn with the same (still-sticky) focus coordinate. It MUST be a no-op so the
+            // camera stays on the panned viewport rather than snapping back to the stop.
+            viewModel.focusOn(stop)
+            advanceUntilIdle()
+
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre).isEqualTo(panned)
+        }
+
+    @Test
+    fun `focusOn ignores a repeat to the same coordinate after follow-me re-engaged — issue 180`() =
+        runTest(dispatcher) {
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val stop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(stop)
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).isFollowingUser).isFalse()
+
+            // User taps the GPS FAB — camera recentres on their fix, follow-me re-engages.
+            viewModel.onFollowMeClicked()
+            advanceUntilIdle()
+            val afterFollow = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(afterFollow.isFollowingUser).isTrue()
+            assertThat(afterFollow.camera.centre).isEqualTo(flinders)
+
+            // Return to the tab → focusOn re-fires for the stop. The issue's "return to following
+            // GPS if GPS was tapped": follow-me stays on and the camera stays on the user's fix.
+            viewModel.focusOn(stop)
+            advanceUntilIdle()
+
+            val loaded = viewModel.uiState.value as NearbyUiState.Loaded
+            assertThat(loaded.isFollowingUser).isTrue()
+            assertThat(loaded.camera.centre).isEqualTo(flinders)
+        }
+
+    @Test
+    fun `focusOn still honours a genuinely different coordinate — issue 180`() =
+        runTest(dispatcher) {
+            // The guard is per-coordinate, not "focus once ever": a new stop (distinct coordinate,
+            // which in production arrives via a fresh Home entry / fresh VM) must still re-centre.
+            val flinders = CoordinatesMother.flindersStreet().build()
+            locationProvider.seed(flinders)
+            val viewModel = newViewModel()
+            viewModel.onPermissionResult(granted = true)
+            advanceUntilIdle()
+
+            val firstStop = Coordinates(lat = -37.8233, lng = 144.9913)
+            viewModel.focusOn(firstStop)
+            advanceUntilIdle()
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre).isEqualTo(firstStop)
+
+            val secondStop = Coordinates(lat = -37.7964, lng = 144.9612)
+            viewModel.focusOn(secondStop)
+            advanceUntilIdle()
+
+            assertThat((viewModel.uiState.value as NearbyUiState.Loaded).camera.centre).isEqualTo(secondStop)
         }
 
     @Test
