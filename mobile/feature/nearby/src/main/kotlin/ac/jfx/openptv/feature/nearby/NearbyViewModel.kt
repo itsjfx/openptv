@@ -155,6 +155,24 @@ class NearbyViewModel
         private var pendingProgrammaticCenter: Coordinates? = null
 
         /**
+         * The focus coordinate already applied this ViewModel lifetime (issue #180). The "show on
+         * map" action bakes the stop's `(lat, lon)` into the sticky `AppNavKey.Home` focus args,
+         * and the screen re-fires [focusOn] from a `LaunchedEffect` every time `NearbyRoute`
+         * (re)composes. A configuration change keys identically and doesn't re-fire — but leaving
+         * the Nearby tab for Favourites and coming back *disposes and recomposes* `NearbyRoute`,
+         * so the effect runs again with the same (unchanged) focus args. Re-applying the focus
+         * would snap the camera back onto the stop, discarding any pan the user has made or the
+         * follow-me they re-engaged via the GPS FAB — the bug in #180.
+         *
+         * We record the coordinate the first time we apply it and make a repeat [focusOn] with the
+         * same coordinate a no-op, so a return to the tab keeps the user where they left off (or
+         * following their location). A genuinely new stop arrives via a *fresh* `Home` entry
+         * (`clear()` + `add()` in the nav graph) and therefore a fresh ViewModel with this slot
+         * back at `null`, so it still focuses as expected.
+         */
+        private var consumedFocus: Coordinates? = null
+
+        /**
          * LRU cache of every stop the user has fetched this session. Solves the disappear/reappear
          * problem: panning into a region we've fetched before keeps those pins on-screen
          * immediately, instead of dropping them until the next fetch lands.
@@ -535,6 +553,15 @@ class NearbyViewModel
          * a configuration change (rotation, dark-mode flip) doesn't re-fire the focus and reset
          * the camera if the user has since panned away.
          *
+         * **Forget the focus on tab return (issue #180).** A configuration change keeps the same
+         * composition, but switching to another bottom-nav tab and back *disposes and recomposes*
+         * `NearbyRoute`, so the keyed `LaunchedEffect` re-fires with the same (still-sticky) focus
+         * args and would re-snap the camera onto the stop — discarding the pan or follow-me the
+         * user did after they first arrived. We guard on [consumedFocus]: once this coordinate has
+         * been applied, a repeat call is a no-op, so the return lands on wherever the user left the
+         * map (or following their location if they tapped the GPS FAB). A new stop comes through a
+         * fresh `Home` entry / fresh ViewModel, so it isn't suppressed.
+         *
          * **PermissionUnasked race fix (PR #139 follow-up).** When the user navigates in from
          * stop-detail's "show on map", the screen's permission-resolve `LaunchedEffect` and the
          * focus `LaunchedEffect` fire on the same dispatcher tick. The focus one usually wins
@@ -547,6 +574,11 @@ class NearbyViewModel
          * stop, no second hop required.
          */
         fun focusOn(coordinates: Coordinates) {
+            // Issue #180: the screen re-fires this on every return to the Nearby tab (the Home
+            // focus args are sticky and a tab switch recomposes NearbyRoute). Once we've framed
+            // this coordinate, ignore repeats so the user's subsequent pan / follow-me survives.
+            if (coordinates == consumedFocus) return
+            consumedFocus = coordinates
             val camera = OpenPtvCameraState(centre = coordinates, zoom = FOCUS_ZOOM)
             val filter = currentFilter()
             when (val current = _uiState.value) {
