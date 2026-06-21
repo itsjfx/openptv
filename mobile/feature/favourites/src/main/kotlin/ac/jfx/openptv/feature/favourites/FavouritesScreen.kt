@@ -408,7 +408,7 @@ private fun FavouriteRowContent(
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
                         shape = RoundedCornerShape(4.dp),
-                        modifier = Modifier.widthIn(max = FAVOURITE_BADGE_MAX_WIDTH),
+                        modifier = Modifier.widthIn(max = FavouriteBadgeMaxWidth),
                     ) {
                         Text(
                             text = liveBadge,
@@ -617,7 +617,7 @@ internal fun FavouriteKey.asLazyListKey(): String = "$stopId|$destinationKey"
 private const val REORDER_THRESHOLD_PX: Float = 80f
 
 // Issue #171: keep the favourite row's route badge from growing unbounded on long V/Line names.
-private val FAVOURITE_BADGE_MAX_WIDTH = 140.dp
+private val FavouriteBadgeMaxWidth = 140.dp
 
 internal const val TestTagRoot: String = "favourites-root"
 internal const val TestTagEmpty: String = "favourites-empty"
