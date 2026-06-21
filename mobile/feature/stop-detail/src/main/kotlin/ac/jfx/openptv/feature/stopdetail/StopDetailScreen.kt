@@ -673,6 +673,27 @@ private fun DepartureRow(
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
+            if (departure.hasDisruption) {
+                // Issue #177: a compact ⚠ glyph replaces the old "Disruption affects this route"
+                // text button — tapping it opens the bottom sheet with this run's disruption(s).
+                // Sits just left of the time so the disruption reads as part of "when is it / is it
+                // ok". Unicode glyph rather than a Material icon keeps this module off the
+                // `compose-material-icons-extended` artifact (same trade as 🗺 / ★ elsewhere).
+                val description = stringResource(R.string.feature_stop_detail_disruption_show)
+                Text(
+                    text = stringResource(R.string.feature_stop_detail_disruption_icon),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier =
+                        Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .clickable(onClick = onShowDisruptions)
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .semantics { contentDescription = description }
+                            .testTag(TestTagDisruptionFlag),
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+            }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
                     text = relative,
@@ -698,41 +719,15 @@ private fun DepartureRow(
         }
         // Issue #122: drop the "no platform info" placeholder when PTV doesn't return a platform
         // for the run — the line was empty noise on tram/bus rows where platform data never exists.
-        // Disruption affordance still renders on its own if the platform line is suppressed.
+        // The disruption ⚠ now lives inline next to the time (above), so this line is platform-only.
         val platform = departure.platform
-        if (platform != null || departure.hasDisruption) {
+        if (platform != null) {
             Spacer(modifier = Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (platform != null) {
-                    Text(
-                        text = stringResource(R.string.feature_stop_detail_platform, platform.value),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.testTag(TestTagPlatform),
-                    )
-                }
-                if (departure.hasDisruption) {
-                    if (platform != null) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-                    // Issue #177: a compact ⚠ glyph replaces the old "Disruption affects this route"
-                    // text button — tapping it opens the bottom sheet with this run's disruption(s).
-                    // Unicode glyph rather than a Material icon keeps this module off the
-                    // `compose-material-icons-extended` artifact (same trade as 🗺 / ★ elsewhere).
-                    val description = stringResource(R.string.feature_stop_detail_disruption_show)
-                    Text(
-                        text = stringResource(R.string.feature_stop_detail_disruption_icon),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier =
-                            Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable(onClick = onShowDisruptions)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                                .semantics { contentDescription = description }
-                                .testTag(TestTagDisruptionFlag),
-                    )
-                }
-            }
+            Text(
+                text = stringResource(R.string.feature_stop_detail_platform, platform.value),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.testTag(TestTagPlatform),
+            )
         }
     }
 }
