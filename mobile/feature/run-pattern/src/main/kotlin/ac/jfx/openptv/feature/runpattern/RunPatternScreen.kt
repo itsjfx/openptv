@@ -46,6 +46,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -288,26 +289,33 @@ private fun PatternStopRow(
         )
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stop.stopName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.Medium,
-                    color = contentColor,
-                )
-                if (row.isOrigin) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(4.dp),
-                        modifier = Modifier.testTag(TestTagThisStop),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.feature_run_pattern_this_stop),
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
-                    }
+            Text(
+                text = stop.stopName,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.Medium,
+                color = contentColor,
+                // Names overflow *down*, bounded at 2 lines + ellipsis, rather than *out*
+                // (CLAUDE.md UI conventions).
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (row.isOrigin) {
+                // The "This stop" chip sits on its own line, left-aligned under the name, so a long
+                // wrapped name never crowds it and it always reads as belonging to this stop.
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.testTag(TestTagThisStop),
+                ) {
+                    Text(
+                        text = stringResource(R.string.feature_run_pattern_this_stop),
+                        style = MaterialTheme.typography.labelSmall,
+                        // Keep the chip on one line — it should never wrap to "This / stop".
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
                 }
             }
             Text(
