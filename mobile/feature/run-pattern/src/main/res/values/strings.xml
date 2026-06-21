@@ -28,4 +28,8 @@
     <!-- Stop row content description. Slots: stop name, relative time phrase ("in 3 minutes",
          "having already departed"). -->
     <string name="feature_run_pattern_row_content_description">%1$s, departing %2$s</string>
+    <!-- Collapsible route-line map (issue #187). -->
+    <string name="feature_run_pattern_map_show">Show map</string>
+    <string name="feature_run_pattern_map_hide">Hide map</string>
+    <string name="feature_run_pattern_map_content_description">Map of the route with the service\'s stops drawn along it</string>
 </resources>

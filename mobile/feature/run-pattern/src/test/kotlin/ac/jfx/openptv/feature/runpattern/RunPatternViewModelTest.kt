@@ -3,6 +3,7 @@ package ac.jfx.openptv.feature.runpattern
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.data.test.FakeRunPatternRepository
 import ac.jfx.openptv.core.domain.ObserveRunPatternUseCase
+import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.testing.RunPatternMother
@@ -252,6 +253,83 @@ class RunPatternViewModelTest {
             advanceUntilIdle()
 
             assertThat(vm.uiState.value.pattern).isEqualTo(PatternState.Loading)
+        }
+
+    // ---------- Map data projection (issue #187) ----------
+
+    @Test
+    fun `loaded state builds map data from geopath and stop coordinates`() =
+        runTest(dispatcher.scheduler) {
+            val vm = viewModel(fromStopId = 1071)
+            vm.startObserving()
+            advanceUntilIdle()
+
+            val pattern =
+                RunPatternMother.aRunPattern()
+                    .withGeopath(
+                        listOf(listOf(Coordinates(-37.82, 145.05), Coordinates(-37.83, 145.06))),
+                    )
+                    .withStops(
+                        listOf(
+                            RunPatternStopMother.aPastPatternStop()
+                                .withCoordinates(Coordinates(-37.81, 145.00))
+                                .build(),
+                            RunPatternStopMother.aPatternStop()
+                                .withStopId(1071)
+                                .withCoordinates(Coordinates(-37.818, 144.967))
+                                .build(),
+                        ),
+                    )
+                    .build()
+            repository.emitSuccess(pattern)
+            advanceUntilIdle()
+
+            val loaded = vm.uiState.value.pattern as PatternState.Loaded
+            val mapData = loaded.mapData!!
+            assertThat(mapData.hasGeometry).isTrue()
+            assertThat(mapData.polyline).hasSize(1)
+            assertThat(mapData.markers).hasSize(2)
+            // Exactly the origin (fromStopId 1071) marker carries the you-are-here flag.
+            assertThat(mapData.markers.count { it.isOrigin }).isEqualTo(1)
+            assertThat(mapData.markers.single { it.isOrigin }.coordinates)
+                .isEqualTo(Coordinates(-37.818, 144.967))
+            // The past stop's marker is dimmed.
+            assertThat(mapData.markers.count { it.hasDeparted }).isEqualTo(1)
+            assertThat(mapData.bounds).isNotNull()
+        }
+
+    @Test
+    fun `map data is null when no geopath and no stop coordinates`() =
+        runTest(dispatcher.scheduler) {
+            val vm = viewModel()
+            vm.startObserving()
+            advanceUntilIdle()
+
+            // Default mother: empty geopath, stops without coordinates.
+            repository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+
+            val loaded = vm.uiState.value.pattern as PatternState.Loaded
+            assertThat(loaded.mapData).isNull()
+        }
+
+    @Test
+    fun `map data has geometry from geopath alone when stops lack coordinates`() =
+        runTest(dispatcher.scheduler) {
+            val vm = viewModel()
+            vm.startObserving()
+            advanceUntilIdle()
+
+            repository.emitSuccess(
+                RunPatternMother.aRunPattern()
+                    .withGeopath(listOf(listOf(Coordinates(-37.82, 145.05), Coordinates(-37.83, 145.06))))
+                    .build(),
+            )
+            advanceUntilIdle()
+
+            val loaded = vm.uiState.value.pattern as PatternState.Loaded
+            assertThat(loaded.mapData?.hasGeometry).isTrue()
+            assertThat(loaded.mapData?.markers).isEmpty()
         }
 
     private class FakeClock(private val instant: Instant) : Clock {

@@ -31,6 +31,14 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.datetime)
 
+    // MapLibre for the collapsible route-geopath map (issue #187). The SDK singleton is
+    // initialised process-wide in `OpenPtvApplication.onCreate` via `:feature:nearby`'s
+    // initialiser, and the 50 MiB tile cache is wired there too — this module just draws into the
+    // already-initialised SDK with a self-contained read-only `AndroidView` map. Same raw-SDK +
+    // `AndroidView` approach `:feature:nearby` uses (see its build.gradle for the artifact
+    // rationale).
+    implementation(libs.maplibre.android.sdk)
+
     // Retrofit's `HttpException` is what the ViewModel pattern-matches on when mapping errors to
     // user-facing strings (same compromise as `:feature:stop-detail`).
     implementation(libs.retrofit)

@@ -1,5 +1,6 @@
 package ac.jfx.openptv.core.testing
 
+import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.PlatformNumber
 import ac.jfx.openptv.core.model.Route
 import ac.jfx.openptv.core.model.RouteId
@@ -30,6 +31,8 @@ class RunPatternMother private constructor() {
                 routeType = RouteType.Train,
             )
         private var directionName: String = DEFAULT_DIRECTION_NAME
+        private var directionId: Int? = DEFAULT_DIRECTION_ID
+        private var geopath: List<List<Coordinates>> = emptyList()
         private var stops: List<RunPatternStop> =
             listOf(
                 RunPatternStopMother.aPastPatternStop().build(),
@@ -46,6 +49,10 @@ class RunPatternMother private constructor() {
 
         fun withDirectionName(name: String) = apply { this.directionName = name }
 
+        fun withDirectionId(id: Int?) = apply { this.directionId = id }
+
+        fun withGeopath(geopath: List<List<Coordinates>>) = apply { this.geopath = geopath }
+
         fun withStops(stops: List<RunPatternStop>) = apply { this.stops = stops }
 
         fun build(): RunPattern =
@@ -53,12 +60,15 @@ class RunPatternMother private constructor() {
                 route = route,
                 directionName = directionName,
                 stops = stops,
+                directionId = directionId,
+                geopath = geopath,
             )
 
         private companion object {
             private const val DEFAULT_ROUTE_ID = 5
             private const val DEFAULT_ROUTE_NAME = "Lilydale"
             private const val DEFAULT_DIRECTION_NAME = "Flinders Street"
+            private const val DEFAULT_DIRECTION_ID = 1
             private const val DEFAULT_THIRD_STOP_ID = 1071
         }
     }
@@ -90,6 +100,7 @@ class RunPatternStopMother private constructor() {
         private var scheduledDepartureUtc: Instant = DEFAULT_SCHEDULED
         private var estimatedDepartureUtc: Instant? = DEFAULT_ESTIMATED
         private var platform: String? = DEFAULT_PLATFORM
+        private var coordinates: Coordinates? = null
 
         fun withStopId(id: Int) = apply { this.stopId = id }
 
@@ -103,6 +114,8 @@ class RunPatternStopMother private constructor() {
 
         fun withPlatform(value: String?) = apply { this.platform = value }
 
+        fun withCoordinates(value: Coordinates?) = apply { this.coordinates = value }
+
         fun build(): RunPatternStop =
             RunPatternStop(
                 stopId = StopId(stopId),
@@ -111,6 +124,7 @@ class RunPatternStopMother private constructor() {
                 scheduledDepartureUtc = scheduledDepartureUtc,
                 estimatedDepartureUtc = estimatedDepartureUtc,
                 platform = platform?.let(::PlatformNumber),
+                coordinates = coordinates,
             )
 
         private companion object {

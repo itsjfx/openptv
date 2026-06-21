@@ -1,11 +1,18 @@
 package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.model.Coordinates
+import ac.jfx.openptv.core.model.RouteId
+import ac.jfx.openptv.core.model.RouteShape
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunPattern
 import ac.jfx.openptv.core.model.RunRef
+import ac.jfx.openptv.core.model.StopId
+import ac.jfx.openptv.core.network.RouteShapeDataSource
 import ac.jfx.openptv.core.network.RunPatternDataSource
+import ac.jfx.openptv.core.testing.RouteShapeMother
 import ac.jfx.openptv.core.testing.RunPatternMother
+import ac.jfx.openptv.core.testing.RunPatternStopMother
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -32,7 +39,7 @@ class RunPatternRepositoryImplTest {
     fun `observe emits Loading then Success on first tick`() =
         runTest {
             val expected = RunPatternMother.aRunPattern().build()
-            val repo = RunPatternRepositoryImpl(FakeDataSource(returning = expected))
+            val repo = RunPatternRepositoryImpl(FakeDataSource(returning = expected), FakeRouteShapeDataSource())
 
             repo.observeRunPattern(runRef, RouteType.Train).test {
                 assertThat(awaitItem()).isEqualTo(Result.Loading)
@@ -47,7 +54,7 @@ class RunPatternRepositoryImplTest {
     fun `observe re-emits on 30 second tick`() =
         runTest {
             val ds = FakeDataSource(returning = RunPatternMother.aRunPattern().build())
-            val repo = RunPatternRepositoryImpl(ds)
+            val repo = RunPatternRepositoryImpl(ds, FakeRouteShapeDataSource())
 
             repo.observeRunPattern(runRef, RouteType.Train).test {
                 assertThat(awaitItem()).isEqualTo(Result.Loading)
@@ -72,7 +79,7 @@ class RunPatternRepositoryImplTest {
     fun `observe stops polling when collector cancels`() =
         runTest {
             val ds = FakeDataSource(returning = RunPatternMother.aRunPattern().build())
-            val repo = RunPatternRepositoryImpl(ds)
+            val repo = RunPatternRepositoryImpl(ds, FakeRouteShapeDataSource())
 
             val job: Job =
                 repo.observeRunPattern(runRef, RouteType.Train)
@@ -105,7 +112,7 @@ class RunPatternRepositoryImplTest {
                             FakeOutcome.Returning(good),
                         ),
                 )
-            val repo = RunPatternRepositoryImpl(ds)
+            val repo = RunPatternRepositoryImpl(ds, FakeRouteShapeDataSource())
 
             repo.observeRunPattern(runRef, RouteType.Train).test {
                 assertThat(awaitItem()).isEqualTo(Result.Loading)
@@ -131,7 +138,7 @@ class RunPatternRepositoryImplTest {
     fun `observe passes runRef and routeType to the data source`() =
         runTest {
             val ds = FakeDataSource(returning = RunPatternMother.aRunPattern().build())
-            val repo = RunPatternRepositoryImpl(ds)
+            val repo = RunPatternRepositoryImpl(ds, FakeRouteShapeDataSource())
 
             repo.observeRunPattern(runRef, RouteType.Tram).test {
                 awaitItem()
@@ -143,7 +150,120 @@ class RunPatternRepositoryImplTest {
             assertThat(ds.lastRouteType).isEqualTo(RouteType.Tram)
         }
 
+    // ---------- Geopath enrichment (issue #187) ----------
+
+    @Test
+    fun `enriches pattern with geopath and stop coordinates for the matching direction`() =
+        runTest {
+            // Pattern with one stop whose id the shape provides coordinates for, in direction 1.
+            val stop = RunPatternStopMother.aPatternStop().withStopId(1071).build()
+            val pattern =
+                RunPatternMother.aRunPattern()
+                    .withStops(listOf(stop))
+                    .withDirectionId(1)
+                    .build()
+            val shape =
+                RouteShapeMother.aRouteShape()
+                    .withGeopath(
+                        mapOf(
+                            1 to listOf(listOf(Coordinates(-37.82, 145.05), Coordinates(-37.83, 145.06))),
+                        ),
+                    )
+                    .withStopCoordinates(mapOf(StopId(1071) to Coordinates(-37.818, 144.967)))
+                    .build()
+            val repo = RunPatternRepositoryImpl(FakeDataSource(returning = pattern), FakeRouteShapeDataSource(shape))
+
+            repo.observeRunPattern(runRef, RouteType.Train).test {
+                assertThat(awaitItem()).isEqualTo(Result.Loading)
+                val enriched = (awaitItem() as Result.Success).data
+                assertThat(enriched.geopath).hasSize(1)
+                assertThat(enriched.geopath.first()).hasSize(2)
+                assertThat(enriched.stops.first().coordinates)
+                    .isEqualTo(Coordinates(-37.818, 144.967))
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `degrades gracefully when route shape fetch fails`() =
+        runTest {
+            val pattern = RunPatternMother.aRunPattern().build()
+            val repo =
+                RunPatternRepositoryImpl(
+                    FakeDataSource(returning = pattern),
+                    FakeRouteShapeDataSource(throwing = IOException("no shape")),
+                )
+
+            repo.observeRunPattern(runRef, RouteType.Train).test {
+                assertThat(awaitItem()).isEqualTo(Result.Loading)
+                val result = awaitItem()
+                // The pattern still succeeds; the geopath is just empty.
+                assertThat(result).isInstanceOf(Result.Success::class.java)
+                assertThat((result as Result.Success).data.geopath).isEmpty()
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `skips route shape fetch when run has no route id`() =
+        runTest {
+            val pattern = RunPatternMother.aRunPatternWithoutRoute().build()
+            val shapeDs = FakeRouteShapeDataSource()
+            val repo = RunPatternRepositoryImpl(FakeDataSource(returning = pattern), shapeDs)
+
+            repo.observeRunPattern(runRef, RouteType.Train).test {
+                assertThat(awaitItem()).isEqualTo(Result.Loading)
+                assertThat(awaitItem()).isInstanceOf(Result.Success::class.java)
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            assertThat(shapeDs.callCount.get()).isEqualTo(0)
+        }
+
+    @Test
+    fun `fetches route shape once and reuses it across polls`() =
+        runTest {
+            val stop = RunPatternStopMother.aPatternStop().withStopId(1071).build()
+            val pattern =
+                RunPatternMother.aRunPattern().withStops(listOf(stop)).withDirectionId(1).build()
+            val shapeDs =
+                FakeRouteShapeDataSource(
+                    RouteShapeMother.aRouteShape()
+                        .withStopCoordinates(mapOf(StopId(1071) to Coordinates(-37.8, 144.9)))
+                        .build(),
+                )
+            val repo = RunPatternRepositoryImpl(FakeDataSource(returning = pattern), shapeDs)
+
+            repo.observeRunPattern(runRef, RouteType.Train).test {
+                awaitItem() // Loading
+                awaitItem() // Success (first poll)
+                advanceTimeBy(30_001)
+                awaitItem() // Loading
+                awaitItem() // Success (second poll)
+                cancelAndIgnoreRemainingEvents()
+            }
+
+            // Geometry is static between polls — fetched exactly once.
+            assertThat(shapeDs.callCount.get()).isEqualTo(1)
+        }
+
     // ---------- Inline fakes ----------
+
+    private class FakeRouteShapeDataSource(
+        private val returning: RouteShape = RouteShape.EMPTY,
+        private val throwing: Throwable? = null,
+    ) : RouteShapeDataSource {
+        val callCount: AtomicInteger = AtomicInteger(0)
+
+        override suspend fun getRouteShape(
+            routeId: RouteId,
+            routeType: RouteType,
+        ): RouteShape {
+            callCount.incrementAndGet()
+            throwing?.let { throw it }
+            return returning
+        }
+    }
 
     private sealed class FakeOutcome {
         data class Returning(val pattern: RunPattern) : FakeOutcome()
