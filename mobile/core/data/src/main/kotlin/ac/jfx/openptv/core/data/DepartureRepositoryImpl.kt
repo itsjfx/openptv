@@ -62,13 +62,14 @@ internal class DepartureRepositoryImpl
         override suspend fun getDepartures(
             stopId: StopId,
             routeType: RouteType,
+            at: Instant?,
         ): Result<DeparturesAtStop> =
             try {
                 Result.Success(
                     dataSource.getDepartures(
                         stopId = stopId,
                         routeType = routeType,
-                        dateUtc = clock.now() - NOW_GRACE,
+                        dateUtc = anchorFor(at),
                         // PTV quirk discovered while testing issue #86: `look_backwards=false`
                         // only excludes already-departed entries when `max_results` is also set.
                         // Without it, the response is still anchored at start-of-day. The
@@ -88,11 +89,12 @@ internal class DepartureRepositoryImpl
         override fun observeDepartures(
             stopId: StopId,
             routeType: RouteType,
+            at: Instant?,
         ): Flow<Result<List<Departure>>> =
             flow {
                 while (true) {
                     emit(Result.Loading)
-                    emit(fetchOnce(stopId, routeType))
+                    emit(fetchOnce(stopId, routeType, at))
                     delay(POLL_INTERVAL)
                 }
             }
@@ -124,13 +126,14 @@ internal class DepartureRepositoryImpl
         private suspend fun fetchOnce(
             stopId: StopId,
             routeType: RouteType,
+            at: Instant?,
         ): Result<List<Departure>> =
             try {
                 Result.Success(
                     dataSource.getDepartures(
                         stopId = stopId,
                         routeType = routeType,
-                        dateUtc = clock.now() - NOW_GRACE,
+                        dateUtc = anchorFor(at),
                         maxResults = INITIAL_PAGE_SIZE_PER_ROUTE,
                         lookBackwards = false,
                     ).departures,
@@ -140,6 +143,15 @@ internal class DepartureRepositoryImpl
             } catch (t: Throwable) {
                 Result.Error(t)
             }
+
+        /**
+         * Resolve the `date_utc` anchor for a fetch. A custom [at] (issue #182) is passed through
+         * verbatim — the user picked an exact instant to look around, and `look_backwards=false`
+         * already trims anything earlier than it, so no grace subtraction applies. The live "now"
+         * path ([at] == null) keeps the 2-minute grace so a row whose scheduled time just slipped
+         * into the past but is still tracking upcoming survives PTV's server-side filter.
+         */
+        private fun anchorFor(at: Instant?): Instant = at ?: (clock.now() - NOW_GRACE)
 
         private companion object {
             private val POLL_INTERVAL: Duration = 30.seconds

@@ -38,6 +38,17 @@ class FakeDepartureRepository
         val observedKeys: MutableList<Pair<StopId, RouteType>> = mutableListOf()
         val oneShotKeys: MutableList<Pair<StopId, RouteType>> = mutableListOf()
 
+        /**
+         * Time anchors (issue #182) seen by the last `getDepartures` / `observeDepartures` call.
+         * `null` means the caller asked for live "now"; a non-null instant means a custom time was
+         * threaded through. Feature tests assert these to prove the selected-time state reaches the
+         * repository seam without clobbering.
+         */
+        var lastOneShotAt: Instant? = null
+            private set
+        var lastObservedAt: Instant? = null
+            private set
+
         // -------- one-shot --------
 
         fun enqueueResult(result: Result<DeparturesAtStop>) {
@@ -67,8 +78,10 @@ class FakeDepartureRepository
         override suspend fun getDepartures(
             stopId: StopId,
             routeType: RouteType,
+            at: Instant?,
         ): Result<DeparturesAtStop> {
             oneShotKeys += stopId to routeType
+            lastOneShotAt = at
             return oneShotQueue.removeFirstOrNull()
                 ?: error("FakeDepartureRepository: no result enqueued for ($stopId, $routeType)")
         }
@@ -95,8 +108,10 @@ class FakeDepartureRepository
         override fun observeDepartures(
             stopId: StopId,
             routeType: RouteType,
+            at: Instant?,
         ): Flow<Result<List<Departure>>> {
             observedKeys += stopId to routeType
+            lastObservedAt = at
             return observedFlow.asSharedFlow()
         }
 

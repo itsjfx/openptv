@@ -6,6 +6,7 @@ import ac.jfx.openptv.core.model.Departure
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.StopId
 import kotlinx.coroutines.flow.Flow
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 
 /**
@@ -19,6 +20,9 @@ import javax.inject.Inject
  * Pure pass-through today; lives behind a use case so future ordering / filtering (e.g.
  * "hide departed runs older than two minutes", "promote starred routes to the top") slots in
  * without touching the ViewModel.
+ *
+ * [at] (issue #182) optionally anchors the stream at a chosen instant instead of live "now". The
+ * ViewModel passes it through verbatim; `null` keeps the live-polling behaviour.
  */
 class ObserveDeparturesUseCase
     @Inject
@@ -28,5 +32,6 @@ class ObserveDeparturesUseCase
         operator fun invoke(
             stopId: StopId,
             routeType: RouteType,
-        ): Flow<Result<List<Departure>>> = repository.observeDepartures(stopId, routeType)
+            at: Instant? = null,
+        ): Flow<Result<List<Departure>>> = repository.observeDepartures(stopId, routeType, at)
     }
