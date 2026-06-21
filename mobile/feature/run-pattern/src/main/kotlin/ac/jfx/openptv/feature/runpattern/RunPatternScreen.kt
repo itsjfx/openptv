@@ -6,6 +6,8 @@ import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.StopId
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -35,6 +38,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -102,17 +107,25 @@ internal fun RunPatternScreenContent(
 ) {
     val listState = rememberLazyListState()
 
+    // Collapsible route map (issue #187). Expanded by default — the spatial overview is the point
+    // of the feature — and persisted across config changes so a rotate doesn't re-expand it after
+    // the user collapsed it.
+    var mapExpanded by rememberSaveable { mutableStateOf(true) }
+    val loaded = uiState.pattern as? PatternState.Loaded
+    val hasMap = loaded?.mapData?.hasGeometry == true
+
     // One-shot auto-scroll to the first upcoming stop (issue #132: "full pattern, scrolled to
     // the next upcoming stop on first render"). `rememberSaveable` so a configuration change
     // doesn't yank the user back if they've scrolled elsewhere.
     var hasAutoScrolled by rememberSaveable { mutableStateOf(false) }
-    val loaded = uiState.pattern as? PatternState.Loaded
     LaunchedEffect(loaded != null) {
         if (!hasAutoScrolled && loaded != null) {
-            // +1 because the list's item 0 is the as-of row; only scroll at all when some stops
-            // have already been served, so a run that hasn't started yet stays at the top.
+            // The list's leading items are the optional map section then the as-of row, so the
+            // first stop sits at that offset. Only scroll when some stops have already been served,
+            // so a run that hasn't started yet stays at the top (map visible).
+            val leadingItems = (if (hasMap) 1 else 0) + 1
             if (loaded.firstUpcomingIndex > 0) {
-                listState.scrollToItem(loaded.firstUpcomingIndex + 1)
+                listState.scrollToItem(loaded.firstUpcomingIndex + leadingItems)
             }
             hasAutoScrolled = true
         }
@@ -168,6 +181,16 @@ internal fun RunPatternScreenContent(
                         }
                     }
                     is PatternState.Loaded -> {
+                        val mapData = pattern.mapData
+                        if (mapData != null && mapData.hasGeometry) {
+                            item(key = "map") {
+                                MapSection(
+                                    mapData = mapData,
+                                    expanded = mapExpanded,
+                                    onToggle = { mapExpanded = !mapExpanded },
+                                )
+                            }
+                        }
                         item(key = "as-of") {
                             AsOfRow(asOf = uiState.asOf)
                         }
@@ -326,6 +349,67 @@ private fun PatternStopRow(
     }
 }
 
+/**
+ * The collapsible route-map section (issue #187). A header row toggles the [RunPatternMap] open and
+ * shut; the map is mounted only while expanded so the GL surface (and the tile fetch) isn't paid
+ * for when collapsed. `isDark` is derived from the surface luminance — same heuristic the nearby
+ * screen uses to pick the OpenFreeMap style variant.
+ */
+@Composable
+private fun MapSection(
+    mapData: RunPatternMapData,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < DARK_LUMINANCE_THRESHOLD
+    Column(modifier = Modifier.fillMaxWidth().testTag(TestTagMap)) {
+        Row(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Spacer(modifier = Modifier.weight(1f))
+            TextButton(
+                onClick = onToggle,
+                modifier = Modifier.testTag(TestTagMapToggle),
+            ) {
+                Text(
+                    text =
+                        stringResource(
+                            if (expanded) {
+                                R.string.feature_run_pattern_map_hide
+                            } else {
+                                R.string.feature_run_pattern_map_show
+                            },
+                        ),
+                )
+            }
+        }
+        if (expanded) {
+            val mapDescription = stringResource(R.string.feature_run_pattern_map_content_description)
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .height(MAP_HEIGHT_DP.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .semantics { contentDescription = mapDescription },
+            ) {
+                RunPatternMap(
+                    mapData = mapData,
+                    isDark = isDark,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
 @Composable
 private fun AsOfRow(asOf: Instant?) {
     if (asOf == null) {
@@ -425,6 +509,12 @@ private fun String.toSpokenForm(): String =
 
 private const val SKELETON_ROWS = 8
 
+/** Surface luminance below this reads as a dark theme — pick the dark OpenFreeMap style. */
+private const val DARK_LUMINANCE_THRESHOLD: Float = 0.5f
+
+/** Fixed map height — tall enough to read a metro line, short enough to leave the timeline in view. */
+private const val MAP_HEIGHT_DP: Int = 240
+
 internal const val TestTagRoot: String = "run-pattern-root"
 internal const val TestTagLoading: String = "run-pattern-loading"
 internal const val TestTagEmpty: String = "run-pattern-empty"
@@ -435,3 +525,5 @@ internal const val TestTagStopRow: String = "run-pattern-stop-row"
 internal const val TestTagPastStopRow: String = "run-pattern-past-stop-row"
 internal const val TestTagThisStop: String = "run-pattern-this-stop"
 internal const val TestTagPlatform: String = "run-pattern-platform"
+internal const val TestTagMap: String = "run-pattern-map"
+internal const val TestTagMapToggle: String = "run-pattern-map-toggle"

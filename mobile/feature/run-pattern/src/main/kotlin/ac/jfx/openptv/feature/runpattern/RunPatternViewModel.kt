@@ -145,6 +145,35 @@ class RunPatternViewModel
                 directionName = directionName,
                 stops = rows,
                 firstUpcomingIndex = rows.indexOfFirst { !it.hasDeparted }.coerceAtLeast(0),
+                mapData = toMapData(rows),
+            )
+        }
+
+        /**
+         * Project the run's geometry into [RunPatternMapData] for the collapsible map (issue #187).
+         * Returns null when there's nothing to draw — no geopath *and* no stop has coordinates — so
+         * the screen drops the map section instead of showing an empty tile. Markers are built only
+         * for stops PTV gave a location for; a coordinate-less stop is silently skipped on the map
+         * (it still renders in the timeline).
+         */
+        private fun RunPattern.toMapData(rows: List<PatternStopRow>): RunPatternMapData? {
+            val markers =
+                rows.mapNotNull { row ->
+                    val coord = row.stop.coordinates ?: return@mapNotNull null
+                    RunPatternMapMarker(
+                        coordinates = coord,
+                        label = row.stop.stopName,
+                        isOrigin = row.isOrigin,
+                        hasDeparted = row.hasDeparted,
+                    )
+                }
+            val polyline = geopath
+            if (polyline.all { it.isEmpty() } && markers.isEmpty()) return null
+            return RunPatternMapData(
+                routeType = routeType,
+                polyline = polyline,
+                markers = markers,
+                bounds = RunPatternMapData.boundsOf(polyline, markers),
             )
         }
 

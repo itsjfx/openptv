@@ -32,12 +32,17 @@ sealed interface PatternState {
      * name/number (null when PTV's sideload missed the route — the title falls back to the
      * generic screen title). `firstUpcomingIndex` is where the auto-scroll lands on first render:
      * the first stop the service hasn't departed yet, clamped to 0 when every stop has passed.
+     *
+     * `mapData` carries the route line + stop markers for the collapsible map (issue #187), or null
+     * when PTV returned no geometry at all (no geopath and no stop coordinates) — in which case the
+     * screen simply omits the map section.
      */
     data class Loaded(
         val routeLabel: String?,
         val directionName: String,
         val stops: List<PatternStopRow>,
         val firstUpcomingIndex: Int,
+        val mapData: RunPatternMapData? = null,
     ) : PatternState
 
     /** A successful fetch returned zero pattern stops — stale `run_ref`, finished run. */
