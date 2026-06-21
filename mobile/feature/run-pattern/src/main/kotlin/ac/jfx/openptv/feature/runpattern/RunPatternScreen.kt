@@ -107,12 +107,13 @@ internal fun RunPatternScreenContent(
 ) {
     val listState = rememberLazyListState()
 
-    // Collapsible route map (issue #187). Expanded by default — the spatial overview is the point
-    // of the feature — and persisted across config changes so a rotate doesn't re-expand it after
-    // the user collapsed it.
+    // Pinned route map (issue #187). Always shown above the timeline so the spatial overview stays
+    // in view while the stop list scrolls beneath it; the show/hide toggle still lets the user
+    // reclaim the vertical space. `rememberSaveable` so a rotate doesn't re-expand a map the user
+    // collapsed.
     var mapExpanded by rememberSaveable { mutableStateOf(true) }
     val loaded = uiState.pattern as? PatternState.Loaded
-    val hasMap = loaded?.mapData?.hasGeometry == true
+    val mapData = loaded?.mapData?.takeIf { it.hasGeometry }
 
     // One-shot auto-scroll to the first upcoming stop (issue #132: "full pattern, scrolled to
     // the next upcoming stop on first render"). `rememberSaveable` so a configuration change
@@ -120,12 +121,11 @@ internal fun RunPatternScreenContent(
     var hasAutoScrolled by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(loaded != null) {
         if (!hasAutoScrolled && loaded != null) {
-            // The list's leading items are the optional map section then the as-of row, so the
-            // first stop sits at that offset. Only scroll when some stops have already been served,
-            // so a run that hasn't started yet stays at the top (map visible).
-            val leadingItems = (if (hasMap) 1 else 0) + 1
+            // The map is a pinned header outside the list now, so the as-of row is the only leading
+            // list item and the first stop sits one slot below it. Only scroll when some stops have
+            // already been served, so a run that hasn't started yet stays at the top.
             if (loaded.firstUpcomingIndex > 0) {
-                listState.scrollToItem(loaded.firstUpcomingIndex + leadingItems)
+                listState.scrollToItem(loaded.firstUpcomingIndex + 1)
             }
             hasAutoScrolled = true
         }
@@ -153,58 +153,60 @@ internal fun RunPatternScreenContent(
                     .padding(padding)
                     .testTag(TestTagRoot),
         ) {
-            // Every state renders inside the LazyColumn (same shape as stop-detail) so the
-            // pull-to-refresh nested-scroll gesture works from the loading / empty / error
-            // states too, not just the loaded timeline.
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                when (val pattern = uiState.pattern) {
-                    PatternState.Loading -> {
-                        item(key = "loading") {
-                            LoadingSkeleton(modifier = Modifier.testTag(TestTagLoading))
+            Column(modifier = Modifier.fillMaxSize()) {
+                // The map is a pinned header (issue #187): it stays put while the timeline scrolls
+                // beneath it. Mounted only while expanded so the GL surface isn't paid for when the
+                // user has hidden it.
+                if (mapData != null) {
+                    MapSection(
+                        mapData = mapData,
+                        expanded = mapExpanded,
+                        onToggle = { mapExpanded = !mapExpanded },
+                    )
+                }
+                // The timeline fills the rest. Every state renders inside the LazyColumn (same shape
+                // as stop-detail) so the pull-to-refresh nested-scroll gesture works from the
+                // loading / empty / error states too, not just the loaded timeline.
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                ) {
+                    when (val pattern = uiState.pattern) {
+                        PatternState.Loading -> {
+                            item(key = "loading") {
+                                LoadingSkeleton(modifier = Modifier.testTag(TestTagLoading))
+                            }
                         }
-                    }
-                    PatternState.Empty -> {
-                        item(key = "empty") {
-                            EmptyState(modifier = Modifier.testTag(TestTagEmpty))
+                        PatternState.Empty -> {
+                            item(key = "empty") {
+                                EmptyState(modifier = Modifier.testTag(TestTagEmpty))
+                            }
                         }
-                    }
-                    is PatternState.Error -> {
-                        item(key = "error") {
-                            ErrorState(
-                                reason = pattern.reason,
-                                onRetry = onRefresh,
-                                modifier = Modifier.testTag(TestTagError),
-                            )
-                        }
-                    }
-                    is PatternState.Loaded -> {
-                        val mapData = pattern.mapData
-                        if (mapData != null && mapData.hasGeometry) {
-                            item(key = "map") {
-                                MapSection(
-                                    mapData = mapData,
-                                    expanded = mapExpanded,
-                                    onToggle = { mapExpanded = !mapExpanded },
+                        is PatternState.Error -> {
+                            item(key = "error") {
+                                ErrorState(
+                                    reason = pattern.reason,
+                                    onRetry = onRefresh,
+                                    modifier = Modifier.testTag(TestTagError),
                                 )
                             }
                         }
-                        item(key = "as-of") {
-                            AsOfRow(asOf = uiState.asOf)
-                        }
-                        // A stop can legitimately repeat within one run (city-loop services), so
-                        // the row key includes the position in the pattern, which is stable for
-                        // a given run.
-                        pattern.stops.forEachIndexed { index, row ->
-                            item(key = "stop-$index-${row.stop.stopId.value}") {
-                                PatternStopRow(
-                                    row = row,
-                                    timeFormatter = timeFormatter,
-                                )
-                                if (index != pattern.stops.lastIndex) {
-                                    HorizontalDivider()
+                        is PatternState.Loaded -> {
+                            item(key = "as-of") {
+                                AsOfRow(asOf = uiState.asOf)
+                            }
+                            // A stop can legitimately repeat within one run (city-loop services), so
+                            // the row key includes the position in the pattern, which is stable for
+                            // a given run.
+                            pattern.stops.forEachIndexed { index, row ->
+                                item(key = "stop-$index-${row.stop.stopId.value}") {
+                                    PatternStopRow(
+                                        row = row,
+                                        timeFormatter = timeFormatter,
+                                    )
+                                    if (index != pattern.stops.lastIndex) {
+                                        HorizontalDivider()
+                                    }
                                 }
                             }
                         }
