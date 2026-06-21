@@ -289,36 +289,33 @@ private fun PatternStopRow(
         )
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = stop.stopName,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.Medium,
-                    color = contentColor,
-                    // Names overflow *down*, bounded at 2 lines + ellipsis, rather than *out*
-                    // (CLAUDE.md UI conventions). On the origin row `weight(1f, fill = false)` hands
-                    // the name only the leftover width so the "This stop" chip beside it keeps its
-                    // space — the name wraps to a second line instead of crushing the chip.
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = if (row.isOrigin) Modifier.weight(1f, fill = false) else Modifier,
-                )
-                if (row.isOrigin) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(4.dp),
-                        modifier = Modifier.testTag(TestTagThisStop),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.feature_run_pattern_this_stop),
-                            style = MaterialTheme.typography.labelSmall,
-                            // Keep the chip on one line — it should never wrap to "This / stop".
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
-                    }
+            Text(
+                text = stop.stopName,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.Medium,
+                color = contentColor,
+                // Names overflow *down*, bounded at 2 lines + ellipsis, rather than *out*
+                // (CLAUDE.md UI conventions).
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (row.isOrigin) {
+                // The "This stop" chip sits on its own line, left-aligned under the name, so a long
+                // wrapped name never crowds it and it always reads as belonging to this stop.
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.testTag(TestTagThisStop),
+                ) {
+                    Text(
+                        text = stringResource(R.string.feature_run_pattern_this_stop),
+                        style = MaterialTheme.typography.labelSmall,
+                        // Keep the chip on one line — it should never wrap to "This / stop".
+                        maxLines = 1,
+                        softWrap = false,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
                 }
             }
             Text(
