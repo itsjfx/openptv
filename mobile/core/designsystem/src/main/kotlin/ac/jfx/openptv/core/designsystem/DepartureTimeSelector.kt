@@ -29,7 +29,6 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.LocalTime
 import kotlinx.datetime.TimeZone
-import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.toInstant
 import kotlinx.datetime.toLocalDateTime
 
@@ -113,7 +112,11 @@ fun DepartureTimeSelector(
         val initialDate = (draftDate ?: anchor.date)
         val datePickerState =
             rememberDatePickerState(
-                initialSelectedDateMillis = initialDate.atStartOfDayIn(timeZone).toEpochMilliseconds(),
+                // Material 3's DatePicker keeps `selectedDateMillis` at UTC midnight of the chosen
+                // calendar day, so the *initial* value must also be UTC midnight — passing a
+                // local-zone midnight (which is the previous UTC day east of Greenwich) makes the
+                // picker pre-select the wrong day and mis-map subsequent taps. Build it in UTC.
+                initialSelectedDateMillis = initialDate.atUtcMidnightMillis(),
             )
         DatePickerDialog(
             onDismissRequest = { pickerStep = 0 },
@@ -184,6 +187,10 @@ fun DepartureTimeSelector(
         }
     }
 }
+
+/** UTC-midnight epoch millis for this calendar day — the unit Material 3's DatePicker speaks. */
+private fun LocalDate.atUtcMidnightMillis(): Long =
+    LocalDateTime(this, LocalTime(hour = 0, minute = 0)).toInstant(TimeZone.UTC).toEpochMilliseconds()
 
 /** "Sat 21 Jun" — compact date prefix for a non-today custom time. */
 private fun LocalDate.shortLabel(): String {
