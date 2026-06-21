@@ -27,6 +27,6 @@ internal class RetrofitStopDetailDataSource
         ): StopDetail? {
             val typeCode = routeType.toPtvCode()
             val path = "stops/${stopId.value}/route_type/$typeCode?stop_location=true&stop_disruptions=true"
-            return api.getStop(urlResolver.resolve(path)).toDomain()
+            return api.getStop(urlResolver.resolve(path)).toDomain(requestedRouteType = routeType)
         }
     }

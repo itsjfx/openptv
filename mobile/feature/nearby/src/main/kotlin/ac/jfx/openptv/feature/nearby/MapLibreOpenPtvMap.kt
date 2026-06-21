@@ -65,6 +65,14 @@ import javax.inject.Singleton
  * pins can be on screen at once, so the unclustered point count stays well within MapLibre's
  * comfort zone.
  *
+ * **Co-located stops (issue #172).** Different modes routinely share one physical station, and PTV
+ * gives them identical coordinates — e.g. the Richmond train stop and the V/Line "Richmond Railway
+ * Station" are both `stop_id 1162` at the same lat/lng. Rendered as-is their circles stack on the
+ * same pixel and only the top one is visible/tappable. [applyPins] fans any group of stops sharing
+ * a coordinate out around a small fixed-radius circle (see [spreadColocatedStops]); a lone stop
+ * keeps its exact coordinate. We deliberately do *not* re-enable clustering to fix this (that brings back
+ * the #124 zoom-extreme bug) — the offset is a few metres, well under one stop's spacing.
+ *
  * Going with [CircleLayer] (rather than icon bitmaps) keeps the impl asset-free — every colour
  * is derivable from a constant, and adding a route type is one row in [routeTypeColor]. If a
  * future Roborazzi screenshot ever needs distinct icons we'll swap in a bitmap factory; until
@@ -207,16 +215,18 @@ internal class MapLibreOpenPtvMap
                                                 )
                                             val tap =
                                                 Coordinates(lat = latLng.latitude, lng = latLng.longitude)
+                                            // Issue #172: hit-test against the displayed positions so
+                                            // co-located stops fanned apart by [spreadColocatedStops]
+                                            // are each individually tappable; tapping the shared
+                                            // underlying coordinate would otherwise always resolve to
+                                            // the same one.
                                             val hit =
-                                                pinsLatest.minByOrNull { stop ->
-                                                    tap.distanceTo(Coordinates(stop.latitude, stop.longitude))
+                                                spreadColocatedStops(pinsLatest).minByOrNull { (_, coord) ->
+                                                    tap.distanceTo(coord)
                                                 }
-                                            val dist =
-                                                hit?.let {
-                                                    tap.distanceTo(Coordinates(it.latitude, it.longitude))
-                                                }
+                                            val dist = hit?.let { tap.distanceTo(it.second) }
                                             if (hit != null && dist != null && dist <= PIN_HIT_RADIUS_METERS) {
-                                                onPinClickedLatest(hit)
+                                                onPinClickedLatest(hit.first)
                                             }
                                         }
                                     }
@@ -388,9 +398,13 @@ internal class MapLibreOpenPtvMap
         ) {
             val style = map.style ?: return
             val source = style.getSourceAs<GeoJsonSource>(SOURCE_PINS) ?: return
+            // Issue #172: draw each stop at its (possibly fanned-out) display position so
+            // co-located stops don't stack on one pixel. [spreadColocatedStops] is the single source
+            // of these positions — the tap hit-test uses it too, so a fanned-out dot is tappable
+            // where it's actually drawn rather than at the shared underlying coordinate.
             val features =
-                pins.map { stop ->
-                    Feature.fromGeometry(Point.fromLngLat(stop.longitude, stop.latitude)).apply {
+                spreadColocatedStops(pins).map { (stop, coord) ->
+                    Feature.fromGeometry(Point.fromLngLat(coord.lng, coord.lat)).apply {
                         addNumberProperty(GEOJSON_PROP_ROUTE_TYPE, stop.routeType.toCode())
                         addNumberProperty(GEOJSON_PROP_STOP_ID, stop.id.value)
                     }

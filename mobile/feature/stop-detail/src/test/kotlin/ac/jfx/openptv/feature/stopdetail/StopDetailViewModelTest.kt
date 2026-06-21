@@ -102,6 +102,40 @@ class StopDetailViewModelTest {
         }
 
     @Test
+    fun `header is fetched exactly once on first load — issue 161`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.header).isInstanceOf(HeaderState.Loaded::class.java)
+            assertThat(stopDetailRepository.requestedKeys).hasSize(1)
+        }
+
+    @Test
+    fun `restarting the departures poll does not refetch the header — issue 161`() =
+        runTest(dispatcher) {
+            // A config change (rotation) re-runs the repeatOnLifecycle(RESUMED) block, which calls
+            // startObserving() again. That must not drag the one-shot header fetch along with it —
+            // the header stays Loaded and `stops/{id}/route_type/{rt}` is hit only once.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().build()))
+            advanceUntilIdle()
+
+            // Simulate the rotation Pause -> Resume: the lifecycle owner re-enters the block.
+            viewModel.stopObserving()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            assertThat(viewModel.uiState.value.header).isInstanceOf(HeaderState.Loaded::class.java)
+            assertThat(stopDetailRepository.requestedKeys).hasSize(1)
+        }
+
+    @Test
     fun `header Error renders the user-facing reason and retry restores Loading`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueError(IOException("offline"))
@@ -282,8 +316,61 @@ class StopDetailViewModelTest {
         }
 
     @Test
-    fun `loading emission flips departures back to Loading`() =
+    fun `resume single-flights the observe — a pause then resume leaves exactly one live collector — issue 162`() =
         runTest(dispatcher) {
+            // Issue #162: foreground (Pause -> Resume via repeatOnLifecycle) intermittently fired
+            // TWO departures fetches ~66 ms apart. Root cause: the old `cancel()` only *requested*
+            // cancellation, so a not-yet-stopped collector overlapped the fresh `startObserving()`.
+            // The fix `cancelAndJoin`s the prior job before subscribing, so a resume yields exactly
+            // one live subscription — and a single tick lands on UI state once, not twice.
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+
+            // First resume: one subscription.
+            viewModel.startObserving()
+            advanceUntilIdle()
+            assertThat(departureRepository.observedKeys).hasSize(1)
+
+            // Pause -> Resume fired back-to-back, the way repeatOnLifecycle drives it. The previous
+            // observe job is cancelled-and-joined before the new collection subscribes, so this
+            // adds exactly one more subscription — never two from an overlapping start.
+            viewModel.stopObserving()
+            viewModel.startObserving()
+            advanceUntilIdle()
+            assertThat(departureRepository.observedKeys).hasSize(2)
+
+            // The single live collector applies one tick once. (The torn-down collector is gone, so
+            // the emission isn't double-applied.)
+            departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().withRunRef("ONE").build()))
+            advanceUntilIdle()
+            val loaded = viewModel.uiState.value.departures as DeparturesState.Loaded
+            assertThat(loaded.groups.flatMap { it.departures }.map { it.runRef.value })
+                .containsExactly("ONE")
+        }
+
+    @Test
+    fun `first loading emission shows the loading skeleton`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            // No rows have landed yet — a Loading emission should surface the skeleton.
+            departureRepository.emit(Result.Loading)
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Loading)
+        }
+
+    @Test
+    fun `loading emission after data keeps the last-good list on screen — issue 161`() =
+        runTest(dispatcher) {
+            // Rotation re-subscribes the poll via repeatOnLifecycle(RESUMED); the repository's
+            // first re-emission is Loading. We must NOT flip back to the skeleton — that's the
+            // reload flicker issue #161 fixes. The previously-loaded rows stay visible until the
+            // next Success tick replaces them.
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
             val viewModel = newViewModel()
             advanceUntilIdle()
@@ -292,12 +379,13 @@ class StopDetailViewModelTest {
 
             departureRepository.emitSuccess(listOf(DepartureMother.aDeparture().build()))
             advanceUntilIdle()
-            assertThat(viewModel.uiState.value.departures)
-                .isInstanceOf(DeparturesState.Loaded::class.java)
+            val loaded = viewModel.uiState.value.departures
+            assertThat(loaded).isInstanceOf(DeparturesState.Loaded::class.java)
 
             departureRepository.emit(Result.Loading)
             advanceUntilIdle()
-            assertThat(viewModel.uiState.value.departures).isEqualTo(DeparturesState.Loading)
+            // Same Loaded list, not the skeleton.
+            assertThat(viewModel.uiState.value.departures).isEqualTo(loaded)
         }
 
     @Test
