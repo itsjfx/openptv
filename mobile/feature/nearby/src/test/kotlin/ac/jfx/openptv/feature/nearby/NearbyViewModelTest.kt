@@ -124,6 +124,31 @@ class NearbyViewModelTest {
             assertThat(viewModel.uiState.value).isEqualTo(NearbyUiState.PermissionUnasked)
         }
 
+    // -------------------- PermissionUnasked: no fetch fired/discarded (issue #160) --------------------
+    //
+    // On a fresh install the Nearby tab opens in PermissionUnasked. MapLibre still fires
+    // camera-idle events as its style loads, but there's no Loaded/Denied variant to render a
+    // result onto — so any `stops/location` fetch we fired would be silently discarded by
+    // `scheduleFetch`'s `PermissionUnasked -> Unit` branch. `onCameraIdle` must bail before
+    // scheduling so we don't spend a request (+ PTV rate limit) on a result we can't show.
+
+    @Test
+    fun `camera idle in PermissionUnasked fires no fetch`() =
+        runTest(dispatcher) {
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            assertThat(viewModel.uiState.value).isEqualTo(NearbyUiState.PermissionUnasked)
+
+            // MapLibre settles its style and fires an idle while the permission prompt is up.
+            viewModel.onCameraIdle(OpenPtvCameraState(Coordinates(-37.81, 144.96), 13.0))
+            advanceTimeBy(NearbyViewModel.CAMERA_IDLE_DEBOUNCE_MS + 1)
+            advanceUntilIdle()
+
+            // No `stops/location` request was dispatched, and the state is untouched.
+            assertThat(nearbyRepo.requestedCalls).isEmpty()
+            assertThat(viewModel.uiState.value).isEqualTo(NearbyUiState.PermissionUnasked)
+        }
+
     @Test
     fun `permission granted with last known fix enters Loaded centred on the fix`() =
         runTest(dispatcher) {

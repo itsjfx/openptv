@@ -39,6 +39,9 @@
     <string name="feature_nearby_list_header">Nearby stops</string>
     <string name="feature_nearby_list_count">%1$d</string>
     <string name="feature_nearby_list_empty">No stops match the current filter. Pan or toggle a chip to see more.</string>
+    <!-- Shown in place of the "no match" copy while location permission hasn't been granted (issue #160):
+         the list is empty because we have no location to anchor the search, not because the filter excluded everything. -->
+    <string name="feature_nearby_list_empty_permission">Enable location to see nearby stops.</string>
 
     <!-- Bottom-nav -->
     <string name="feature_nearby_tab_label">Nearby</string>
