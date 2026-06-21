@@ -14,6 +14,10 @@ import kotlinx.datetime.Instant
  * `pendingUndo` is set when the user swipes a row away and clears either when they tap "Undo" or
  * the snackbar times out. `editMode` toggles the drag-handle + delete affordance. `isRefreshing`
  * flips while a manual fan-out is in flight.
+ *
+ * `selectedTime` (issue #182) is the page-level custom instant every row's next-departure is
+ * computed relative to. Null means live "now". When set, the 60 s tick keeps refreshing at that
+ * same anchor rather than snapping back to now, and the page shows the chosen time clearly.
  */
 sealed interface FavouritesUiState {
     data object Loading : FavouritesUiState
@@ -25,6 +29,7 @@ sealed interface FavouritesUiState {
         val pendingUndo: PendingUndo? = null,
         val editMode: Boolean = false,
         val isRefreshing: Boolean = false,
+        val selectedTime: Instant? = null,
     ) : FavouritesUiState
 }
 
