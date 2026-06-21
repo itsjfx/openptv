@@ -46,6 +46,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
@@ -294,6 +295,14 @@ private fun PatternStopRow(
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.Medium,
                     color = contentColor,
+                    // Long V/Line-style names overflow *down* (wrap, bounded at 2 lines + ellipsis)
+                    // rather than *out*, so the "This stop" chip beside us keeps its space instead
+                    // of being crushed against the trailing edge (CLAUDE.md UI conventions). The
+                    // chip is measured first (unweighted), so `weight(fill = false)` hands the name
+                    // only the leftover width when the chip is present.
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = if (row.isOrigin) Modifier.weight(1f, fill = false) else Modifier,
                 )
                 if (row.isOrigin) {
                     Spacer(modifier = Modifier.width(8.dp))
@@ -305,6 +314,9 @@ private fun PatternStopRow(
                         Text(
                             text = stringResource(R.string.feature_run_pattern_this_stop),
                             style = MaterialTheme.typography.labelSmall,
+                            // Keep the chip on one line — it should never wrap to "This / stop".
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
