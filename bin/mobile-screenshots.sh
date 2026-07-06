@@ -166,7 +166,9 @@ capture_set() {
 
   log "[$mode] capturing stop-detail (Flinders Street)"
   tap "Flinders Street · Melbourne City"
-  wait_for "Routes serving this stop"
+  # top-bar action; static and unique to stop-detail (the old "Routes serving this stop"
+  # section no longer exists)
+  wait_for "Show stop on map"
   sleep 2
   screenshot "$dir/stop-detail.png"
 
