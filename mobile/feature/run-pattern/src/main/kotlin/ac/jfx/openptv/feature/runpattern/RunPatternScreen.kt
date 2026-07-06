@@ -69,6 +69,7 @@ fun RunPatternRoute(
     runRef: RunRef,
     routeType: RouteType,
     fromStopId: StopId? = null,
+    onStopClicked: (StopId) -> Unit = {},
     viewModel: RunPatternViewModel =
         hiltViewModel<RunPatternViewModel, RunPatternViewModel.Factory>(
             // Part of the ViewModel store key so navigating to a different run allocates a fresh
@@ -95,6 +96,7 @@ fun RunPatternRoute(
     RunPatternScreenContent(
         uiState = uiState,
         onRefresh = viewModel::refresh,
+        onStopClicked = onStopClicked,
         timeFormatter = viewModel.timeFormatter,
     )
 }
@@ -104,6 +106,7 @@ fun RunPatternRoute(
 internal fun RunPatternScreenContent(
     uiState: RunPatternUiState,
     onRefresh: () -> Unit,
+    onStopClicked: (StopId) -> Unit,
     timeFormatter: RelativeTimeFormatter,
 ) {
     val listState = rememberLazyListState()
@@ -204,6 +207,7 @@ internal fun RunPatternScreenContent(
                                     PatternStopRow(
                                         row = row,
                                         timeFormatter = timeFormatter,
+                                        onClick = { onStopClicked(row.stop.stopId) },
                                     )
                                     if (index != pattern.stops.lastIndex) {
                                         HorizontalDivider()
@@ -246,6 +250,7 @@ private fun PatternState.titleText(): String =
 private fun PatternStopRow(
     row: PatternStopRow,
     timeFormatter: RelativeTimeFormatter,
+    onClick: () -> Unit,
 ) {
     val stop = row.stop
     val relative =
@@ -272,6 +277,7 @@ private fun PatternStopRow(
         modifier =
             Modifier
                 .fillMaxWidth()
+                .clickable(onClick = onClick)
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .semantics { contentDescription = talkback }
                 .testTag(if (row.hasDeparted) TestTagPastStopRow else TestTagStopRow),

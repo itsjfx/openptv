@@ -149,6 +149,17 @@ private fun MainNav() {
                         runRef = RunRef(key.runRef),
                         routeType = RouteType.fromCode(key.routeTypeCode),
                         fromStopId = key.fromStopId?.let(::StopId),
+                        // Tapping a stop in the run timeline opens that stop's detail. Every stop on
+                        // the run shares the run's route type, so we reuse the destination's
+                        // routeTypeCode rather than threading a per-stop value.
+                        onStopClicked = { stopId ->
+                            backStack.add(
+                                AppNavKey.StopDetail(
+                                    stopId = stopId.value,
+                                    routeTypeCode = key.routeTypeCode,
+                                ),
+                            )
+                        },
                     )
                 }
                 entry<AppNavKey.Settings> {
