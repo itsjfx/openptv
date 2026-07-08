@@ -12,7 +12,7 @@ name: mobile-release
 on:
   push:
     branches: [master]
-    # Only the file that carries versionName / versionCode. The `gate` step
+    # Only the file that carries versionName / versionCode. The release script
     # then confirms the version actually changed (a push that edits this file
     # without touching the version is a no-op).
     paths:
@@ -45,26 +45,16 @@ jobs:
         with:
           fetch-depth: 2 # need the parent commit to diff the version line
 
-      # Cheap gate before we pay for a JDK + Gradle build.
-      - name: Decide whether to release
-        id: gate
-        env:
-          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
-        run: bin/mobile-release.sh gate
-
       - uses: actions/setup-java@v5
-        if: steps.gate.outputs.release == 'true'
         with:
           distribution: temurin
           java-version: '21'
       - uses: gradle/actions/setup-gradle@v6
-        if: steps.gate.outputs.release == 'true'
 
       # Decode the base64 keystore secret to a runner-local file. Guard against
       # an unset secret so the failure is "you forgot to add KEYSTORE", not a
       # confusing empty-file signing error deep in Gradle.
       - name: Decode keystore
-        if: steps.gate.outputs.release == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE }}
         run: |
@@ -74,11 +64,13 @@ jobs:
           fi
           echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/openptv-release.jks"
 
+      # The script itself decides whether to release (version bump in the last
+      # commit, or FORCE non-empty) and exits 0 as a no-op otherwise.
       - name: Build & publish signed release
-        if: steps.gate.outputs.release == 'true'
         env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force && '1' || '' }}
           KEYSTORE_PATH: ${{ runner.temp }}/openptv-release.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: bin/mobile-release.sh publish
+        run: bin/mobile-release.sh
