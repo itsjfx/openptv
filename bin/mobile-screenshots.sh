@@ -220,7 +220,15 @@ capture_set() {
   sleep 2
   screenshot "$dir/stop-detail.png"
 
+  log "[$mode] capturing run-pattern (first Sandringham departure)"
+  # row content-desc; the favourited Sandringham group is pinned first, so this is the top row
+  tap "Route Sandringham to Sandringham"
+  wait_for "This stop"
+  sleep 5 # let the route-line map tiles + geopath render
+  screenshot "$dir/run-pattern.png"
+
   log "[$mode] capturing nearby map"
+  adb shell input keyevent KEYCODE_BACK
   adb shell input keyevent KEYCODE_BACK
   tap "Nearby tab"
   wait_for "Nearby stops"
