@@ -4,9 +4,11 @@ import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.FollowedTripRepository
 import ac.jfx.openptv.core.domain.ObserveRunPatternUseCase
+import ac.jfx.openptv.core.model.AlightAlert
 import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunPattern
+import ac.jfx.openptv.core.model.RunPatternStop
 import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.StopId
 import androidx.lifecycle.ViewModel
@@ -87,13 +89,26 @@ class RunPatternViewModel
          */
         private var latestPattern: RunPattern? = null
 
+        /**
+         * The stop an in-flight replace-confirmation wants to arm an alight alert on (issue
+         * #201): set when arming raised the dialog, consumed by [confirmReplaceFollow], cleared
+         * on dismiss or a plain follow.
+         */
+        private var pendingAlightStopId: StopId? = null
+
         init {
             // Mirror the followed-trip repository into the UI state for the whole ViewModel
             // lifetime (not just while the pattern poll runs) so the Follow/Unfollow action is
             // correct the moment the screen composes.
             viewModelScope.launch {
                 followedTripRepository.followedTrip.collect { trip ->
-                    _uiState.update { it.copy(isFollowingThisRun = trip?.runRef == runRef) }
+                    val followsThisRun = trip?.runRef == runRef
+                    _uiState.update {
+                        it.copy(
+                            isFollowingThisRun = followsThisRun,
+                            alightStopId = trip?.alightAlert?.stopId.takeIf { _ -> followsThisRun },
+                        )
+                    }
                 }
             }
         }
@@ -143,28 +158,84 @@ class RunPatternViewModel
         fun followTrip() {
             val pattern = latestPattern ?: return
             if (pattern.stops.isEmpty()) return
+            pendingAlightStopId = null
             viewModelScope.launch {
                 val current = followedTripRepository.followedTrip.first()
                 if (current != null && current.runRef != runRef) {
                     _uiState.update { it.copy(followReplaceCandidate = current) }
                 } else {
-                    followedTripRepository.follow(pattern.toFollowedTrip())
+                    followedTripRepository.follow(pattern.toFollowedTrip(existing = current))
                 }
             }
+        }
+
+        /**
+         * Arm the "I'm getting off here" alert on [stopId] (issue #201). Follows the trip if it
+         * isn't already followed (raising the same replace-confirmation when a *different* run
+         * is), and stores a fresh [AlightAlert] — arming a different stop while one is armed
+         * re-arms with reset fire-once latches, because the alert is rebuilt from scratch.
+         *
+         * When the pattern has no live estimates (trams — see CLAUDE.md quirks), flips
+         * [RunPatternUiState.alightLocationPromptNeeded] so the screen can contextually request
+         * location permission for the GPS fallback.
+         */
+        fun armAlightAlert(stopId: StopId) {
+            val pattern = latestPattern ?: return
+            val alightStop = pattern.stops.lastOrNull { it.stopId == stopId } ?: return
+            viewModelScope.launch {
+                val current = followedTripRepository.followedTrip.first()
+                if (current != null && current.runRef != runRef) {
+                    pendingAlightStopId = stopId
+                    _uiState.update { it.copy(followReplaceCandidate = current) }
+                } else {
+                    followedTripRepository.follow(
+                        pattern.toFollowedTrip(existing = current, alightStop = alightStop),
+                    )
+                    if (pattern.lacksRealTimeSignal()) {
+                        _uiState.update { it.copy(alightLocationPromptNeeded = true) }
+                    }
+                }
+            }
+        }
+
+        /** Disarm the alight alert but keep following the trip. */
+        fun disarmAlightAlert() {
+            viewModelScope.launch {
+                val current = followedTripRepository.followedTrip.first() ?: return@launch
+                if (current.runRef != runRef || current.alightAlert == null) return@launch
+                followedTripRepository.follow(current.copy(alightAlert = null))
+            }
+        }
+
+        /** The screen has dealt with the location-permission prompt (granted, denied, or moot). */
+        fun onAlightLocationPromptHandled() {
+            _uiState.update { it.copy(alightLocationPromptNeeded = false) }
         }
 
         /** Confirm replacing the previously followed trip with this run. */
         fun confirmReplaceFollow() {
             val pattern = latestPattern ?: return
             if (pattern.stops.isEmpty()) return
+            val alightStop = pendingAlightStopId?.let { id -> pattern.stops.lastOrNull { it.stopId == id } }
+            pendingAlightStopId = null
             viewModelScope.launch {
-                followedTripRepository.follow(pattern.toFollowedTrip())
-                _uiState.update { it.copy(followReplaceCandidate = null) }
+                followedTripRepository.follow(
+                    pattern.toFollowedTrip(existing = null, alightStop = alightStop),
+                )
+                _uiState.update {
+                    it.copy(
+                        followReplaceCandidate = null,
+                        alightLocationPromptNeeded =
+                            it.alightLocationPromptNeeded ||
+                                (alightStop != null && pattern.lacksRealTimeSignal()),
+                    )
+                }
             }
         }
 
         /** Dismiss the replace confirmation without touching the stored trip. */
         fun dismissReplaceFollow() {
+            pendingAlightStopId = null
             _uiState.update { it.copy(followReplaceCandidate = null) }
         }
 
@@ -192,8 +263,18 @@ class RunPatternViewModel
             if (updated != followed) followedTripRepository.follow(updated)
         }
 
-        private fun RunPattern.toFollowedTrip(): FollowedTrip {
+        /**
+         * Build the stored trip from the loaded pattern. When [existing] already follows this
+         * run the write is an upsert: `followedAtUtc` and any armed alert survive. [alightStop]
+         * (issue #201) arms a *fresh* [AlightAlert] — deliberately not carrying old latches, so
+         * changing the alight stop re-arms both stages.
+         */
+        private fun RunPattern.toFollowedTrip(
+            existing: FollowedTrip?,
+            alightStop: RunPatternStop? = null,
+        ): FollowedTrip {
             val terminus = stops.last()
+            val sameRun = existing?.takeIf { it.runRef == runRef }
             return FollowedTrip(
                 runRef = runRef,
                 routeType = routeType,
@@ -201,9 +282,20 @@ class RunPatternViewModel
                 routeLabel = route?.displayLabel,
                 destinationName = directionName,
                 completesAtUtc = terminus.estimatedDepartureUtc ?: terminus.scheduledDepartureUtc,
-                followedAtUtc = clock.now(),
+                followedAtUtc = sameRun?.followedAtUtc ?: clock.now(),
+                alightAlert = alightStop?.toAlightAlert() ?: sameRun?.alightAlert,
             )
         }
+
+        private fun RunPatternStop.toAlightAlert(): AlightAlert =
+            AlightAlert(
+                stopId = stopId,
+                stopName = stopName,
+                coordinates = coordinates,
+            )
+
+        /** True when no stop carries a live estimate — the tram case the GPS fallback exists for. */
+        private fun RunPattern.lacksRealTimeSignal(): Boolean = stops.none { it.estimatedDepartureUtc != null }
 
         private fun RunPatternUiState.applyResult(result: Result<RunPattern>): RunPatternUiState =
             when (result) {
