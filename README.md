@@ -29,7 +29,11 @@ OpenPTV is presented in [Material You](https://m3.material.io) style
 
 ## Quick start
 
-Download the latest pre-release APK from [GitHub Releases](https://github.com/itsjfx/openptv/releases/tag/preview) until I start signing and publishing release APKs.
+Download the latest APK from [GitHub Releases](https://github.com/itsjfx/openptv/releases/latest).
+
+Verify the release is signed with the following key: `CE:3E:2D:12:4B:8C:5E:A9:39:45:D5:FA:36:5B:CD:E3:CC:39:02:BB:B4:22:50:A3:60:04:73:F8:05:6A:48:CE`
+
+If you're using Obtanium, search for `itsjfx/openptv`.
 
 You can also build your own APK, see [mobile#Build](./mobile/README.md#build).
 
