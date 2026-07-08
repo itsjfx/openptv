@@ -33,6 +33,13 @@ verify_signature() {
   "$apksigner" verify --print-certs "$apk" >&2
 }
 
+# Signing cert SHA-256 fingerprint of the APK, colon-separated uppercase to
+# match mobile/RELEASE.md. keytool ships with the JDK, so it's always present
+# where the build just ran.
+cert_sha256() {
+  keytool -printcert -jarfile "$1" | grep -oPm1 'SHA256:\s*\K[0-9A-F:]+'
+}
+
 force=0
 [[ -n "${FORCE:-}" ]] && force=1
 
@@ -71,6 +78,8 @@ verify_signature "$apk_src"
 apk="openptv-${name}.apk"
 cp -- "$apk_src" "$apk"
 
+fingerprint="$(cert_sha256 "$apk")"
+
 short="${GITHUB_SHA:-$(git rev-parse HEAD)}"
 short="${short:0:7}"
 subject="$(git log -1 --format='%s' "${GITHUB_SHA:-HEAD}")"
@@ -94,6 +103,14 @@ apksigner verify --print-certs ${apk}
 \`\`\`
 
 The SHA-256 must match the fingerprint published in [\`mobile/RELEASE.md\`](${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-itsjfx/openptv}/blob/master/mobile/RELEASE.md).
+
+## Signing certificate
+
+SHA-256 fingerprint of the certificate this APK is signed with — the digest from \`apksigner verify --print-certs\` on your download must match:
+
+\`\`\`
+${fingerprint}
+\`\`\`
 EOF
 
 # Replace any existing release on this tag so re-runs / forced dispatches are
