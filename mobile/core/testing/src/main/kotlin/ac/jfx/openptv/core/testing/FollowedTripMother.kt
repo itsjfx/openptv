@@ -1,5 +1,6 @@
 package ac.jfx.openptv.core.testing
 
+import ac.jfx.openptv.core.model.AlightAlert
 import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
@@ -32,6 +33,7 @@ class FollowedTripMother private constructor() {
         private var destinationName: String = DEFAULT_DESTINATION
         private var completesAtUtc: Instant = DEFAULT_COMPLETES_AT
         private var followedAtUtc: Instant = DEFAULT_FOLLOWED_AT
+        private var alightAlert: AlightAlert? = null
 
         fun withRunRef(value: String) = apply { this.runRef = value }
 
@@ -47,6 +49,8 @@ class FollowedTripMother private constructor() {
 
         fun withFollowedAtUtc(value: Instant) = apply { this.followedAtUtc = value }
 
+        fun withAlightAlert(value: AlightAlert?) = apply { this.alightAlert = value }
+
         fun build(): FollowedTrip =
             FollowedTrip(
                 runRef = RunRef(runRef),
@@ -56,6 +60,7 @@ class FollowedTripMother private constructor() {
                 destinationName = destinationName,
                 completesAtUtc = completesAtUtc,
                 followedAtUtc = followedAtUtc,
+                alightAlert = alightAlert,
             )
 
         private companion object {
