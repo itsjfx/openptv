@@ -32,4 +32,14 @@
     <string name="feature_run_pattern_map_show">Show map</string>
     <string name="feature_run_pattern_map_hide">Hide map</string>
     <string name="feature_run_pattern_map_content_description">Map of the route with the service\'s stops drawn along it</string>
+    <!-- Follow this trip (issue #200). Top-bar action; the pinned "Return to your trip" bar
+         itself lives in :app. -->
+    <string name="feature_run_pattern_follow">Follow</string>
+    <string name="feature_run_pattern_unfollow">Unfollow</string>
+    <!-- Replace-confirmation when a different trip is already followed. Slot: the currently
+         followed trip's name ("Lilydale to Flinders Street"). -->
+    <string name="feature_run_pattern_follow_replace_title">Follow this trip instead?</string>
+    <string name="feature_run_pattern_follow_replace_body">You\'re following %1$s. Only one trip can be followed at a time — following this one replaces it.</string>
+    <string name="feature_run_pattern_follow_replace_confirm">Replace</string>
+    <string name="feature_run_pattern_follow_replace_cancel">Cancel</string>
 </resources>

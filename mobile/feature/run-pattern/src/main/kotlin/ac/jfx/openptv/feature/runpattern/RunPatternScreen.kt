@@ -3,6 +3,7 @@ package ac.jfx.openptv.feature.runpattern
 import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
+import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.StopId
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -98,16 +100,25 @@ fun RunPatternRoute(
         onRefresh = viewModel::refresh,
         onStopClicked = onStopClicked,
         timeFormatter = viewModel.timeFormatter,
+        onFollowClicked = viewModel::followTrip,
+        onUnfollowClicked = viewModel::unfollowTrip,
+        onConfirmReplaceFollow = viewModel::confirmReplaceFollow,
+        onDismissReplaceFollow = viewModel::dismissReplaceFollow,
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList")
 internal fun RunPatternScreenContent(
     uiState: RunPatternUiState,
     onRefresh: () -> Unit,
     onStopClicked: (StopId) -> Unit,
     timeFormatter: RelativeTimeFormatter,
+    onFollowClicked: () -> Unit = {},
+    onUnfollowClicked: () -> Unit = {},
+    onConfirmReplaceFollow: () -> Unit = {},
+    onDismissReplaceFollow: () -> Unit = {},
 ) {
     val listState = rememberLazyListState()
 
@@ -135,6 +146,38 @@ internal fun RunPatternScreenContent(
         }
     }
 
+    // Replace-confirmation for the followed trip (issue #200): shown when the user taps Follow
+    // while a *different* run is already followed. Confirm replaces; dismiss leaves it alone.
+    val replaceCandidate = uiState.followReplaceCandidate
+    if (replaceCandidate != null) {
+        AlertDialog(
+            onDismissRequest = onDismissReplaceFollow,
+            modifier = Modifier.testTag(TestTagFollowReplaceDialog),
+            title = { Text(stringResource(R.string.feature_run_pattern_follow_replace_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.feature_run_pattern_follow_replace_body,
+                        replaceCandidate.displayText(),
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = onConfirmReplaceFollow,
+                    modifier = Modifier.testTag(TestTagFollowReplaceConfirm),
+                ) {
+                    Text(stringResource(R.string.feature_run_pattern_follow_replace_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismissReplaceFollow) {
+                    Text(stringResource(R.string.feature_run_pattern_follow_replace_cancel))
+                }
+            },
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -143,6 +186,29 @@ internal fun RunPatternScreenContent(
                         text = uiState.pattern.titleText(),
                         maxLines = 1,
                     )
+                },
+                actions = {
+                    // Follow/Unfollow (issue #200). Only once the pattern is Loaded — the stored
+                    // trip is built from the fetched terminus arrival + labels, so following a
+                    // skeleton would persist garbage.
+                    if (uiState.pattern is PatternState.Loaded) {
+                        TextButton(
+                            onClick =
+                                if (uiState.isFollowingThisRun) onUnfollowClicked else onFollowClicked,
+                            modifier = Modifier.testTag(TestTagFollowButton),
+                        ) {
+                            Text(
+                                text =
+                                    stringResource(
+                                        if (uiState.isFollowingThisRun) {
+                                            R.string.feature_run_pattern_unfollow
+                                        } else {
+                                            R.string.feature_run_pattern_follow
+                                        },
+                                    ),
+                            )
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
@@ -219,6 +285,20 @@ internal fun RunPatternScreenContent(
                 }
             }
         }
+    }
+}
+
+/**
+ * Human-readable name for a followed trip, used by the replace-confirmation dialog. Same
+ * route/destination collapse rule as [titleText] so "Lilydale to Lilydale" reads as "Lilydale".
+ */
+@Composable
+private fun FollowedTrip.displayText(): String {
+    val route = routeLabel
+    return when {
+        route == null -> destinationName
+        route.equals(destinationName, ignoreCase = true) -> route
+        else -> stringResource(R.string.feature_run_pattern_title_format, route, destinationName)
     }
 }
 
@@ -543,3 +623,6 @@ internal const val TestTagThisStop: String = "run-pattern-this-stop"
 internal const val TestTagPlatform: String = "run-pattern-platform"
 internal const val TestTagMap: String = "run-pattern-map"
 internal const val TestTagMapToggle: String = "run-pattern-map-toggle"
+internal const val TestTagFollowButton: String = "run-pattern-follow-button"
+internal const val TestTagFollowReplaceDialog: String = "run-pattern-follow-replace-dialog"
+internal const val TestTagFollowReplaceConfirm: String = "run-pattern-follow-replace-confirm"

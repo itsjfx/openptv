@@ -1,5 +1,6 @@
 package ac.jfx.openptv.feature.runpattern
 
+import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RunPatternStop
 import kotlinx.datetime.Instant
 
@@ -13,11 +14,20 @@ import kotlinx.datetime.Instant
  *
  * `asOf` is the wall-clock instant of the most recent successful emission, rendered as
  * `As of HH:mm`. Null until the first successful fetch lands.
+ *
+ * [isFollowingThisRun] mirrors the followed-trip repository (issue #200): true when the
+ * currently followed trip *is this run*, driving the Follow/Unfollow top-bar action.
+ *
+ * [followReplaceCandidate] is non-null while the "replace the followed trip?" confirmation is
+ * showing — it carries the *currently followed* (other) trip so the dialog can name it. Set when
+ * the user taps Follow while a different run is followed; cleared on confirm or dismiss.
  */
 data class RunPatternUiState(
     val pattern: PatternState,
     val isRefreshing: Boolean = false,
     val asOf: Instant? = null,
+    val isFollowingThisRun: Boolean = false,
+    val followReplaceCandidate: FollowedTrip? = null,
 ) {
     companion object {
         val Initial: RunPatternUiState = RunPatternUiState(pattern = PatternState.Loading)
