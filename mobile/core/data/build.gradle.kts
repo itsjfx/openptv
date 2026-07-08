@@ -3,8 +3,9 @@
 // the impls are wired via Hilt's `@Binds` modules.
 //
 // Allowed dependencies (per the docs/mobile/00-conventions.md rule):
-//   :core:network, :core:database, :core:model, :core:common
-//   (Datastore lands later; the favourites repository in #34 brought :core:database on.)
+//   :core:network, :core:database, :core:datastore, :core:model, :core:common
+//   (The favourites repository in #34 brought :core:database on; the followed-trip
+//   repository in #200 brought :core:datastore on.)
 plugins {
     id("openptv.android.library")
     id("openptv.android.hilt")
@@ -29,6 +30,10 @@ dependencies {
     // dep is `implementation` — DAO and entity types stay internal to this module's repository
     // impl; consumers see only the domain `FavouriteRouteAtStop`.
     implementation(project(":core:database"))
+    // Followed-trip repository (issue #200) delegates persistence to
+    // `FollowedTripDataSource`. `implementation` — the datastore types stay internal to the
+    // impl; consumers see only the domain `FollowedTrip` behind the repository interface.
+    implementation(project(":core:datastore"))
 
     implementation(libs.kotlinx.coroutines.android)
     // `LocationManagerLocationProvider` uses `androidx.core.content.ContextCompat.checkSelfPermission`
@@ -46,6 +51,10 @@ dependencies {
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    // `FollowedTripRepositoryImplTest` runs the real `FollowedTripDataSource` against a
+    // temp-file DataStore (`PreferenceDataStoreFactory`), so the preferences artifact is needed
+    // on the test classpath — `:core:datastore` keeps it `implementation`-scoped.
+    testImplementation(libs.androidx.datastore.preferences)
     // In-memory Room + Robolectric — same pairing the DAO tests use. Lets
     // `FavouritesRepositoryImplTest` exercise the real DAO instead of mocking it.
     testImplementation(libs.androidx.room.runtime)
