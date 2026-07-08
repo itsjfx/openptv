@@ -1,0 +1,76 @@
+name: mobile-release
+
+# Signed release pipeline (issue #50). Fires when the version is bumped in
+# `mobile/app/build.gradle.kts` on master, or on a manual dispatch. Produces a
+# signed release APK and publishes it to GitHub Releases tagged
+# `mobile-v<versionName>`. The keystore lives only in repo secrets — never in
+# the tree — and is decoded to the runner for the length of the build.
+#
+# Distinct from `mobile-prerelease.yml`, which ships an *unsigned debug* APK on
+# every master push for preview testing. This one is the signed, versioned
+# channel.
+on:
+  push:
+    branches: [master]
+    # Only the file that carries versionName / versionCode. The release script
+    # then confirms the version actually changed (a push that edits this file
+    # without touching the version is a no-op).
+    paths:
+      - 'mobile/app/build.gradle.kts'
+      - '.github/workflows/mobile-release.yml'
+      - 'bin/mobile-release.sh'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Release even if the version did not change'
+        type: boolean
+        default: true
+
+# Never cancel a release mid-publish — a half-created GitHub Release / tag is
+# worse than waiting for the previous run to finish.
+concurrency:
+  group: mobile-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create the tag + release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2 # need the parent commit to diff the version line
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v6
+
+      # Decode the base64 keystore secret to a runner-local file. Guard against
+      # an unset secret so the failure is "you forgot to add KEYSTORE", not a
+      # confusing empty-file signing error deep in Gradle.
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE }}
+        run: |
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo "::error::Missing KEYSTORE secret. See mobile/RELEASE.md for the upload commands." >&2
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/openptv-release.jks"
+
+      # The script itself decides whether to release (version bump in the last
+      # commit, or FORCE non-empty) and exits 0 as a no-op otherwise.
+      - name: Build & publish signed release
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force && '1' || '' }}
+          KEYSTORE_PATH: ${{ runner.temp }}/openptv-release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: bin/mobile-release.sh

@@ -8,6 +8,8 @@
 // What lives here: `applicationId`, `versionCode`, `versionName`, build types
 // (with `BACKEND_BASE_URL`). Everything else (compileSdk/minSdk, JVM target,
 // Compose BOM, Hilt + KSP) comes from the convention plugins.
+import java.util.Properties
+
 plugins {
     id("openptv.android.application")
     id("openptv.android.application.compose")
@@ -24,8 +26,43 @@ plugins {
     alias(libs.plugins.dependency.guard)
 }
 
+// Release signing credentials. Sourced from env vars (CI: decoded from the
+// `KEYSTORE` secret + friends) or `local.properties` (a maintainer cutting a
+// release on their laptop) — both are git-ignored, so no key material is ever
+// committed. When any of the four is missing the release build is left
+// UNSIGNED on purpose: CI's `assembleDebug`, the preview channel, and a plain
+// `assembleRelease` on a fresh checkout all build fine without the keystore.
+val signingProperties =
+    Properties().apply {
+        val file = rootProject.file("local.properties")
+        if (file.exists()) file.inputStream().use { load(it) }
+    }
+
+fun signingCredential(key: String): String? =
+    System.getenv(key) ?: signingProperties.getProperty(key)
+
+val releaseSigningCredentials: Map<String, String>? =
+    listOf("KEYSTORE_PATH", "KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD")
+        .associateWith { signingCredential(it) }
+        .takeIf { creds -> creds.values.all { !it.isNullOrBlank() } }
+        ?.mapValues { it.value!! }
+
 android {
     namespace = "ac.jfx.openptv"
+
+    signingConfigs {
+        releaseSigningCredentials?.let { creds ->
+            create("release") {
+                storeFile = file(creds.getValue("KEYSTORE_PATH"))
+                storePassword = creds.getValue("KEYSTORE_PASSWORD")
+                keyAlias = creds.getValue("KEY_ALIAS")
+                keyPassword = creds.getValue("KEY_PASSWORD")
+                // v1 (JAR) + v2/v3/v4 APK signature schemes; minSdk 26 covers v2.
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "ac.jfx.openptv"
@@ -50,6 +87,11 @@ android {
             buildConfigField("String", "BACKEND_BASE_URL", "\"https://ptv.jfx.ac/api/v3/\"")
         }
         release {
+            // Only signed when credentials are present (see above); otherwise
+            // the APK comes out unsigned and must be signed out-of-band.
+            if (releaseSigningCredentials != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
