@@ -123,6 +123,9 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:datastore"))
     implementation(project(":core:designsystem"))
+    // `AlightAlertService` (issue #201) drives the pure `AlightAlertEvaluator` and the
+    // run-pattern use case from the composition root.
+    implementation(project(":core:domain"))
     implementation(project(":core:model"))
     implementation(project(":core:navigation"))
     implementation(project(":core:network"))

@@ -1,6 +1,7 @@
 package ac.jfx.openptv.ui
 
 import ac.jfx.openptv.R
+import ac.jfx.openptv.alert.AlightAlertService
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
 import ac.jfx.openptv.core.designsystem.ThemeMode
 import ac.jfx.openptv.core.model.FollowedTrip
@@ -15,6 +16,7 @@ import ac.jfx.openptv.feature.search.SearchScreen
 import ac.jfx.openptv.feature.settings.SettingsRoute
 import ac.jfx.openptv.feature.setup.SetupScreen
 import ac.jfx.openptv.feature.stopdetail.StopDetailRoute
+import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +46,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -103,6 +106,18 @@ private fun MainNav(appViewModel: AppViewModel) {
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             appViewModel.evaluateFollowedTripCompletion()
+        }
+    }
+
+    // Alight alerts (issue #201): whenever the followed trip carries an armed alert — armed
+    // just now on the run-pattern screen, or persisted from before an app restart — make sure
+    // the tracking foreground service is running. The service stops itself when the alert
+    // goes away (disarm, unfollow, completion), so only the start needs wiring here.
+    val context = LocalContext.current
+    val alightArmed = followedTrip?.alightAlert != null
+    LaunchedEffect(alightArmed) {
+        if (alightArmed) {
+            context.startForegroundService(Intent(context, AlightAlertService::class.java))
         }
     }
 

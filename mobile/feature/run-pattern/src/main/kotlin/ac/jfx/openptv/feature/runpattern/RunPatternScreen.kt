@@ -52,6 +52,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -226,34 +227,13 @@ internal fun RunPatternScreenContent(
     }
 
     // Replace-confirmation for the followed trip (issue #200): shown when the user taps Follow
-    // while a *different* run is already followed. Confirm replaces; dismiss leaves it alone.
+    // (or arms an alight alert) while a *different* run is already followed.
     val replaceCandidate = uiState.followReplaceCandidate
     if (replaceCandidate != null) {
-        AlertDialog(
-            onDismissRequest = onDismissReplaceFollow,
-            modifier = Modifier.testTag(TestTagFollowReplaceDialog),
-            title = { Text(stringResource(R.string.feature_run_pattern_follow_replace_title)) },
-            text = {
-                Text(
-                    stringResource(
-                        R.string.feature_run_pattern_follow_replace_body,
-                        replaceCandidate.displayText(),
-                    ),
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = onConfirmReplaceFollow,
-                    modifier = Modifier.testTag(TestTagFollowReplaceConfirm),
-                ) {
-                    Text(stringResource(R.string.feature_run_pattern_follow_replace_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissReplaceFollow) {
-                    Text(stringResource(R.string.feature_run_pattern_follow_replace_cancel))
-                }
-            },
+        FollowReplaceDialog(
+            candidate = replaceCandidate,
+            onConfirm = onConfirmReplaceFollow,
+            onDismiss = onDismissReplaceFollow,
         )
     }
 
@@ -268,27 +248,11 @@ internal fun RunPatternScreenContent(
                     )
                 },
                 actions = {
-                    // Follow/Unfollow (issue #200). Only once the pattern is Loaded — the stored
-                    // trip is built from the fetched terminus arrival + labels, so following a
-                    // skeleton would persist garbage.
-                    if (uiState.pattern is PatternState.Loaded) {
-                        TextButton(
-                            onClick =
-                                if (uiState.isFollowingThisRun) onUnfollowClicked else onFollowClicked,
-                            modifier = Modifier.testTag(TestTagFollowButton),
-                        ) {
-                            Text(
-                                text =
-                                    stringResource(
-                                        if (uiState.isFollowingThisRun) {
-                                            R.string.feature_run_pattern_unfollow
-                                        } else {
-                                            R.string.feature_run_pattern_follow
-                                        },
-                                    ),
-                            )
-                        }
-                    }
+                    FollowAction(
+                        uiState = uiState,
+                        onFollowClicked = onFollowClicked,
+                        onUnfollowClicked = onUnfollowClicked,
+                    )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(),
             )
@@ -371,6 +335,70 @@ internal fun RunPatternScreenContent(
             }
         }
     }
+}
+
+/**
+ * Follow/Unfollow top-bar action (issue #200). Only once the pattern is Loaded — the stored
+ * trip is built from the fetched terminus arrival + labels, so following a skeleton would
+ * persist garbage.
+ */
+@Composable
+private fun FollowAction(
+    uiState: RunPatternUiState,
+    onFollowClicked: () -> Unit,
+    onUnfollowClicked: () -> Unit,
+) {
+    if (uiState.pattern !is PatternState.Loaded) return
+    TextButton(
+        onClick = if (uiState.isFollowingThisRun) onUnfollowClicked else onFollowClicked,
+        modifier = Modifier.testTag(TestTagFollowButton),
+    ) {
+        Text(
+            text =
+                stringResource(
+                    if (uiState.isFollowingThisRun) {
+                        R.string.feature_run_pattern_unfollow
+                    } else {
+                        R.string.feature_run_pattern_follow
+                    },
+                ),
+        )
+    }
+}
+
+/** Confirm replacing the currently followed [candidate] trip with this run (issue #200). */
+@Composable
+private fun FollowReplaceDialog(
+    candidate: FollowedTrip,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(TestTagFollowReplaceDialog),
+        title = { Text(stringResource(R.string.feature_run_pattern_follow_replace_title)) },
+        text = {
+            Text(
+                stringResource(
+                    R.string.feature_run_pattern_follow_replace_body,
+                    candidate.displayText(),
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                modifier = Modifier.testTag(TestTagFollowReplaceConfirm),
+            ) {
+                Text(stringResource(R.string.feature_run_pattern_follow_replace_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.feature_run_pattern_follow_replace_cancel))
+            }
+        },
+    )
 }
 
 /**
@@ -481,39 +509,20 @@ private fun PatternStopRow(
             if (row.isOrigin) {
                 // The "This stop" chip sits on its own line, left-aligned under the name, so a long
                 // wrapped name never crowds it and it always reads as belonging to this stop.
-                Spacer(modifier = Modifier.height(4.dp))
-                Surface(
+                StopMarkerChip(
+                    text = stringResource(R.string.feature_run_pattern_this_stop),
                     color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier.testTag(TestTagThisStop),
-                ) {
-                    Text(
-                        text = stringResource(R.string.feature_run_pattern_this_stop),
-                        style = MaterialTheme.typography.labelSmall,
-                        // Keep the chip on one line — it should never wrap to "This / stop".
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                }
+                    testTag = TestTagThisStop,
+                )
             }
             if (isAlight) {
                 // The armed alight marker (issue #201) — same chip shape as "This stop", on the
                 // tertiary container so the two markers read as different things at a glance.
-                Spacer(modifier = Modifier.height(4.dp))
-                Surface(
+                StopMarkerChip(
+                    text = stringResource(R.string.feature_run_pattern_alight_here),
                     color = MaterialTheme.colorScheme.tertiaryContainer,
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier.testTag(TestTagAlightChip),
-                ) {
-                    Text(
-                        text = stringResource(R.string.feature_run_pattern_alight_here),
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                }
+                    testTag = TestTagAlightChip,
+                )
             }
             Text(
                 text = stringResource(R.string.feature_run_pattern_scheduled, scheduled),
@@ -530,56 +539,104 @@ private fun PatternStopRow(
                 )
             }
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = relative,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.SemiBold,
-                color = contentColor,
-            )
-            val delayMinutes = row.delayMinutes()
-            if (delayMinutes != null && !row.hasDeparted) {
-                val absMinutes = kotlin.math.abs(delayMinutes).toInt()
-                val pluralRes =
-                    if (delayMinutes > 0) {
-                        R.plurals.feature_run_pattern_delay_late
-                    } else {
-                        R.plurals.feature_run_pattern_delay_early
-                    }
-                Text(
-                    text = pluralStringResource(pluralRes, absMinutes, absMinutes),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-        }
+        RelativeTimeColumn(row = row, relative = relative, contentColor = contentColor)
         if (!row.hasDeparted) {
-            // Alight-alert bell (issue #201). An emoji glyph ignores tint (it renders in colour),
-            // so armed/unarmed is signalled through alpha + the "Getting off here" chip instead.
-            // Same no-Material-Icons trade as the rest of the codebase.
-            val bellDescription =
-                stringResource(
-                    if (isAlight) {
-                        R.string.feature_run_pattern_alight_disarm_content_description
-                    } else {
-                        R.string.feature_run_pattern_alight_arm_content_description
-                    },
-                    stop.stopName,
-                )
-            TextButton(
-                onClick = onToggleAlight,
-                modifier =
-                    Modifier
-                        .testTag(if (isAlight) TestTagAlightArmedButton else TestTagAlightButton)
-                        .semantics { contentDescription = bellDescription },
-            ) {
-                Text(
-                    text = "🔔",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.alpha(if (isAlight) 1f else UNARMED_BELL_ALPHA),
-                )
-            }
+            AlightBell(
+                isAlight = isAlight,
+                stopName = stop.stopName,
+                onToggleAlight = onToggleAlight,
+            )
         }
+    }
+}
+
+/** The trailing live-time column: the relative phrase plus the late/early delta when known. */
+@Composable
+private fun RelativeTimeColumn(
+    row: PatternStopRow,
+    relative: String,
+    contentColor: Color,
+) {
+    Column(horizontalAlignment = Alignment.End) {
+        Text(
+            text = relative,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.SemiBold,
+            color = contentColor,
+        )
+        val delayMinutes = row.delayMinutes()
+        if (delayMinutes != null && !row.hasDeparted) {
+            val absMinutes = kotlin.math.abs(delayMinutes).toInt()
+            val pluralRes =
+                if (delayMinutes > 0) {
+                    R.plurals.feature_run_pattern_delay_late
+                } else {
+                    R.plurals.feature_run_pattern_delay_early
+                }
+            Text(
+                text = pluralStringResource(pluralRes, absMinutes, absMinutes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+/** The origin / alight marker chip under a stop's name — single line, never wraps. */
+@Composable
+private fun StopMarkerChip(
+    text: String,
+    color: Color,
+    testTag: String,
+) {
+    Spacer(modifier = Modifier.height(4.dp))
+    Surface(
+        color = color,
+        shape = RoundedCornerShape(4.dp),
+        modifier = Modifier.testTag(testTag),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/**
+ * The alight-alert bell (issue #201). An emoji glyph ignores tint (it renders in colour), so
+ * armed/unarmed is signalled through alpha + the "Getting off here" chip instead. Same
+ * no-Material-Icons trade as the rest of the codebase.
+ */
+@Composable
+private fun AlightBell(
+    isAlight: Boolean,
+    stopName: String,
+    onToggleAlight: () -> Unit,
+) {
+    val bellDescription =
+        stringResource(
+            if (isAlight) {
+                R.string.feature_run_pattern_alight_disarm_content_description
+            } else {
+                R.string.feature_run_pattern_alight_arm_content_description
+            },
+            stopName,
+        )
+    TextButton(
+        onClick = onToggleAlight,
+        modifier =
+            Modifier
+                .testTag(if (isAlight) TestTagAlightArmedButton else TestTagAlightButton)
+                .semantics { contentDescription = bellDescription },
+    ) {
+        Text(
+            text = "🔔",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.alpha(if (isAlight) 1f else UNARMED_BELL_ALPHA),
+        )
     }
 }
 

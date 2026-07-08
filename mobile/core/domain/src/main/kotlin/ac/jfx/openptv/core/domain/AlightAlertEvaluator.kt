@@ -80,44 +80,26 @@ class AlightAlertEvaluator
             location: Coordinates? = null,
         ): AlightAlertEvaluation {
             val hasRealTime = pattern.stops.any { it.estimatedDepartureUtc != null }
-            val alightIndex = pattern.alightIndex(alert, now)
-            if (alightIndex == null) {
-                // Alight stop not on the pattern (stale run_ref / PTV trimmed the pattern):
-                // nothing to decide; keep polling at the far cadence and let the pattern recover.
-                return AlightAlertEvaluation(
-                    stopsAway = null,
-                    etaUtc = null,
-                    hasRealTimeSignal = hasRealTime,
-                    usesGpsFallback = false,
-                    isScheduleOnly = !hasRealTime,
-                    fireApproachAlert = false,
-                    fireArrivalAlert = false,
-                    updatedAlert = alert,
-                    nextCheckIn = FAR_POLL,
-                )
-            }
+            val alightIndex =
+                pattern.alightIndex(alert, now)
+                    ?: return alightStopMissingEvaluation(alert, hasRealTime)
 
             val alightStop = pattern.stops[alightIndex]
             val resolvedCoordinates = alert.coordinates ?: alightStop.coordinates
             val eta = alightStop.departureUtc
             val stopsAway = pattern.stopsAway(alightIndex, now)
 
-            val (approachWanted, arrivalWanted) =
-                if (!hasRealTime && location != null && resolvedCoordinates != null) {
-                    gpsStages(pattern, alightIndex, resolvedCoordinates, location)
-                } else {
-                    timeStages(stopsAway, eta, now)
-                }
             val gpsMode = !hasRealTime && location != null && resolvedCoordinates != null
-
-            // Arrival supersedes approach: never sound both in the same evaluation.
-            val fireArrival = arrivalWanted && !alert.arrivalFired
-            val fireApproach = approachWanted && !alert.approachFired && !fireArrival
-            val updatedAlert =
-                alert.copy(
-                    coordinates = resolvedCoordinates,
-                    approachFired = alert.approachFired || fireApproach || fireArrival,
-                    arrivalFired = alert.arrivalFired || fireArrival,
+            val (fireApproach, fireArrival, updatedAlert) =
+                stageDecision(
+                    pattern = pattern,
+                    alightIndex = alightIndex,
+                    alert = alert,
+                    resolvedCoordinates = resolvedCoordinates,
+                    stopsAway = stopsAway,
+                    eta = eta,
+                    now = now,
+                    gpsLocation = location.takeIf { gpsMode },
                 )
 
             return AlightAlertEvaluation(
@@ -132,6 +114,59 @@ class AlightAlertEvaluator
                 nextCheckIn = nextCheckIn(updatedAlert, stopsAway, eta, now),
             )
         }
+
+        /**
+         * Pick the stage signal (GPS proximity when [gpsLocation] is engaged, pattern times
+         * otherwise) and advance the fire-once latches. Arrival supersedes approach: both never
+         * sound in the same evaluation, but a superseded approach still latches.
+         */
+        @Suppress("LongParameterList")
+        private fun stageDecision(
+            pattern: RunPattern,
+            alightIndex: Int,
+            alert: AlightAlert,
+            resolvedCoordinates: Coordinates?,
+            stopsAway: Int,
+            eta: Instant,
+            now: Instant,
+            gpsLocation: Coordinates?,
+        ): Triple<Boolean, Boolean, AlightAlert> {
+            val (approachWanted, arrivalWanted) =
+                if (gpsLocation != null && resolvedCoordinates != null) {
+                    gpsStages(pattern, alightIndex, resolvedCoordinates, gpsLocation)
+                } else {
+                    timeStages(stopsAway, eta, now)
+                }
+            val fireArrival = arrivalWanted && !alert.arrivalFired
+            val fireApproach = approachWanted && !alert.approachFired && !fireArrival
+            val updatedAlert =
+                alert.copy(
+                    coordinates = resolvedCoordinates,
+                    approachFired = alert.approachFired || fireApproach || fireArrival,
+                    arrivalFired = alert.arrivalFired || fireArrival,
+                )
+            return Triple(fireApproach, fireArrival, updatedAlert)
+        }
+
+        /**
+         * The alight stop isn't on the pattern (stale run_ref / PTV trimmed the pattern):
+         * nothing to decide; keep polling at the far cadence and let the pattern recover.
+         */
+        private fun alightStopMissingEvaluation(
+            alert: AlightAlert,
+            hasRealTime: Boolean,
+        ): AlightAlertEvaluation =
+            AlightAlertEvaluation(
+                stopsAway = null,
+                etaUtc = null,
+                hasRealTimeSignal = hasRealTime,
+                usesGpsFallback = false,
+                isScheduleOnly = !hasRealTime,
+                fireApproachAlert = false,
+                fireArrivalAlert = false,
+                updatedAlert = alert,
+                nextCheckIn = FAR_POLL,
+            )
 
         /**
          * Index of the alert's stop on the pattern: the first *upcoming* occurrence when the
