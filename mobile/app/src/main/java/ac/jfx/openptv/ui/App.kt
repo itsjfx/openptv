@@ -3,6 +3,7 @@ package ac.jfx.openptv.ui
 import ac.jfx.openptv.R
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
 import ac.jfx.openptv.core.designsystem.ThemeMode
+import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.StopId
@@ -14,18 +15,29 @@ import ac.jfx.openptv.feature.search.SearchScreen
 import ac.jfx.openptv.feature.settings.SettingsRoute
 import ac.jfx.openptv.feature.setup.SetupScreen
 import ac.jfx.openptv.feature.stopdetail.StopDetailRoute
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -36,8 +48,15 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.navigation3.runtime.NavBackStack
+import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
@@ -57,14 +76,76 @@ fun App(appViewModel: AppViewModel = hiltViewModel()) {
     when (gate) {
         GateState.Loading -> SplashLoader()
         GateState.NeedsSetup -> SetupScreen(onSetupComplete = { /* gate flow flips */ })
-        GateState.Ready -> MainNav()
+        GateState.Ready -> MainNav(appViewModel)
+    }
+}
+
+/**
+ * Nav host plus the app-wide pinned "Return to your trip" bar (issue #200). The bar sits
+ * *below* the [NavDisplay] in a [Column] — not overlaid — so it can never obscure screen
+ * content or the Home bottom nav; everything above simply shrinks. It is hidden while the
+ * followed run's own pattern screen is on top (the bar would only navigate to where the user
+ * already is) and while nothing is followed.
+ *
+ * Inset handling: when the bar shows, it becomes the bottom-most window element, so it takes
+ * the navigation-bar inset itself ([navigationBarsPadding]) and the nav content *consumes* that
+ * inset — otherwise every screen's own Scaffold would double-pad against a system bar the bar
+ * already cleared.
+ */
+@Composable
+private fun MainNav(appViewModel: AppViewModel) {
+    val backStack = rememberNavBackStack(AppNavKey.Home())
+    val followedTrip by appViewModel.followedTrip.collectAsStateWithLifecycle()
+
+    // In-app completion check: the stored trip only re-emits on writes, so a trip that finished
+    // while the app was backgrounded is re-evaluated against the clock on every resume.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            appViewModel.evaluateFollowedTripCompletion()
+        }
+    }
+
+    val trip = followedTrip
+    val topKey = backStack.lastOrNull()
+    val showReturnBar =
+        trip != null && !(topKey is AppNavKey.RunPattern && topKey.runRef == trip.runRef.value)
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .then(
+                        if (showReturnBar) {
+                            Modifier.consumeWindowInsets(WindowInsets.navigationBars)
+                        } else {
+                            Modifier
+                        },
+                    ),
+        ) {
+            MainNavDisplay(backStack = backStack)
+        }
+        if (trip != null && showReturnBar) {
+            FollowedTripBar(
+                trip = trip,
+                onOpen = {
+                    backStack.add(
+                        AppNavKey.RunPattern(
+                            runRef = trip.runRef.value,
+                            routeTypeCode = trip.routeType.toCode(),
+                            fromStopId = trip.fromStopId?.value,
+                        ),
+                    )
+                },
+                onUnfollow = appViewModel::unfollowTrip,
+            )
+        }
     }
 }
 
 @Composable
-private fun MainNav() {
-    val backStack = rememberNavBackStack(AppNavKey.Home())
-
+private fun MainNavDisplay(backStack: NavBackStack<NavKey>) {
     NavDisplay(
         backStack = backStack,
         onBack = { backStack.removeLastOrNull() },
@@ -288,6 +369,83 @@ private enum class HomeTab(
     Search("⌕", R.string.bottom_nav_search, "Search tab", TestTagTabSearch),
 }
 
+/**
+ * The pinned followed-trip bar (issue #200). Tapping the body reopens the run-pattern
+ * destination for the followed run; the ✕ unfollows (glyph stand-in keeps `:app` off the
+ * Material Icons artifact, same trade as the bottom-nav tabs).
+ *
+ * Long trip names (V/Line: "Bairnsdale - Melbourne via Sale & Traralgon to Southern Cross")
+ * overflow *down*, bounded at two lines with ellipsis, never *out* — the text column takes
+ * `weight(1f)` so the unfollow control always keeps its tap target (CLAUDE.md UI conventions).
+ */
+@Composable
+private fun FollowedTripBar(
+    trip: FollowedTrip,
+    onOpen: () -> Unit,
+    onUnfollow: () -> Unit,
+) {
+    val openLabel = stringResource(R.string.followed_trip_open_content_description)
+    val unfollowLabel = stringResource(R.string.followed_trip_unfollow_content_description)
+
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = Modifier.fillMaxWidth().testTag(TestTagFollowedTripBar),
+    ) {
+        Row(
+            modifier =
+                Modifier
+                    .clickable(onClick = onOpen)
+                    // The bar is the bottom-most window element, so it owns the system
+                    // navigation-bar inset; content stays inside the padded area.
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .semantics { contentDescription = openLabel },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.followed_trip_return),
+                    style = MaterialTheme.typography.labelMedium,
+                )
+                Text(
+                    text = trip.displayName(),
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            TextButton(
+                onClick = onUnfollow,
+                modifier =
+                    Modifier
+                        .testTag(TestTagFollowedTripUnfollow)
+                        .semantics { contentDescription = unfollowLabel },
+            ) {
+                Text(
+                    text = "✕",
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Human-readable trip name for the bar. Mirrors the run-pattern title's collapse rule so a
+ * loop/terminus run whose line and destination share a name reads once, not "X to X".
+ */
+@Composable
+private fun FollowedTrip.displayName(): String {
+    val route = routeLabel
+    return when {
+        route == null -> destinationName
+        route.equals(destinationName, ignoreCase = true) -> route
+        else -> stringResource(R.string.followed_trip_format, route, destinationName)
+    }
+}
+
 @Composable
 private fun SplashLoader() {
     Scaffold { padding ->
@@ -307,6 +465,8 @@ internal const val TestTagHomeScaffold: String = "home-scaffold"
 internal const val TestTagTabFavourites: String = "home-tab-favourites"
 internal const val TestTagTabNearby: String = "home-tab-nearby"
 internal const val TestTagTabSearch: String = "home-tab-search"
+internal const val TestTagFollowedTripBar: String = "followed-trip-bar"
+internal const val TestTagFollowedTripUnfollow: String = "followed-trip-unfollow"
 
 /**
  * Maps the `:core:datastore` user-preference theme enum to the `:core:designsystem`

@@ -23,4 +23,12 @@
     <string name="setup_title">Choose your server</string>
     <string name="setup_intro">OpenPTV needs to know which backend to talk to. Pick a server below.</string>
     <string name="setup_continue">Continue</string>
+
+    <!-- Pinned followed-trip bar (issue #200). The Follow/Unfollow action on the run pattern
+         screen lives in :feature:run-pattern; only the app-wide bar is :app-local. -->
+    <string name="followed_trip_return">Return to your trip</string>
+    <!-- Trip name. Slots: route label ("Lilydale", "96"), destination ("Flinders Street"). -->
+    <string name="followed_trip_format">%1$s to %2$s</string>
+    <string name="followed_trip_open_content_description">Return to your followed trip</string>
+    <string name="followed_trip_unfollow_content_description">Stop following this trip</string>
 </resources>
