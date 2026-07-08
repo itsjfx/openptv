@@ -3,7 +3,8 @@
 set -eu -o pipefail
 
 # Capture a fixed set of demo/README screenshots from the app on a running emulator.
-# Pins every source of run-to-run drift: SystemUI demo-mode status bar, fixed GPS,
+# Pins every source of run-to-run drift: device clock pinned to 12:00 Melbourne today
+# (see freeze_time), SystemUI demo-mode status bar synced to that clock, fixed GPS,
 # pre-granted location permission, and DB-seeded favourites (so the favourites list
 # doesn't depend on live departures). Navigation is by accessibility element, not
 # fixed coordinates, so it survives resolution/layout changes.
@@ -53,7 +54,10 @@ command -v adb &>/dev/null || { echo "adb not found on PATH" >&2; exit 1; }
 command -v python3 &>/dev/null || { echo "python3 not found on PATH" >&2; exit 1; }
 
 tmpdir="$(mktemp -d)"
-trap 'code="$?"; rm -rf -- "$tmpdir"; exit "$code"' EXIT
+orig_tz=""
+orig_auto_tz=""
+orig_auto_time=""
+trap 'code="$?"; restore_time; rm -rf -- "$tmpdir"; exit "$code"' EXIT
 
 log() { echo "==> $*" >&2; }
 
@@ -114,12 +118,56 @@ screenshot() {
   log "saved $1"
 }
 
+# Pin the device to ~12:00 Melbourne today so every capture reads as midday regardless of when
+# the script runs. Setting the real clock works because the app passes its own "now"
+# (`clock.now()`) upstream as the departures query time, so PTV serves the timetable *around the
+# faked noon* and all relative times stay coherent. The clock keeps ticking from 12:00; demo_on
+# re-syncs the status bar to it. Caveat: real-time estimates only exist near real wall-clock
+# time, so at a faked noon stop-detail rows read "scheduled" (RelativeTimeFormatter renders
+# "in N min" only for rows with a live estimate) — run near real Melbourne midday if you want
+# live-estimate rows. Needs adb root, which the AOSP emulator images provide.
+freeze_time() {
+  local mmdd yyyy
+  adb root >/dev/null
+  adb wait-for-device
+  [[ "$(adb shell id -u | tr -d '\r')" == 0 ]] || {
+    echo "adb root unavailable — use a rootable emulator image (AOSP default, not google_apis)" >&2
+    exit 1
+  }
+  orig_tz="$(adb shell getprop persist.sys.timezone | tr -d '\r')"
+  orig_auto_tz="$(adb shell settings get global auto_time_zone | tr -d '\r')"
+  orig_auto_time="$(adb shell settings get global auto_time | tr -d '\r')"
+  adb shell settings put global auto_time_zone 0
+  adb shell settings put global auto_time 0
+  # the data is Melbourne's, so "noon" must be Melbourne noon whatever the host timezone is
+  adb shell cmd alarm set-timezone Australia/Melbourne
+  mmdd="$(adb shell date +%m%d | tr -d '\r')"
+  yyyy="$(adb shell date +%Y | tr -d '\r')"
+  adb shell date "${mmdd}1200${yyyy}.00" >/dev/null
+  log "device clock pinned at $(adb shell date | tr -d '\r')"
+}
+
+restore_time() {
+  [[ -n "$orig_tz" ]] || return 0
+  # resync from the host clock in UTC to sidestep any host/device timezone mismatch
+  adb shell date -u "$(date -u +%m%d%H%M%Y.%S)" >/dev/null
+  adb shell cmd alarm set-timezone "$orig_tz"
+  [[ -n "$orig_auto_tz" ]] && adb shell settings put global auto_time_zone "$orig_auto_tz"
+  [[ -n "$orig_auto_time" ]] && adb shell settings put global auto_time "$orig_auto_time"
+  adb unroot >/dev/null 2>&1 || true
+}
+
 demo() { adb shell am broadcast -a com.android.systemui.demo "$@" >/dev/null 2>&1; }
 
 demo_on() {
+  local hhmm
+  # Freeze the status bar at the device's current local time (~12:00 once freeze_time has run),
+  # not a made-up value: the app renders PTV data against the device clock, so a fake
+  # status-bar time contradicts the in-app "As of HH:mm". Re-synced on every call to bound drift.
+  hhmm="$(adb shell date +%H%M | tr -d '\r')"
   adb shell settings put global sysui_demo_allowed 1 >/dev/null
   demo -e command enter
-  demo -e command clock -e hhmm 1000
+  demo -e command clock -e hhmm "$hhmm"
   demo -e command battery -e level 100 -e plugged false
   demo -e command network -e wifi show -e level 4 -e fully true
   # empty datatype drops the mobile/"3G" label for a clean wifi+battery bar
@@ -166,11 +214,21 @@ capture_set() {
 
   log "[$mode] capturing stop-detail (Flinders Street)"
   tap "Flinders Street · Melbourne City"
-  wait_for "Routes serving this stop"
+  # top-bar action; static and unique to stop-detail (the old "Routes serving this stop"
+  # section no longer exists)
+  wait_for "Show stop on map"
   sleep 2
   screenshot "$dir/stop-detail.png"
 
+  log "[$mode] capturing run-pattern (first Sandringham departure)"
+  # row content-desc; the favourited Sandringham group is pinned first, so this is the top row
+  tap "Route Sandringham to Sandringham"
+  wait_for "This stop"
+  sleep 5 # let the route-line map tiles + geopath render
+  screenshot "$dir/run-pattern.png"
+
   log "[$mode] capturing nearby map"
+  adb shell input keyevent KEYCODE_BACK
   adb shell input keyevent KEYCODE_BACK
   tap "Nearby tab"
   wait_for "Nearby stops"
@@ -201,6 +259,7 @@ adb shell pm grant "$pkg" android.permission.ACCESS_FINE_LOCATION
 adb shell pm grant "$pkg" android.permission.ACCESS_COARSE_LOCATION
 adb emu geo fix "$geo_lng" "$geo_lat"
 
+freeze_time
 demo_on
 
 log "first launch to create the database"
