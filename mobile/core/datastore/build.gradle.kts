@@ -25,6 +25,9 @@ plugins {
     id("openptv.android.library")
     id("openptv.android.library.compose")
     id("openptv.android.hilt")
+    // `FollowedTripDataSource` (issue #200) persists the followed trip as a JSON string, so the
+    // module owns one internal `@Serializable` DTO. Same plugin wiring as `:core:navigation`.
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -44,7 +47,11 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.kotlinx.serialization.json)
 
+    // `FollowedTripMother` for the data-source round-trip tests — mandatory Object Mother
+    // pattern per CLAUDE.md; the Mother lives in `:core:testing` alongside the others.
+    testImplementation(project(":core:testing"))
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
