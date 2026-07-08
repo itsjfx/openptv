@@ -20,8 +20,8 @@ touches the signing keystore.
    on). Re-running an existing tag replaces that release in place.
 
 The build leaves the APK **unsigned** when signing credentials are absent, so a
-plain `assembleRelease` on a fresh checkout still succeeds; the workflow's `publish`
-step refuses to publish an unsigned APK.
+plain `assembleRelease` on a fresh checkout still succeeds; the release script
+refuses to publish an unsigned APK.
 
 ## Signing config
 
@@ -36,20 +36,14 @@ no key material is ever committed:
 | `KEY_ALIAS`         | Key alias (`openptv`)            |
 | `KEY_PASSWORD`      | Key password (same as the store) |
 
-### Building a signed release locally
-
-The keystore and its credentials live on the maintainer's machine under
-`~/.openptv/` (never in the repo):
-
-```sh
-set -a; source ~/.openptv/openptv-release.env; set +a
-cd mobile && ./gradlew :app:assembleRelease
-```
+To build a signed release locally, put the four values in
+`mobile/local.properties` (git-ignored) and run
+`cd mobile && ./gradlew :app:assembleRelease`.
 
 ## The keystore
 
-- **Location:** `~/.openptv/openptv-release.jks` (PKCS12, RSA 4096, valid ~27 years).
-  Credentials are in the sibling `~/.openptv/openptv-release.env`.
+- **Keystore:** PKCS12, RSA 4096, valid ~27 years. Held privately by the
+  maintainer — never in the repo.
 - **Signing certificate SHA-256** — verify every published APK against this:
 
   ```
@@ -79,11 +73,10 @@ secrets requires **admin** on the repo, so the maintainer runs this from a shell
 authenticated as an admin account:
 
 ```sh
-set -a; source ~/.openptv/openptv-release.env; set +a
-base64 -w0 "$KEYSTORE_PATH" | gh secret set KEYSTORE          --repo itsjfx/openptv
-gh secret set KEYSTORE_PASSWORD --repo itsjfx/openptv --body "$KEYSTORE_PASSWORD"
-gh secret set KEY_ALIAS         --repo itsjfx/openptv --body "$KEY_ALIAS"
-gh secret set KEY_PASSWORD      --repo itsjfx/openptv --body "$KEY_PASSWORD"
+base64 -w0 path/to/release.jks | gh secret set KEYSTORE --repo itsjfx/openptv
+gh secret set KEYSTORE_PASSWORD --repo itsjfx/openptv # prompts for the value
+gh secret set KEY_ALIAS         --repo itsjfx/openptv --body openptv
+gh secret set KEY_PASSWORD      --repo itsjfx/openptv # prompts for the value
 ```
 
 Verify with `gh secret list --repo itsjfx/openptv` — it should list all four. No
