@@ -4,14 +4,16 @@ A third-party open-source alternative for the Public Transport Victoria (PTV) An
 
 OpenPTV is presented in [Material You](https://m3.material.io) style
 <div align="center">
-  <img src="https://github.com/user-attachments/assets/9cfe6244-0f70-45d6-9606-0c431cac3608" width="32.0%" alt="light-favourites" />
-  <img src="https://github.com/user-attachments/assets/04939830-76c3-4ff6-8548-6cb823117177" width="32.0%" alt="light-nearby-map" />
-  <img src="https://github.com/user-attachments/assets/8bbf13c6-5301-4ff1-ae76-e5fe960c0591" width="32.0%" alt="light-stop-detail" />
+  <img width="16%" alt="light-favourites" src="https://github.com/user-attachments/assets/278084f3-8a03-4b7c-a56d-a2e055fda98b" />
+  <img width="16%" alt="light-nearby-map" src="https://github.com/user-attachments/assets/9c14f8d9-292b-44b6-98d7-c4132740d6cb" />
+  <img width="16%" alt="light-stop-detail" src="https://github.com/user-attachments/assets/e0082221-527b-498c-b6ff-067aa9faaecd" />
+  <img width="16%" alt="light-run-pattern" src="https://github.com/user-attachments/assets/4bd7252d-2f40-4e59-9c45-86dc151d6a2d" />
   <p>Light mode</p>
   <br>
-  <img src="https://github.com/user-attachments/assets/e876095d-b6c7-4837-9b5c-b253571eaba7" width="32.0%" alt="dark-favourites" />
-  <img src="https://github.com/user-attachments/assets/63037a21-bc59-4695-b6a1-eed159df479c" width="32.0%" alt="dark-nearby-map" />
-  <img src="https://github.com/user-attachments/assets/99e0953e-0ee9-475a-9e44-df202f6634f3" width="32.0%" alt="dark-stop-detail" />
+  <img width="16%" alt="dark-favourites" src="https://github.com/user-attachments/assets/ed4b4e7e-82a2-4b60-881b-615e6bbdd001" />
+  <img width="16%" alt="dark-nearby-map" src="https://github.com/user-attachments/assets/f1f2e4ed-0082-4387-8fad-e64d1374730b" />
+  <img width="16%" alt="dark-stop-detail" src="https://github.com/user-attachments/assets/956f152c-7a2c-49ef-846c-26cbbd3d679e" />
+  <img width="16%" alt="dark-run-pattern" src="https://github.com/user-attachments/assets/00d378a9-14ca-4681-bc95-5add21e38042" />
   <p>Dark mode</p>
 </div>
 
