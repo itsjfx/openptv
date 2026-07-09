@@ -31,4 +31,6 @@
     <string name="followed_trip_format">%1$s to %2$s</string>
     <string name="followed_trip_open_content_description">Return to your followed trip</string>
     <string name="followed_trip_unfollow_content_description">Stop following this trip</string>
+    <!-- Live progress line. Slot: the next upcoming stop's name ("Richmond Station"). -->
+    <string name="followed_trip_next_stop">Next stop: %1$s</string>
 </resources>
