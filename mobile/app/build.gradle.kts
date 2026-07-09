@@ -79,6 +79,11 @@ android {
 
     buildTypes {
         debug {
+            // Distinct package id + launcher label ("OpenPTV (debug)", overridden in
+            // `src/debug/res/values/strings.xml`) so a debug build installs alongside the
+            // release app instead of replacing it. Applies to every debug APK — local
+            // `assembleDebug`, CI's PR artifact, and the preview-channel prerelease.
+            applicationIdSuffix = ".debug"
             isMinifyEnabled = false
             // Same maintainer-operated proxy as release so the picker's "Default" radio
             // resolves to one URL regardless of variant. Developers running a local Go

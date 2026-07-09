@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only launcher label. Together with the `applicationIdSuffix = ".debug"` in
+  `app/build.gradle.kts` this lets a debug build sit next to the release install and stay
+  tellable-apart in the launcher.
+-->
+<resources>
+    <string name="app_name">OpenPTV (debug)</string>
+</resources>
