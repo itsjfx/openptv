@@ -7,6 +7,7 @@ import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
 import ac.jfx.openptv.core.domain.ObserveRunPatternUseCase
 import ac.jfx.openptv.core.model.AppSettings
 import ac.jfx.openptv.core.model.FollowedTrip
+import ac.jfx.openptv.core.testing.AlightAlertMother
 import ac.jfx.openptv.core.testing.FollowedTripMother
 import ac.jfx.openptv.core.testing.RunPatternMother
 import ac.jfx.openptv.core.testing.RunPatternStopMother
@@ -325,6 +326,78 @@ class AppViewModelTest {
                     second.runRef to second.routeType,
                 )
                 .inOrder()
+        }
+
+    // --- Combined bar state with an armed alight alert (issue #201) ---
+
+    @Test
+    fun `an armed alight alert adds the rough eta to the derived progress`() =
+        runTest(dispatcher.scheduler) {
+            // Alert armed on the Mother's terminus (Flinders Street, est 09:11; clock 09:00).
+            followedTripRepository.seed(
+                FollowedTripMother.aFollowedTrip()
+                    .withAlightAlert(AlightAlertMother.anAlightAlert().build())
+                    .build(),
+            )
+
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+            runPatternRepository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+
+            assertThat(vm.tripProgress.value?.nextStopName).isEqualTo("East Richmond Station")
+            assertThat(vm.tripProgress.value?.alightEta).isEqualTo(11.minutes)
+        }
+
+    @Test
+    fun `arming between poll ticks re-derives from the cached pattern without a refetch`() =
+        runTest(dispatcher.scheduler) {
+            val trip = FollowedTripMother.aFollowedTrip().build()
+            followedTripRepository.seed(trip)
+
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+            runPatternRepository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+            assertThat(vm.tripProgress.value?.alightEta).isNull()
+
+            // Arm on the run-pattern screen: same run, trip re-written with an alert.
+            followedTripRepository.follow(
+                FollowedTripMother.aFollowedTrip()
+                    .withAlightAlert(AlightAlertMother.anAlightAlert().build())
+                    .build(),
+            )
+            advanceUntilIdle()
+
+            assertThat(vm.tripProgress.value?.alightEta).isEqualTo(11.minutes)
+            // Same run — the poll must not have restarted for the alert re-write.
+            assertThat(runPatternRepository.observedKeys).hasSize(1)
+        }
+
+    @Test
+    fun `disarming drops the eta but keeps the next-stop line`() =
+        runTest(dispatcher.scheduler) {
+            followedTripRepository.seed(
+                FollowedTripMother.aFollowedTrip()
+                    .withAlightAlert(AlightAlertMother.anAlightAlert().build())
+                    .build(),
+            )
+
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+            runPatternRepository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+            assertThat(vm.tripProgress.value?.alightEta).isEqualTo(11.minutes)
+
+            // Disarm keeps following (issue #201 semantics) — the alert just goes away.
+            followedTripRepository.follow(FollowedTripMother.aFollowedTrip().build())
+            advanceUntilIdle()
+
+            assertThat(vm.tripProgress.value?.alightEta).isNull()
+            assertThat(vm.tripProgress.value?.nextStopName).isEqualTo("East Richmond Station")
         }
 
     @Test

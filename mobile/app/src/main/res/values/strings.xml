@@ -33,6 +33,11 @@
     <string name="followed_trip_unfollow_content_description">Stop following this trip</string>
     <!-- Live progress line. Slot: the next upcoming stop's name ("Richmond Station"). -->
     <string name="followed_trip_next_stop">Next stop: %1$s</string>
+    <!-- Rough ETA to the armed alight stop (issue #201). Slots: rough eta ("~12 min"), the
+         alight stop's name ("Jordanville Station"). Joined onto the progress line with "·". -->
+    <string name="followed_trip_alight_eta">%1$s to %2$s</string>
+    <string name="followed_trip_eta_minutes">~%1$d min</string>
+    <string name="followed_trip_eta_under_minute">&lt;1 min</string>
 
     <!-- Alight alerts (issue #201): the foreground service's notifications. Channel ids are a
          one-way door (see AlightAlertNotifications); these are just their user-facing names. -->

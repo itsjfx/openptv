@@ -4,6 +4,7 @@ import ac.jfx.openptv.R
 import ac.jfx.openptv.alert.AlightAlertService
 import ac.jfx.openptv.core.datastore.preference.ThemeModePreference
 import ac.jfx.openptv.core.designsystem.ThemeMode
+import ac.jfx.openptv.core.domain.TripProgress
 import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
@@ -64,6 +65,8 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import kotlinx.coroutines.awaitCancellation
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * Root composable. The persisted theme mode is wrapped around this composable in
@@ -173,7 +176,7 @@ private fun MainNav(appViewModel: AppViewModel) {
                         {
                             FollowedTripBar(
                                 trip = trip,
-                                nextStopName = tripProgress?.nextStopName,
+                                progress = tripProgress,
                                 onOpen = openFollowedRun,
                                 onUnfollow = appViewModel::unfollowTrip,
                                 padSystemNavBar = false,
@@ -187,7 +190,7 @@ private fun MainNav(appViewModel: AppViewModel) {
         if (trip != null && showReturnBar && !barInHomeScaffold) {
             FollowedTripBar(
                 trip = trip,
-                nextStopName = tripProgress?.nextStopName,
+                progress = tripProgress,
                 onOpen = openFollowedRun,
                 onUnfollow = appViewModel::unfollowTrip,
             )
@@ -439,10 +442,11 @@ private enum class HomeTab(
  * system navigation bar itself; false when it stacks above Home's [NavigationBar], which
  * already owns that inset.
  *
- * [nextStopName] is the live "Next stop: …" progress line (PR #202 follow-up), derived from
- * the foreground pattern poll. Null — nothing followed yet fetched, fetch failing, or the run
- * out of upcoming stops — simply drops the line, so the bar degrades to its static text and
- * never shows an error.
+ * [progress] is the live progress line (PR #202 follow-up): "Next stop: …", plus — when this
+ * trip has an armed alight alert (issue #201) — "· ~12 min to …" for the alight stop, both
+ * derived from the foreground pattern poll. Null (nothing fetched yet, fetch failing) or a
+ * progress with nothing to say (run out of upcoming stops, alight stop already passed) simply
+ * drops the line/fragment, so the bar degrades to its static text and never shows an error.
  *
  * Long trip names (V/Line: "Bairnsdale - Melbourne via Sale & Traralgon to Southern Cross")
  * overflow *down*, bounded at two lines with ellipsis, never *out* — the text column takes
@@ -452,7 +456,7 @@ private enum class HomeTab(
 @Composable
 private fun FollowedTripBar(
     trip: FollowedTrip,
-    nextStopName: String?,
+    progress: TripProgress?,
     onOpen: () -> Unit,
     onUnfollow: () -> Unit,
     padSystemNavBar: Boolean = true,
@@ -485,9 +489,10 @@ private fun FollowedTripBar(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (nextStopName != null) {
+                val progressLine = trip.progressLine(progress)
+                if (progressLine != null) {
                     Text(
-                        text = stringResource(R.string.followed_trip_next_stop, nextStopName),
+                        text = progressLine,
                         style = MaterialTheme.typography.bodySmall,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -511,6 +516,39 @@ private fun FollowedTripBar(
         }
     }
 }
+
+/**
+ * The bar's live progress line: "Next stop: Richmond", extended with "· ~12 min to Jordanville"
+ * when this trip has an armed alight alert and the poll has an ETA for its stop. Either
+ * fragment can be absent independently (run finished vs. alight stop passed/off-pattern);
+ * null when neither has anything to say, which drops the line entirely.
+ */
+@Composable
+private fun FollowedTrip.progressLine(progress: TripProgress?): String? {
+    if (progress == null) return null
+    val nextStopFragment =
+        progress.nextStopName?.let { stringResource(R.string.followed_trip_next_stop, it) }
+    val alightStopName = alightAlert?.stopName
+    val alightEta = progress.alightEta
+    val etaFragment =
+        if (alightStopName != null && alightEta != null) {
+            stringResource(R.string.followed_trip_alight_eta, roughEta(alightEta), alightStopName)
+        } else {
+            null
+        }
+    return listOfNotNull(nextStopFragment, etaFragment)
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(separator = " · ")
+}
+
+/** Rough human ETA: "~12 min", or "<1 min" once the arrival is under a minute away. */
+@Composable
+private fun roughEta(eta: Duration): String =
+    if (eta < 1.minutes) {
+        stringResource(R.string.followed_trip_eta_under_minute)
+    } else {
+        stringResource(R.string.followed_trip_eta_minutes, eta.inWholeMinutes)
+    }
 
 /**
  * Human-readable trip name for the bar. Mirrors the run-pattern title's collapse rule so a
