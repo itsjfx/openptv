@@ -86,14 +86,18 @@ fun App(appViewModel: AppViewModel = hiltViewModel()) {
 /**
  * Nav host plus the app-wide pinned "Return to your trip" bar (issue #200). The bar sits
  * *below* the [NavDisplay] in a [Column] — not overlaid — so it can never obscure screen
- * content or the Home bottom nav; everything above simply shrinks. It is hidden while the
- * followed run's own pattern screen is on top (the bar would only navigate to where the user
- * already is) and while nothing is followed.
+ * content; everything above simply shrinks. On the Home surface, which owns the bottom
+ * [NavigationBar], the bar instead docks *above* the nav bar (mini-player placement) by
+ * rendering inside [HomeScaffold]'s `bottomBar` slot. It is hidden while the followed run's
+ * own pattern screen is on top (the bar would only navigate to where the user already is)
+ * and while nothing is followed.
  *
- * Inset handling: when the bar shows, it becomes the bottom-most window element, so it takes
- * the navigation-bar inset itself ([navigationBarsPadding]) and the nav content *consumes* that
- * inset — otherwise every screen's own Scaffold would double-pad against a system bar the bar
- * already cleared.
+ * Inset handling: when the bar shows at the app level it becomes the bottom-most window
+ * element, so it takes the navigation-bar inset itself ([navigationBarsPadding]) and the nav
+ * content *consumes* that inset — otherwise every screen's own Scaffold would double-pad
+ * against a system bar the bar already cleared. Inside [HomeScaffold] the [NavigationBar]
+ * below the bar already clears the system bar, so the bar pads nothing and Home's insets are
+ * left untouched.
  */
 @Composable
 private fun MainNav(appViewModel: AppViewModel) {
@@ -125,6 +129,18 @@ private fun MainNav(appViewModel: AppViewModel) {
     val topKey = backStack.lastOrNull()
     val showReturnBar =
         trip != null && !(topKey is AppNavKey.RunPattern && topKey.runRef == trip.runRef.value)
+    val barInHomeScaffold = showReturnBar && topKey is AppNavKey.Home
+    val openFollowedRun: () -> Unit = {
+        trip?.let {
+            backStack.add(
+                AppNavKey.RunPattern(
+                    runRef = it.runRef.value,
+                    routeTypeCode = it.routeType.toCode(),
+                    fromStopId = it.fromStopId?.value,
+                ),
+            )
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -132,27 +148,34 @@ private fun MainNav(appViewModel: AppViewModel) {
                 Modifier
                     .weight(1f)
                     .then(
-                        if (showReturnBar) {
+                        if (showReturnBar && !barInHomeScaffold) {
                             Modifier.consumeWindowInsets(WindowInsets.navigationBars)
                         } else {
                             Modifier
                         },
                     ),
         ) {
-            MainNavDisplay(backStack = backStack)
+            MainNavDisplay(
+                backStack = backStack,
+                homeFollowedTripBar =
+                    if (trip != null && barInHomeScaffold) {
+                        {
+                            FollowedTripBar(
+                                trip = trip,
+                                onOpen = openFollowedRun,
+                                onUnfollow = appViewModel::unfollowTrip,
+                                padSystemNavBar = false,
+                            )
+                        }
+                    } else {
+                        null
+                    },
+            )
         }
-        if (trip != null && showReturnBar) {
+        if (trip != null && showReturnBar && !barInHomeScaffold) {
             FollowedTripBar(
                 trip = trip,
-                onOpen = {
-                    backStack.add(
-                        AppNavKey.RunPattern(
-                            runRef = trip.runRef.value,
-                            routeTypeCode = trip.routeType.toCode(),
-                            fromStopId = trip.fromStopId?.value,
-                        ),
-                    )
-                },
+                onOpen = openFollowedRun,
                 onUnfollow = appViewModel::unfollowTrip,
             )
         }
@@ -160,7 +183,10 @@ private fun MainNav(appViewModel: AppViewModel) {
 }
 
 @Composable
-private fun MainNavDisplay(backStack: NavBackStack<NavKey>) {
+private fun MainNavDisplay(
+    backStack: NavBackStack<NavKey>,
+    homeFollowedTripBar: (@Composable () -> Unit)?,
+) {
     NavDisplay(
         backStack = backStack,
         onBack = { backStack.removeLastOrNull() },
@@ -170,6 +196,7 @@ private fun MainNavDisplay(backStack: NavBackStack<NavKey>) {
                     HomeScaffold(
                         focusLat = key.focusLat,
                         focusLon = key.focusLon,
+                        followedTripBar = homeFollowedTripBar,
                         onOpenStopDetail = { stopId, routeTypeCode, focusDestinationKey ->
                             backStack.add(
                                 AppNavKey.StopDetail(
@@ -292,6 +319,7 @@ private fun MainNavDisplay(backStack: NavBackStack<NavKey>) {
 private fun HomeScaffold(
     focusLat: Double?,
     focusLon: Double?,
+    followedTripBar: (@Composable () -> Unit)?,
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusDestinationKey: String?) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -303,25 +331,30 @@ private fun HomeScaffold(
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
-                HomeTab.values().forEach { tab ->
-                    NavigationBarItem(
-                        selected = selectedTab == tab,
-                        onClick = { selectedTab = tab },
-                        icon = {
-                            // Glyph stand-ins keep `:app` off the Material Icons artifact, same
-                            // trade as the back arrow and favourite star elsewhere.
-                            Text(
-                                text = tab.glyph,
-                                style = MaterialTheme.typography.titleLarge,
-                            )
-                        },
-                        label = { Text(stringResource(tab.labelRes)) },
-                        modifier =
-                            Modifier
-                                .testTag(tab.testTag)
-                                .semantics { contentDescription = tab.semanticLabel },
-                    )
+            // The followed-trip bar docks directly above the bottom nav (issue #200 review):
+            // stacking it in the bottomBar slot keeps Scaffold's content padding covering both.
+            Column {
+                followedTripBar?.invoke()
+                NavigationBar {
+                    HomeTab.values().forEach { tab ->
+                        NavigationBarItem(
+                            selected = selectedTab == tab,
+                            onClick = { selectedTab = tab },
+                            icon = {
+                                // Glyph stand-ins keep `:app` off the Material Icons artifact, same
+                                // trade as the back arrow and favourite star elsewhere.
+                                Text(
+                                    text = tab.glyph,
+                                    style = MaterialTheme.typography.titleLarge,
+                                )
+                            },
+                            label = { Text(stringResource(tab.labelRes)) },
+                            modifier =
+                                Modifier
+                                    .testTag(tab.testTag)
+                                    .semantics { contentDescription = tab.semanticLabel },
+                        )
+                    }
                 }
             }
         },
@@ -389,6 +422,10 @@ private enum class HomeTab(
  * destination for the followed run; the ✕ unfollows (glyph stand-in keeps `:app` off the
  * Material Icons artifact, same trade as the bottom-nav tabs).
  *
+ * [padSystemNavBar] is true when the bar is the bottom-most window element and must clear the
+ * system navigation bar itself; false when it stacks above Home's [NavigationBar], which
+ * already owns that inset.
+ *
  * Long trip names (V/Line: "Bairnsdale - Melbourne via Sale & Traralgon to Southern Cross")
  * overflow *down*, bounded at two lines with ellipsis, never *out* — the text column takes
  * `weight(1f)` so the unfollow control always keeps its tap target (CLAUDE.md UI conventions).
@@ -398,6 +435,7 @@ private fun FollowedTripBar(
     trip: FollowedTrip,
     onOpen: () -> Unit,
     onUnfollow: () -> Unit,
+    padSystemNavBar: Boolean = true,
 ) {
     val openLabel = stringResource(R.string.followed_trip_open_content_description)
     val unfollowLabel = stringResource(R.string.followed_trip_unfollow_content_description)
@@ -411,9 +449,7 @@ private fun FollowedTripBar(
             modifier =
                 Modifier
                     .clickable(onClick = onOpen)
-                    // The bar is the bottom-most window element, so it owns the system
-                    // navigation-bar inset; content stays inside the padded area.
-                    .navigationBarsPadding()
+                    .then(if (padSystemNavBar) Modifier.navigationBarsPadding() else Modifier)
                     .padding(horizontal = 16.dp, vertical = 10.dp)
                     .semantics { contentDescription = openLabel },
             verticalAlignment = Alignment.CenterVertically,
