@@ -1,11 +1,15 @@
 package ac.jfx.openptv.ui
 
 import ac.jfx.openptv.core.data.test.FakeFollowedTripRepository
+import ac.jfx.openptv.core.data.test.FakeRunPatternRepository
 import ac.jfx.openptv.core.data.test.FakeSettingsRepository
 import ac.jfx.openptv.core.datastore.UserPreferencesDataStore
+import ac.jfx.openptv.core.domain.ObserveRunPatternUseCase
 import ac.jfx.openptv.core.model.AppSettings
 import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.testing.FollowedTripMother
+import ac.jfx.openptv.core.testing.RunPatternMother
+import ac.jfx.openptv.core.testing.RunPatternStopMother
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
@@ -44,6 +48,7 @@ class AppViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val settings = FakeSettingsRepository()
     private val followedTripRepository = FakeFollowedTripRepository()
+    private val runPatternRepository = FakeRunPatternRepository()
     private val clock = MutableFakeClock(Instant.parse("2026-05-14T09:00:00Z"))
 
     private lateinit var dataStoreScope: CoroutineScope
@@ -77,6 +82,7 @@ class AppViewModelTest {
             settings = settings,
             userPreferences = userPreferences,
             followedTripRepository = followedTripRepository,
+            observeRunPattern = ObserveRunPatternUseCase(runPatternRepository),
             clock = clock,
         )
 
@@ -169,6 +175,156 @@ class AppViewModelTest {
 
             assertThat(followedTripRepository.current).isEqualTo(trip)
             assertThat(vm.followedTrip.value).isEqualTo(trip)
+        }
+
+    // --- Trip-progress polling behind the bar's "Next stop" line (PR #202 follow-up) ---
+
+    @Test
+    fun `no trip followed means the progress poll never touches the pattern repository`() =
+        runTest(dispatcher.scheduler) {
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+
+            assertThat(runPatternRepository.observedKeys).isEmpty()
+            assertThat(vm.tripProgress.value).isNull()
+        }
+
+    @Test
+    fun `polling only runs between start and stop - the foreground window`() =
+        runTest(dispatcher.scheduler) {
+            followedTripRepository.seed(FollowedTripMother.aFollowedTrip().build())
+
+            val vm = viewModel()
+            advanceUntilIdle()
+            // Backgrounded (no start yet): a followed trip alone must not poll.
+            assertThat(runPatternRepository.observedKeys).isEmpty()
+
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+            assertThat(runPatternRepository.observedKeys).hasSize(1)
+
+            vm.stopTripProgressPolling()
+            runPatternRepository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+            // The emission after stop lands nowhere — collection is torn down.
+            assertThat(vm.tripProgress.value).isNull()
+        }
+
+    @Test
+    fun `a successful fetch derives the next upcoming stop for the bar`() =
+        runTest(dispatcher.scheduler) {
+            val trip = FollowedTripMother.aFollowedTrip().build()
+            followedTripRepository.seed(trip)
+
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+            runPatternRepository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+
+            assertThat(runPatternRepository.observedKeys)
+                .containsExactly(trip.runRef to trip.routeType)
+            // Clock 09:00; Mother's pattern: Richmond 08:50 (past), East Richmond est 09:06.
+            assertThat(vm.tripProgress.value?.nextStopName).isEqualTo("East Richmond Station")
+        }
+
+    @Test
+    fun `progress advances as the clock passes each stop on a later poll tick`() =
+        runTest(dispatcher.scheduler) {
+            followedTripRepository.seed(FollowedTripMother.aFollowedTrip().build())
+
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+            runPatternRepository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+            assertThat(vm.tripProgress.value?.nextStopName).isEqualTo("East Richmond Station")
+
+            // Next 30 s tick re-delivers the same pattern, but the vehicle has moved on.
+            clock.now = Instant.parse("2026-05-14T09:07:00Z")
+            runPatternRepository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+
+            assertThat(vm.tripProgress.value?.nextStopName)
+                .isEqualTo("Flinders Street Railway Station")
+        }
+
+    @Test
+    fun `a failed fetch keeps the last derived progress - the bar degrades, never errors`() =
+        runTest(dispatcher.scheduler) {
+            followedTripRepository.seed(FollowedTripMother.aFollowedTrip().build())
+
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+            runPatternRepository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+
+            runPatternRepository.emitLoading()
+            runPatternRepository.emitError(RuntimeException("proxy down"))
+            advanceUntilIdle()
+
+            assertThat(vm.tripProgress.value?.nextStopName).isEqualTo("East Richmond Station")
+        }
+
+    @Test
+    fun `a run with no upcoming stops derives a null next stop`() =
+        runTest(dispatcher.scheduler) {
+            followedTripRepository.seed(FollowedTripMother.aFollowedTrip().build())
+
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+            runPatternRepository.emitSuccess(
+                RunPatternMother.aRunPattern()
+                    .withStops(listOf(RunPatternStopMother.aPastPatternStop().build()))
+                    .build(),
+            )
+            advanceUntilIdle()
+
+            assertThat(vm.tripProgress.value).isNotNull()
+            assertThat(vm.tripProgress.value?.nextStopName).isNull()
+        }
+
+    @Test
+    fun `unfollowing clears the progress so a future follow never shows stale data`() =
+        runTest(dispatcher.scheduler) {
+            followedTripRepository.seed(FollowedTripMother.aFollowedTrip().build())
+
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+            runPatternRepository.emitSuccess(RunPatternMother.aRunPattern().build())
+            advanceUntilIdle()
+            assertThat(vm.tripProgress.value).isNotNull()
+
+            vm.unfollowTrip()
+            advanceUntilIdle()
+
+            assertThat(vm.tripProgress.value).isNull()
+        }
+
+    @Test
+    fun `following a different run re-keys the poll onto the new run`() =
+        runTest(dispatcher.scheduler) {
+            val first = FollowedTripMother.aFollowedTrip().build()
+            followedTripRepository.seed(first)
+
+            val vm = viewModel()
+            vm.startTripProgressPolling()
+            advanceUntilIdle()
+
+            val second = FollowedTripMother.aFollowedTrip().withRunRef("111222").build()
+            followedTripRepository.follow(second)
+            advanceUntilIdle()
+
+            assertThat(runPatternRepository.observedKeys)
+                .containsExactly(
+                    first.runRef to first.routeType,
+                    second.runRef to second.routeType,
+                )
+                .inOrder()
         }
 
     @Test

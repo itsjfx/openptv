@@ -63,6 +63,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import kotlinx.coroutines.awaitCancellation
 
 /**
  * Root composable. The persisted theme mode is wrapped around this composable in
@@ -103,13 +104,23 @@ fun App(appViewModel: AppViewModel = hiltViewModel()) {
 private fun MainNav(appViewModel: AppViewModel) {
     val backStack = rememberNavBackStack(AppNavKey.Home())
     val followedTrip by appViewModel.followedTrip.collectAsStateWithLifecycle()
+    val tripProgress by appViewModel.tripProgress.collectAsStateWithLifecycle()
 
     // In-app completion check: the stored trip only re-emits on writes, so a trip that finished
-    // while the app was backgrounded is re-evaluated against the clock on every resume.
+    // while the app was backgrounded is re-evaluated against the clock on every resume. The same
+    // RESUMED window drives the bar's "Next stop" poll: start on entering (which also forces an
+    // immediate refresh — the pattern flow fetches on subscription), stop on leaving so a
+    // backgrounded app never polls.
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             appViewModel.evaluateFollowedTripCompletion()
+            appViewModel.startTripProgressPolling()
+            try {
+                awaitCancellation()
+            } finally {
+                appViewModel.stopTripProgressPolling()
+            }
         }
     }
 
@@ -162,6 +173,7 @@ private fun MainNav(appViewModel: AppViewModel) {
                         {
                             FollowedTripBar(
                                 trip = trip,
+                                nextStopName = tripProgress?.nextStopName,
                                 onOpen = openFollowedRun,
                                 onUnfollow = appViewModel::unfollowTrip,
                                 padSystemNavBar = false,
@@ -175,6 +187,7 @@ private fun MainNav(appViewModel: AppViewModel) {
         if (trip != null && showReturnBar && !barInHomeScaffold) {
             FollowedTripBar(
                 trip = trip,
+                nextStopName = tripProgress?.nextStopName,
                 onOpen = openFollowedRun,
                 onUnfollow = appViewModel::unfollowTrip,
             )
@@ -426,13 +439,20 @@ private enum class HomeTab(
  * system navigation bar itself; false when it stacks above Home's [NavigationBar], which
  * already owns that inset.
  *
+ * [nextStopName] is the live "Next stop: …" progress line (PR #202 follow-up), derived from
+ * the foreground pattern poll. Null — nothing followed yet fetched, fetch failing, or the run
+ * out of upcoming stops — simply drops the line, so the bar degrades to its static text and
+ * never shows an error.
+ *
  * Long trip names (V/Line: "Bairnsdale - Melbourne via Sale & Traralgon to Southern Cross")
  * overflow *down*, bounded at two lines with ellipsis, never *out* — the text column takes
  * `weight(1f)` so the unfollow control always keeps its tap target (CLAUDE.md UI conventions).
+ * The progress line follows the same rule, bounded at one line.
  */
 @Composable
 private fun FollowedTripBar(
     trip: FollowedTrip,
+    nextStopName: String?,
     onOpen: () -> Unit,
     onUnfollow: () -> Unit,
     padSystemNavBar: Boolean = true,
@@ -465,6 +485,15 @@ private fun FollowedTripBar(
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (nextStopName != null) {
+                    Text(
+                        text = stringResource(R.string.followed_trip_next_stop, nextStopName),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag(TestTagFollowedTripNextStop),
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(12.dp))
             TextButton(
@@ -518,6 +547,7 @@ internal const val TestTagTabNearby: String = "home-tab-nearby"
 internal const val TestTagTabSearch: String = "home-tab-search"
 internal const val TestTagFollowedTripBar: String = "followed-trip-bar"
 internal const val TestTagFollowedTripUnfollow: String = "followed-trip-unfollow"
+internal const val TestTagFollowedTripNextStop: String = "followed-trip-next-stop"
 
 /**
  * Maps the `:core:datastore` user-preference theme enum to the `:core:designsystem`
