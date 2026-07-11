@@ -25,6 +25,7 @@ import kotlinx.datetime.Instant
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
@@ -53,6 +54,13 @@ import kotlin.time.Duration.Companion.seconds
  * "towards", not "calls at" (`express_stop_count > 0` exists on the Richmond→Burnley corridor).
  * Why not patterns alone (skip steps 2–3): that's a pattern fetch per candidate per 30 s tick;
  * the join answers almost all candidates with the two departures calls the tick already makes.
+ *
+ * Day boundaries (issue #211): a `run_ref` names a timetable slot, not a calendar day's instance,
+ * so both resolution paths can cross days — the pattern endpoint defaults to *today's* instance
+ * (a next-day candidate then "arrives" ~24 h before it departs), and the two departures feeds
+ * have different window depths so around midnight they can hold different days' instances of the
+ * same ref. The pattern fetch is therefore anchored to the candidate's departure via `date_utc`,
+ * and both paths only accept arrivals inside `(departure, departure + MAX_PLAUSIBLE_JOURNEY]`.
  *
  * Failure posture inside one derivation: the three head fetches failing fails the whole fetch
  * ([Result.Error], next tick recovers). A per-candidate sequence fetch failing falls through to
@@ -168,9 +176,12 @@ internal class JourneyPlannerRepositoryImpl
         ): JourneyOption? {
             val route = routesById[candidate.routeId] ?: fallbackRoute(candidate.routeId, origin.routeType)
 
+            // "Later than the departure" alone would also match a *different day's* instance of
+            // the ref (~24 h out) — reject those here so the candidate falls through to the
+            // date-anchored pattern check instead of rendering an absurd duration.
             val joined =
                 destByRun[candidate.runRef]
-                    ?.firstOrNull { it.scheduledDepartureUtc > candidate.scheduledDepartureUtc }
+                    ?.firstOrNull { isPlausibleArrival(candidate, it.scheduledDepartureUtc) }
             if (joined != null) {
                 return candidate.toJourneyOption(
                     route = route,
@@ -216,6 +227,11 @@ internal class JourneyPlannerRepositoryImpl
          * destination *after* the origin. Handles runs that terminate at the destination (absent
          * from its departures feed) and rules out express runs that sail past it. A pattern
          * fetch failing drops this candidate for the tick instead of erroring the whole list.
+         *
+         * The fetch is anchored to the candidate's scheduled departure: timetable `run_ref`s
+         * recur daily and the endpoint defaults to today's instance, so a next-day candidate
+         * would otherwise join yesterday-relative times (issue #211's "-1436 min journey"). The
+         * plausibility check stays as the backstop for refs the API won't re-anchor.
          */
         @Suppress("TooGenericExceptionCaught")
         private suspend fun patternArrival(
@@ -226,7 +242,11 @@ internal class JourneyPlannerRepositoryImpl
         ): JourneyOption? {
             val pattern =
                 try {
-                    runPatternDataSource.getRunPattern(candidate.runRef, origin.routeType)
+                    runPatternDataSource.getRunPattern(
+                        candidate.runRef,
+                        origin.routeType,
+                        dateUtc = candidate.scheduledDepartureUtc,
+                    )
                 } catch (cancellation: CancellationException) {
                     throw cancellation
                 } catch (_: Throwable) {
@@ -238,12 +258,27 @@ internal class JourneyPlannerRepositoryImpl
                 pattern.stops
                     .drop(originIndex + 1)
                     .firstOrNull { it.stopId == destination.id }
+                    ?.takeIf { isPlausibleArrival(candidate, it.scheduledDepartureUtc) }
                     ?: return null
             return candidate.toJourneyOption(
                 route = route,
                 scheduledArrivalUtc = arrival.scheduledDepartureUtc,
                 estimatedArrivalUtc = arrival.estimatedDepartureUtc,
             )
+        }
+
+        /**
+         * True when [arrival] can belong to the candidate's own service instance: strictly after
+         * the scheduled departure and within [MAX_PLAUSIBLE_JOURNEY]. Anything outside that band
+         * is a different calendar day's instance of the same `run_ref` (issue #211) — never a
+         * journey to offer.
+         */
+        private fun isPlausibleArrival(
+            candidate: Departure,
+            arrival: Instant,
+        ): Boolean {
+            val duration = arrival - candidate.scheduledDepartureUtc
+            return duration > Duration.ZERO && duration <= MAX_PLAUSIBLE_JOURNEY
         }
 
         private suspend fun servingRouteIds(stop: Stop): Set<RouteId> {
@@ -300,5 +335,12 @@ internal class JourneyPlannerRepositoryImpl
              * covers the travel-time offset; a miss is only a pattern fetch, not a wrong answer.
              */
             private const val DESTINATION_RESULTS_PER_ROUTE: Int = 12
+
+            /**
+             * Longest believable direct journey. The longest direct V/Line runs are ~4.5 h
+             * (Bairnsdale — Melbourne), so 6 h clears every real service with slack while
+             * sitting far below the ~24 h error a wrong-day instance produces.
+             */
+            private val MAX_PLAUSIBLE_JOURNEY: Duration = 6.hours
         }
     }
