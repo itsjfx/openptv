@@ -258,6 +258,12 @@ private fun StopPickerSection(
                 label = { Text(stringResource(R.string.feature_journey_planner_search_label)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                trailingIcon =
+                    if (query.isNotEmpty()) {
+                        { ClearQueryButton(onClick = { onQueryChanged("") }) }
+                    } else {
+                        null
+                    },
             )
             TextButton(
                 onClick = onPickerDismissed,
@@ -285,6 +291,27 @@ private fun StopPickerSection(
     }
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
+    }
+}
+
+/**
+ * Trailing ✕ in the picker's search field — clears the query in one tap instead of making the
+ * user backspace a long stop name. A text glyph, not a Material icon, per the house trade
+ * (the icons artifact is deliberately not a dependency). Only composed while the query is
+ * non-empty; clearing routes through [onClick] → `onQueryChanged("")`, which the ViewModel
+ * pipeline already maps back to [StopPickerState.Idle].
+ */
+@Composable
+private fun ClearQueryButton(onClick: () -> Unit) {
+    val description = stringResource(R.string.feature_journey_planner_search_clear)
+    IconButton(
+        onClick = onClick,
+        modifier =
+            Modifier
+                .testTag(TestTagPickerClearButton)
+                .semantics { contentDescription = description },
+    ) {
+        Text(text = "✕", style = MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -420,7 +447,8 @@ private fun JourneyRow(
         )
     val durationMinutes =
         (option.effectiveArrivalUtc - option.effectiveDepartureUtc).inWholeMinutes
-    val duration = stringResource(R.string.feature_journey_planner_duration, durationMinutes)
+    val duration =
+        stringResource(R.string.feature_journey_planner_duration_journey, durationMinutes)
     val platformClause =
         option.departurePlatform?.let {
             stringResource(R.string.feature_journey_planner_platform_clause, it.value)
@@ -476,12 +504,19 @@ private fun JourneyRow(
             )
         }
         Spacer(modifier = Modifier.height(4.dp))
+        // Stacked, not dot-joined into one run-on string (issue #208): departure (+ platform)
+        // then arrival (+ duration), so each fact keeps its own line and stays scannable on
+        // narrow screens.
         Text(
-            text =
-                listOfNotNull(departs, platformClause, arrives, duration)
-                    .joinToString(separator = " · "),
+            text = listOfNotNull(departs, platformClause).joinToString(separator = " · "),
             style = MaterialTheme.typography.bodyMedium,
-            maxLines = 2,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = listOf(arrives, duration).joinToString(separator = " · "),
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
     }
@@ -561,6 +596,7 @@ internal const val TestTagSwapButton: String = "journey-swap-button"
 internal const val TestTagTimeSelector: String = "journey-time-selector"
 internal const val TestTagPickerQueryField: String = "journey-picker-query-field"
 internal const val TestTagPickerCancel: String = "journey-picker-cancel"
+internal const val TestTagPickerClearButton: String = "journey-picker-clear-button"
 internal const val TestTagPickerResults: String = "journey-picker-results"
 internal const val TestTagPickerStopRow: String = "journey-picker-stop-row"
 internal const val TestTagResultsIdle: String = "journey-results-idle"
