@@ -168,4 +168,25 @@ class RetrofitRunPatternDataSourceTest {
             assertThat(recorded.path)
                 .isEqualTo("/api/v3/pattern/run/953527/route_type/1?expand=Stop&expand=Route&expand=Direction")
         }
+
+    @Test
+    fun `date_utc is appended when supplied so the caller's day resolves`() =
+        runTest {
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody("""{"departures":[]}"""),
+            )
+
+            dataSource.getRunPattern(
+                RunRef("953527"),
+                RouteType.Train,
+                dateUtc = Instant.parse("2026-05-15T09:07:00Z"),
+            )
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path)
+                .isEqualTo(
+                    "/api/v3/pattern/run/953527/route_type/0" +
+                        "?expand=Stop&expand=Route&expand=Direction&date_utc=2026-05-15T09:07:00Z",
+                )
+        }
 }

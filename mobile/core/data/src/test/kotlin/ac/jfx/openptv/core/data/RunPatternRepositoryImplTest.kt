@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Instant
 import org.junit.Test
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
@@ -282,6 +283,7 @@ class RunPatternRepositoryImplTest {
         override suspend fun getRunPattern(
             runRef: RunRef,
             routeType: RouteType,
+            dateUtc: Instant?,
         ): RunPattern {
             val index = callCount.getAndIncrement()
             lastRunRef = runRef

@@ -591,13 +591,16 @@ class JourneyPlannerRepositoryImplTest {
         private val throwing: Throwable? = null,
     ) : RunPatternDataSource {
         val callCount: AtomicInteger = AtomicInteger(0)
+        var lastDateUtc: Instant? = null
         private val requested = ConcurrentHashMap.newKeySet<String>()
 
         override suspend fun getRunPattern(
             runRef: RunRef,
             routeType: RouteType,
+            dateUtc: Instant?,
         ): RunPattern {
             callCount.incrementAndGet()
+            lastDateUtc = dateUtc
             requested.add(runRef.value)
             throwing?.let { throw it }
             return patterns[runRef] ?: error("FakeRunPatternDataSource: no fixture for $runRef")
