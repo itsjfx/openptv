@@ -1,6 +1,7 @@
 package ac.jfx.openptv.feature.search
 
 import ac.jfx.openptv.core.data.test.FakeStopSearchRepository
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.testing.StopMother
 import app.cash.turbine.test
 import com.google.common.truth.Truth.assertThat
@@ -107,6 +108,100 @@ class SearchViewModelTest {
                 assertThat((terminal as SearchUiState.Error).reason).contains("network")
                 cancelAndIgnoreRemainingEvents()
             }
+        }
+
+    @Test
+    fun `search with no chips selected requests all modes`() =
+        runTest(dispatcher) {
+            repository.enqueueSuccess(listOf(StopMother.aStop().build()))
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                viewModel.onQueryChanged("richmond")
+                advanceTimeBy(350)
+                advanceUntilIdle()
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(repository.requestedRouteTypes).containsExactly(emptySet<RouteType>())
+        }
+
+    @Test
+    fun `toggling a chip re-runs the current query immediately with the filter on the wire`() =
+        runTest(dispatcher) {
+            repository.enqueueSuccess(listOf(StopMother.aStop().build()))
+            repository.enqueueSuccess(emptyList())
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                viewModel.onQueryChanged("richmond")
+                advanceTimeBy(350)
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
+                advanceUntilIdle()
+                assertThat(awaitItem()).isInstanceOf(SearchUiState.Results::class.java)
+
+                viewModel.onRouteTypeFilterToggled(RouteType.Train)
+                // Well inside the 300 ms debounce window — the filter combines in *after* the
+                // debounce, so the re-query must not wait for it.
+                advanceTimeBy(50)
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Loading)
+                advanceUntilIdle()
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Empty)
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(repository.requestedTerms).containsExactly("richmond", "richmond").inOrder()
+            assertThat(repository.requestedRouteTypes)
+                .containsExactly(emptySet<RouteType>(), setOf(RouteType.Train))
+                .inOrder()
+        }
+
+    @Test
+    fun `deselecting the last chip widens the query back to all modes`() =
+        runTest(dispatcher) {
+            repeat(3) { repository.enqueueSuccess(listOf(StopMother.aStop().build())) }
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                viewModel.onQueryChanged("richmond")
+                advanceTimeBy(350)
+                advanceUntilIdle()
+                viewModel.onRouteTypeFilterToggled(RouteType.Tram)
+                advanceUntilIdle()
+                viewModel.onRouteTypeFilterToggled(RouteType.Tram)
+                advanceUntilIdle()
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(repository.requestedRouteTypes)
+                .containsExactly(emptySet<RouteType>(), setOf(RouteType.Tram), emptySet<RouteType>())
+                .inOrder()
+            assertThat(viewModel.routeTypeFilter.value).isEmpty()
+        }
+
+    @Test
+    fun `toggling Unknown is a no-op`() =
+        runTest(dispatcher) {
+            repository.enqueueSuccess(listOf(StopMother.aStop().build()))
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                viewModel.onQueryChanged("richmond")
+                advanceTimeBy(350)
+                advanceUntilIdle()
+                viewModel.onRouteTypeFilterToggled(RouteType.Unknown)
+                advanceUntilIdle()
+                cancelAndIgnoreRemainingEvents()
+            }
+            // No second fetch — Unknown never reaches the filter set.
+            assertThat(repository.requestedTerms).containsExactly("richmond")
+            assertThat(viewModel.routeTypeFilter.value).isEmpty()
+        }
+
+    @Test
+    fun `toggling a chip with a sub-minimum query stays Idle and off the network`() =
+        runTest(dispatcher) {
+            viewModel.uiState.test {
+                assertThat(awaitItem()).isEqualTo(SearchUiState.Idle)
+                viewModel.onRouteTypeFilterToggled(RouteType.Bus)
+                advanceUntilIdle()
+                expectNoEvents()
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(repository.requestedTerms).isEmpty()
         }
 
     @Test
