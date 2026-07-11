@@ -21,38 +21,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * The position re-densification uses a `ROW_NUMBER()` window function. SQLite 3.25+ ships on
  * every supported Android (API 30+ is the project's `minSdk`).
  */
-/**
- * Schema v2 → v3: add the `favourite_journeys` table (issue #209). Pure additive — no existing
- * rows are touched, so the migration is a single `CREATE TABLE` whose shape must match Room's
- * generated schema for [ac.jfx.openptv.core.database.entity.FavouriteJourneyEntity] exactly
- * (the migration test validates against the exported `3.json`).
- */
-val MIGRATION_2_3: Migration =
-    object : Migration(2, 3) {
-        override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL(
-                """
-                CREATE TABLE IF NOT EXISTS `favourite_journeys` (
-                    `originStopId` INTEGER NOT NULL,
-                    `originStopName` TEXT NOT NULL,
-                    `originStopSuburb` TEXT NOT NULL,
-                    `originRouteType` TEXT NOT NULL,
-                    `originLat` REAL NOT NULL,
-                    `originLng` REAL NOT NULL,
-                    `destinationStopId` INTEGER NOT NULL,
-                    `destinationStopName` TEXT NOT NULL,
-                    `destinationStopSuburb` TEXT NOT NULL,
-                    `destinationRouteType` TEXT NOT NULL,
-                    `destinationLat` REAL NOT NULL,
-                    `destinationLng` REAL NOT NULL,
-                    `addedAt` INTEGER NOT NULL,
-                    PRIMARY KEY(`originStopId`, `destinationStopId`)
-                )
-                """.trimIndent(),
-            )
-        }
-    }
-
 val MIGRATION_1_2: Migration =
     object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
@@ -117,5 +85,37 @@ val MIGRATION_1_2: Migration =
                 """.trimIndent(),
             )
             db.execSQL("DROP TABLE `favourite_routes_at_stop`")
+        }
+    }
+
+/**
+ * Schema v2 → v3: add the `favourite_journeys` table (issue #209). Pure additive — no existing
+ * rows are touched, so the migration is a single `CREATE TABLE` whose shape must match Room's
+ * generated schema for [ac.jfx.openptv.core.database.entity.FavouriteJourneyEntity] exactly
+ * (the migration test validates against the exported `3.json`).
+ */
+val MIGRATION_2_3: Migration =
+    object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `favourite_journeys` (
+                    `originStopId` INTEGER NOT NULL,
+                    `originStopName` TEXT NOT NULL,
+                    `originStopSuburb` TEXT NOT NULL,
+                    `originRouteType` TEXT NOT NULL,
+                    `originLat` REAL NOT NULL,
+                    `originLng` REAL NOT NULL,
+                    `destinationStopId` INTEGER NOT NULL,
+                    `destinationStopName` TEXT NOT NULL,
+                    `destinationStopSuburb` TEXT NOT NULL,
+                    `destinationRouteType` TEXT NOT NULL,
+                    `destinationLat` REAL NOT NULL,
+                    `destinationLng` REAL NOT NULL,
+                    `addedAt` INTEGER NOT NULL,
+                    PRIMARY KEY(`originStopId`, `destinationStopId`)
+                )
+                """.trimIndent(),
+            )
         }
     }
