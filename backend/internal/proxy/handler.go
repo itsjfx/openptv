@@ -44,9 +44,17 @@ func NewHandler(client *ptv.Client, signer *ptv.Signer, logger *slog.Logger) (*H
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Work with the escaped path throughout: the signature must cover the
+	// exact bytes sent upstream, and r.URL.Path decodes %XX so signing it
+	// breaks any percent-encoded segment (issue #205). Go preserves these
+	// bytes end to end: the outbound request line is built from RawPath,
+	// which survives the re-parse in Client.Get as long as it is a valid
+	// encoding of the path — and an inbound escaped path always is.
+	escapedPath := r.URL.EscapedPath()
+
 	// 404 for paths not under /api/v3/. The mux already routes /api/v3/ here,
 	// but defence in depth is cheap.
-	if !strings.HasPrefix(r.URL.Path, apiPrefix) {
+	if !strings.HasPrefix(escapedPath, apiPrefix) {
 		http.NotFound(w, r)
 		return
 	}
@@ -59,7 +67,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build the upstream path /v3/<rest> from the inbound /api/v3/<rest>.
-	rest := strings.TrimPrefix(r.URL.Path, apiPrefix)
+	rest := strings.TrimPrefix(escapedPath, apiPrefix)
 	upstreamPath := "/v3/" + rest
 
 	// Strip client-supplied auth params; never trust them.
