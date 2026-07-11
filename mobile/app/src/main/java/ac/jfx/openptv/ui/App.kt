@@ -450,11 +450,11 @@ private enum class HomeTab(
 ) {
     Favourites("★", R.string.bottom_nav_favourites, "Favourites tab", TestTagTabFavourites),
     Nearby("🗺", R.string.bottom_nav_nearby, "Nearby tab", TestTagTabNearby),
-    Search("⌕", R.string.bottom_nav_search, "Search tab", TestTagTabSearch),
 
-    // Journey planner (issue #204) sits last: it *composes* the "find a stop" surfaces before
-    // it — you plan a journey between stops you'd otherwise find via Nearby or Search.
+    // Journey planner (issue #204) slots before Search so the planning surface sits next to the
+    // map — Search stays in the corner where muscle memory expects a text box.
     Journey("⇄", R.string.bottom_nav_journey, "Journey planner tab", TestTagTabJourney),
+    Search("⌕", R.string.bottom_nav_search, "Search tab", TestTagTabSearch),
 }
 
 /**
