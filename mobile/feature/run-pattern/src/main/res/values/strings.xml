@@ -42,4 +42,13 @@
     <string name="feature_run_pattern_follow_replace_body">You\'re following %1$s. Only one trip can be followed at a time — following this one replaces it.</string>
     <string name="feature_run_pattern_follow_replace_confirm">Replace</string>
     <string name="feature_run_pattern_follow_replace_cancel">Cancel</string>
+    <!-- Alight alerts (issue #201). The bell on each upcoming stop row arms/disarms the
+         "I'm getting off here" alert; arming also follows the trip. -->
+    <string name="feature_run_pattern_alight_here">Getting off here</string>
+    <!-- Slot: stop name. -->
+    <string name="feature_run_pattern_alight_arm_content_description">Alert me before %1$s</string>
+    <!-- Slot: stop name. -->
+    <string name="feature_run_pattern_alight_disarm_content_description">Cancel the getting-off alert for %1$s</string>
+    <string name="feature_run_pattern_alight_notifications_denied">Notifications are blocked — getting-off alerts can\'t be shown.</string>
+    <string name="feature_run_pattern_alight_schedule_only">No live tracking for this service — alerts will follow the timetable only.</string>
 </resources>

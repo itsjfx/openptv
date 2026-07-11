@@ -3,6 +3,19 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Alight alerts (issue #201). POST_NOTIFICATIONS is requested contextually when the user
+         arms their first alert; the foreground-service types cover the tracking poll (dataSync)
+         and the tram GPS fallback (location — only engaged when real-time data is missing and
+         the user granted location). Location permissions themselves are declared by :core:data. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Also declared by :core:data (manifest merge), but lint's ForegroundServicePermission
+         check reads this manifest directly, so the location pair is repeated here. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
     <application
         android:name=".OpenPtvApplication"
         android:allowBackup="true"
@@ -21,6 +34,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Tracks the followed trip's alight alert while the app is closed (issue #201).
+             dataSync for the pattern poll; location is added at runtime only when the GPS
+             fallback engages (trams — no real-time on the pattern endpoint). -->
+        <service
+            android:name=".alert.AlightAlertService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|location" />
 
     </application>
 

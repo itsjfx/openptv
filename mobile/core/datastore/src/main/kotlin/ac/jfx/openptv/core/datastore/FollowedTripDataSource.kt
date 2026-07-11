@@ -1,6 +1,8 @@
 package ac.jfx.openptv.core.datastore
 
 import ac.jfx.openptv.core.datastore.preference.PreferenceKeys
+import ac.jfx.openptv.core.model.AlightAlert
+import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
@@ -89,6 +91,12 @@ class FollowedTripDataSource
  * The on-disk JSON shape. `internal` — never leaks past this module; the domain type is
  * [FollowedTrip]. `route_type` is the PTV wire code (same stability argument as
  * `MapRouteTypeFilterPreference`: enum case names can be renamed, the int can't drift).
+ *
+ * The `alight_*` fields (issue #201) were added *additively* — every one defaults so a payload
+ * written by the #200 build still decodes, and a #200 build reading a #201 payload simply
+ * ignores the extras (lenient decode). The alert is considered present iff `alight_stop_id`
+ * AND `alight_stop_name` are both set; a partially written pair decodes as "no alert" rather
+ * than a half-armed one.
  */
 @Serializable
 internal data class StoredFollowedTrip(
@@ -99,6 +107,12 @@ internal data class StoredFollowedTrip(
     @SerialName("destination_name") val destinationName: String,
     @SerialName("completes_at_utc") val completesAtUtc: Instant,
     @SerialName("followed_at_utc") val followedAtUtc: Instant,
+    @SerialName("alight_stop_id") val alightStopId: Int? = null,
+    @SerialName("alight_stop_name") val alightStopName: String? = null,
+    @SerialName("alight_stop_lat") val alightStopLat: Double? = null,
+    @SerialName("alight_stop_lng") val alightStopLng: Double? = null,
+    @SerialName("alight_approach_fired") val alightApproachFired: Boolean = false,
+    @SerialName("alight_arrival_fired") val alightArrivalFired: Boolean = false,
 )
 
 internal fun FollowedTrip.toStored(): StoredFollowedTrip =
@@ -110,6 +124,12 @@ internal fun FollowedTrip.toStored(): StoredFollowedTrip =
         destinationName = destinationName,
         completesAtUtc = completesAtUtc,
         followedAtUtc = followedAtUtc,
+        alightStopId = alightAlert?.stopId?.value,
+        alightStopName = alightAlert?.stopName,
+        alightStopLat = alightAlert?.coordinates?.lat,
+        alightStopLng = alightAlert?.coordinates?.lng,
+        alightApproachFired = alightAlert?.approachFired ?: false,
+        alightArrivalFired = alightAlert?.arrivalFired ?: false,
     )
 
 internal fun StoredFollowedTrip.toDomain(): FollowedTrip =
@@ -121,4 +141,19 @@ internal fun StoredFollowedTrip.toDomain(): FollowedTrip =
         destinationName = destinationName,
         completesAtUtc = completesAtUtc,
         followedAtUtc = followedAtUtc,
+        alightAlert = toAlightAlert(),
     )
+
+private fun StoredFollowedTrip.toAlightAlert(): AlightAlert? {
+    val stopId = alightStopId ?: return null
+    val stopName = alightStopName ?: return null
+    val lat = alightStopLat
+    val lng = alightStopLng
+    return AlightAlert(
+        stopId = StopId(stopId),
+        stopName = stopName,
+        coordinates = if (lat != null && lng != null) Coordinates(lat = lat, lng = lng) else null,
+        approachFired = alightApproachFired,
+        arrivalFired = alightArrivalFired,
+    )
+}

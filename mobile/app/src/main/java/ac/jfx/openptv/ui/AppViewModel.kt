@@ -8,6 +8,7 @@ import ac.jfx.openptv.core.domain.ObserveRunPatternUseCase
 import ac.jfx.openptv.core.domain.TripProgress
 import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RunPattern
+import ac.jfx.openptv.core.model.RunRef
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -16,16 +17,16 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 import javax.inject.Inject
 
 /**
@@ -47,7 +48,8 @@ import javax.inject.Inject
  * is followed *and* the app is foregrounded, [startTripProgressPolling] collects the followed
  * run's pattern through the same 30 s-polling [ObserveRunPatternUseCase] the run-pattern screen
  * uses (fetch-on-subscribe covers "refresh immediately on resume") and derives [TripProgress]
- * per emission. The root composable drives start/stop from `repeatOnLifecycle(RESUMED)`, so
+ * per emission — including, when an alight alert is armed (issue #201), the rough ETA to the
+ * alight stop. The root composable drives start/stop from `repeatOnLifecycle(RESUMED)`, so
  * backgrounding the app tears the poll down — no polling while nothing can see the bar.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -85,16 +87,40 @@ class AppViewModel
                 )
 
         /**
-         * Live progress of the followed run for the bar's "Next stop" line, or `null` when
-         * nothing is followed, nothing has been fetched yet, or the run has no upcoming stops
-         * left. Deliberately *sticky across fetch failures*: an error or in-flight tick keeps
-         * the last derived value, so the bar degrades to slightly-stale text instead of
-         * flickering — the bar must never surface an error state.
+         * The poll's last successful fetch, tagged with the run it was for and the clock at
+         * fetch time. Kept as a snapshot (rather than a derived [TripProgress]) so arming or
+         * disarming an alight alert between poll ticks re-derives the bar's progress from the
+         * cached pattern *immediately* — no waiting up to 30 s for the next fetch.
          */
-        val tripProgress: StateFlow<TripProgress?>
-            get() = mutableTripProgress.asStateFlow()
+        private val latestPattern = MutableStateFlow<PatternSnapshot?>(null)
 
-        private val mutableTripProgress = MutableStateFlow<TripProgress?>(null)
+        /**
+         * Live progress of the followed run for the bar's "Next stop · ~ETA" line, or `null`
+         * when nothing is followed, nothing has been fetched yet, or the last fetch belongs to
+         * a previously followed run (the run-ref guard, so a stale pattern never renders under
+         * a newly followed trip's label). Deliberately *sticky across fetch failures*: an error
+         * or in-flight tick leaves [latestPattern] alone, so the bar degrades to slightly-stale
+         * text instead of flickering — the bar must never surface an error state.
+         *
+         * The alight ETA (issue #201) is derived from the same foreground poll the "Next stop"
+         * line already runs — not from the alert service's background poll — so the bar works
+         * with or without an armed alert and the two pollers stay decoupled.
+         */
+        val tripProgress: StateFlow<TripProgress?> =
+            combine(
+                followedTripRepository.followedTrip,
+                latestPattern,
+            ) { trip, snapshot ->
+                if (trip == null || snapshot == null || snapshot.runRef != trip.runRef) {
+                    null
+                } else {
+                    TripProgress.from(snapshot.pattern, snapshot.asOf, trip.alightAlert?.stopId)
+                }
+            }.stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.Eagerly,
+                initialValue = null,
+            )
 
         /** Tracks the active progress-polling coroutine so [startTripProgressPolling] is idempotent. */
         private var progressJob: Job? = null
@@ -136,10 +162,9 @@ class AppViewModel
          *
          * Shape: the stored trip keyed by run → `flatMapLatest` into the polling pattern flow,
          * so unfollowing stops the poll, following a *different* run swaps it, and re-writes of
-         * the same run (e.g. `completesAtUtc` refreshes) don't restart it. Each subscription
-         * resets the progress to `null` first so a stale "Next stop" from a previous run never
-         * lingers under a new trip's label. `Loading` / `Error` emissions are ignored — the
-         * last good progress stays up (see [tripProgress]).
+         * the same run (`completesAtUtc` refreshes, alight alert arm/disarm/latch updates)
+         * don't restart it. Successful fetches land in [latestPattern]; `Loading` / `Error`
+         * emissions are ignored — the last good progress stays up (see [tripProgress]).
          */
         fun startTripProgressPolling() {
             progressJob?.cancel()
@@ -150,23 +175,20 @@ class AppViewModel
                         .distinctUntilChanged()
                         .flatMapLatest { key ->
                             if (key == null) {
-                                flow { emit(ProgressUpdate.Reset) }
+                                emptyFlow()
                             } else {
                                 observeRunPattern(key.first, key.second)
-                                    .map<Result<RunPattern>, ProgressUpdate> { ProgressUpdate.Emission(it) }
-                                    .onStart { emit(ProgressUpdate.Reset) }
+                                    .map { result -> key.first to result }
                             }
                         }
-                        .collect { update ->
-                            when (update) {
-                                ProgressUpdate.Reset -> mutableTripProgress.value = null
-                                is ProgressUpdate.Emission -> {
-                                    val result = update.result
-                                    if (result is Result.Success) {
-                                        mutableTripProgress.value =
-                                            TripProgress.from(result.data, clock.now())
-                                    }
-                                }
+                        .collect { (runRef, result) ->
+                            if (result is Result.Success) {
+                                latestPattern.value =
+                                    PatternSnapshot(
+                                        runRef = runRef,
+                                        pattern = result.data,
+                                        asOf = clock.now(),
+                                    )
                             }
                         }
                 }
@@ -179,16 +201,16 @@ class AppViewModel
         }
 
         /**
-         * What the progress collector reacts to: a fresh pattern emission for the followed
-         * run, or a reset because there is no (or a different) followed run to poll.
+         * One successful pattern fetch: which run it was for (the [tripProgress] guard against
+         * rendering a previous run's data), the pattern itself, and the wall clock at fetch
+         * time — carried so every fresh fetch re-derives progress even when PTV returns a
+         * byte-identical pattern (the *clock* moving is what advances "Next stop").
          */
-        private sealed interface ProgressUpdate {
-            data object Reset : ProgressUpdate
-
-            data class Emission(
-                val result: Result<RunPattern>,
-            ) : ProgressUpdate
-        }
+        private data class PatternSnapshot(
+            val runRef: RunRef,
+            val pattern: RunPattern,
+            val asOf: Instant,
+        )
     }
 
 sealed interface GateState {

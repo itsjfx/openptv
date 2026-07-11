@@ -18,6 +18,10 @@ import kotlin.time.Duration.Companion.minutes
  *
  * `fromStopId` is nullable for the same reason as the nav key's: the user may have opened the
  * pattern without tapping through from a specific stop.
+ *
+ * `alightAlert` is the optional armed "I'm getting off here" alert (issue #201) — null when the
+ * user follows without arming one. Replacing it with a new [AlightAlert] (different stop)
+ * re-arms both alert stages; see [AlightAlert] for the fire-once latch semantics.
  */
 data class FollowedTrip(
     val runRef: RunRef,
@@ -27,6 +31,7 @@ data class FollowedTrip(
     val destinationName: String,
     val completesAtUtc: Instant,
     val followedAtUtc: Instant,
+    val alightAlert: AlightAlert? = null,
 ) {
     /**
      * True once [now] is past the final pattern stop's arrival plus [COMPLETION_GRACE]. The

@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.datastore
 
 import ac.jfx.openptv.core.datastore.preference.PreferenceKeys
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.testing.AlightAlertMother
 import ac.jfx.openptv.core.testing.FollowedTripMother
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -163,7 +164,119 @@ class FollowedTripDataSourceTest {
     @Test
     fun payload_with_unknown_extra_fields_still_decodes() =
         runTest {
-            // Forward-compat: a newer build (issue #201) may write extra fields.
+            // Forward-compat: a newer build than this one may write extra fields.
+            val scope = newScope()
+            val store = openDataStore(scope)
+            store.edit { prefs ->
+                prefs[PreferenceKeys.FOLLOWED_TRIP] =
+                    """
+                    {
+                      "run_ref": "953527",
+                      "route_type": 0,
+                      "destination_name": "Flinders Street",
+                      "completes_at_utc": "2026-05-14T09:11:00Z",
+                      "followed_at_utc": "2026-05-14T09:00:00Z",
+                      "some_future_field": true
+                    }
+                    """.trimIndent()
+            }
+
+            val source = FollowedTripDataSource(store)
+            source.followedTrip.test {
+                val emitted = awaitItem()
+                assertThat(emitted).isNotNull()
+                assertThat(emitted!!.runRef.value).isEqualTo("953527")
+                assertThat(emitted.routeType).isEqualTo(RouteType.Train)
+                assertThat(emitted.fromStopId).isNull()
+                cancelAndIgnoreRemainingEvents()
+            }
+            scope.cancel()
+        }
+
+    @Test
+    fun alight_alert_round_trips_across_datastore_reopen() =
+        runTest {
+            val written =
+                FollowedTripMother.aFollowedTrip()
+                    .withAlightAlert(
+                        AlightAlertMother.anAlightAlert()
+                            .withApproachFired(true)
+                            .build(),
+                    )
+                    .build()
+
+            val firstScope = newScope()
+            FollowedTripDataSource(openDataStore(firstScope)).set(written)
+            firstScope.cancel()
+
+            val secondScope = newScope()
+            val reopened = FollowedTripDataSource(openDataStore(secondScope))
+            reopened.followedTrip.test {
+                val emitted = awaitItem()
+                assertThat(emitted).isEqualTo(written)
+                assertThat(emitted!!.alightAlert!!.approachFired).isTrue()
+                assertThat(emitted.alightAlert!!.arrivalFired).isFalse()
+                cancelAndIgnoreRemainingEvents()
+            }
+            secondScope.cancel()
+        }
+
+    @Test
+    fun alight_alert_without_coordinates_round_trips() =
+        runTest {
+            val written =
+                FollowedTripMother.aFollowedTrip()
+                    .withAlightAlert(
+                        AlightAlertMother.anAlightAlert().withCoordinates(null).build(),
+                    )
+                    .build()
+
+            val scope = newScope()
+            val source = FollowedTripDataSource(openDataStore(scope))
+            source.set(written)
+            source.followedTrip.test {
+                val emitted = awaitItem()
+                assertThat(emitted).isEqualTo(written)
+                assertThat(emitted!!.alightAlert!!.coordinates).isNull()
+                cancelAndIgnoreRemainingEvents()
+            }
+            scope.cancel()
+        }
+
+    @Test
+    fun pre_alight_payload_decodes_with_no_alert() =
+        runTest {
+            // Backward-compat (one-way-door check): a payload written by the #200 build — no
+            // alight_* fields at all — must decode as a followed trip with a null alert.
+            val scope = newScope()
+            val store = openDataStore(scope)
+            store.edit { prefs ->
+                prefs[PreferenceKeys.FOLLOWED_TRIP] =
+                    """
+                    {
+                      "run_ref": "953527",
+                      "route_type": 0,
+                      "destination_name": "Flinders Street",
+                      "completes_at_utc": "2026-05-14T09:11:00Z",
+                      "followed_at_utc": "2026-05-14T09:00:00Z"
+                    }
+                    """.trimIndent()
+            }
+
+            val source = FollowedTripDataSource(store)
+            source.followedTrip.test {
+                val emitted = awaitItem()
+                assertThat(emitted).isNotNull()
+                assertThat(emitted!!.alightAlert).isNull()
+                cancelAndIgnoreRemainingEvents()
+            }
+            scope.cancel()
+        }
+
+    @Test
+    fun half_written_alight_pair_decodes_as_no_alert() =
+        runTest {
+            // A stop id without a name must not decode into a half-armed alert.
             val scope = newScope()
             val store = openDataStore(scope)
             store.edit { prefs ->
@@ -184,9 +297,7 @@ class FollowedTripDataSourceTest {
             source.followedTrip.test {
                 val emitted = awaitItem()
                 assertThat(emitted).isNotNull()
-                assertThat(emitted!!.runRef.value).isEqualTo("953527")
-                assertThat(emitted.routeType).isEqualTo(RouteType.Train)
-                assertThat(emitted.fromStopId).isNull()
+                assertThat(emitted!!.alightAlert).isNull()
                 cancelAndIgnoreRemainingEvents()
             }
             scope.cancel()

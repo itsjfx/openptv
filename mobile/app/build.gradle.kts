@@ -128,8 +128,10 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:datastore"))
     implementation(project(":core:designsystem"))
-    // `AppViewModel` polls the followed run through `ObserveRunPatternUseCase` and derives
-    // the bar's "Next stop" line via the pure `TripProgress` (PR #202 follow-up).
+    // `AlightAlertService` (issue #201) drives the pure `AlightAlertEvaluator` and the
+    // run-pattern use case from the composition root; `AppViewModel` polls the followed run
+    // through `ObserveRunPatternUseCase` and derives the bar's "Next stop" line via the pure
+    // `TripProgress` (PR #202 follow-up).
     implementation(project(":core:domain"))
     implementation(project(":core:model"))
     implementation(project(":core:navigation"))

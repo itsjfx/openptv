@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
@@ -131,6 +132,12 @@ internal class LocationManagerLocationProvider
                             MIN_TIME_MS,
                             MIN_DISTANCE_M,
                             listener,
+                            // Explicit Looper so collection is dispatcher-agnostic: the no-Looper
+                            // overload throws "Can't create handler inside thread ..." when the
+                            // collector runs off the main thread (the alight-alert foreground
+                            // service collects on Dispatchers.Default — issue #201). Callbacks
+                            // land on main and are immediately trySend-ed, so the cost is nil.
+                            Looper.getMainLooper(),
                         )
                     }
                 } catch (_: SecurityException) {
