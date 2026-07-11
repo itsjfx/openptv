@@ -8,6 +8,7 @@ import ac.jfx.openptv.core.domain.TripProgress
 import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
+import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.navigation.AppNavKey
 import ac.jfx.openptv.feature.favourites.FavouritesRoute
@@ -44,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -357,6 +359,12 @@ private fun HomeScaffold(
             if (focusLat != null && focusLon != null) HomeTab.Nearby else HomeTab.Favourites,
         )
     }
+    // One-shot journey prefill (issue #209): tapping a journey favourite stashes the pair here,
+    // flips to the Journey tab, and JourneyPlannerRoute consumes it once via LaunchedEffect —
+    // the focusLat/focusLon precedent, but scaffold-local state because `Stop` doesn't fit in a
+    // nav key. Plain `remember` (not saveable): the pair lives only for the tab switch; a
+    // process death in that window just lands on the Journey tab unprefixed.
+    var journeyPrefill by remember { mutableStateOf<Pair<Stop, Stop>?>(null) }
 
     Scaffold(
         bottomBar = {
@@ -404,6 +412,12 @@ private fun HomeScaffold(
                         // the bottom-nav surface.
                         onOpenSearch = { selectedTab = HomeTab.Search },
                         onOpenSettings = onOpenSettings,
+                        // Journey favourite tap (issue #209): stash the pair and flip to the
+                        // Journey tab; the planner consumes the prefill once.
+                        onOpenJourney = { origin, destination ->
+                            journeyPrefill = origin to destination
+                            selectedTab = HomeTab.Journey
+                        },
                     )
                 HomeTab.Nearby ->
                     // When the user taps the Nearby tab directly, focusLat/focusLon are null and
@@ -432,6 +446,9 @@ private fun HomeScaffold(
                             onOpenRunPattern(runRef.value, routeType.toCode(), fromStopId.value)
                         },
                         onOpenSettings = onOpenSettings,
+                        prefillOrigin = journeyPrefill?.first,
+                        prefillDestination = journeyPrefill?.second,
+                        onPrefillConsumed = { journeyPrefill = null },
                     )
             }
         }

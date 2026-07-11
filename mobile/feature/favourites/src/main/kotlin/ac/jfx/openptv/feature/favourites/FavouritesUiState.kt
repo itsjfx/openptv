@@ -1,6 +1,7 @@
 package ac.jfx.openptv.feature.favourites
 
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.model.Stop
 import kotlinx.datetime.Instant
 
 /**
@@ -26,6 +27,9 @@ sealed interface FavouritesUiState {
 
     data class Loaded(
         val rows: List<FavouriteRow>,
+        // Journey favourites (issue #209) render as their own section below the stop rows.
+        // Either list may be empty as long as the other isn't — [Empty] means both are.
+        val journeyRows: List<JourneyFavouriteRow> = emptyList(),
         val pendingUndo: PendingUndo? = null,
         val editMode: Boolean = false,
         val isRefreshing: Boolean = false,
@@ -97,3 +101,48 @@ data class PendingUndo(
     val row: FavouriteRow,
     val originalPosition: Int,
 )
+
+/**
+ * One journey favourite on the Favourites tab (issue #209): the starred origin→destination pair
+ * plus the live [nextService] — the next direct run between the two stops — computed by the
+ * ViewModel on the same fan-out cadence as the stop rows' next departures.
+ *
+ * Full [Stop]s ride along so tapping the row can hand both endpoints to the journey planner
+ * prefill without a lookup.
+ */
+data class JourneyFavouriteRow(
+    val key: JourneyFavouriteKey,
+    val origin: Stop,
+    val destination: Stop,
+    val nextService: JourneyNextServiceState,
+)
+
+/** Composite key for a journey favourite — the ordered pair; A→B ≠ B→A. */
+data class JourneyFavouriteKey(
+    val originStopId: Int,
+    val destinationStopId: Int,
+)
+
+/**
+ * Live "next direct service" state for a journey favourite row. One-shot fetched per row on
+ * load/refresh/tick — no per-row polling loop. [Empty] is the honest "no direct services right
+ * now"; [Error] degrades inline without breaking the tab.
+ */
+sealed interface JourneyNextServiceState {
+    data object Loading : JourneyNextServiceState
+
+    data object Empty : JourneyNextServiceState
+
+    data class Loaded(
+        val routeBadge: String,
+        val directionName: String,
+        val relativeLabel: String,
+        val scheduledDepartureUtc: Instant,
+        val estimatedDepartureUtc: Instant?,
+        val departurePlatform: String?,
+        val arrivalUtc: Instant,
+        val durationMinutes: Long,
+    ) : JourneyNextServiceState
+
+    data object Error : JourneyNextServiceState
+}

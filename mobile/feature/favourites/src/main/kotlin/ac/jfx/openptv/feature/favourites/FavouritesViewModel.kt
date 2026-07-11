@@ -2,11 +2,14 @@ package ac.jfx.openptv.feature.favourites
 
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.data.FavouriteJourneysRepository
 import ac.jfx.openptv.core.data.FavouritesRepository
+import ac.jfx.openptv.core.data.JourneyPlannerRepository
 import ac.jfx.openptv.core.domain.LoadNextDepartureUseCase
 import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ReorderFavouritesUseCase
 import ac.jfx.openptv.core.model.FavouriteDestinationAtStop
+import ac.jfx.openptv.core.model.FavouriteJourney
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.model.routeDisplayLabel
 import androidx.lifecycle.ViewModel
@@ -50,9 +53,15 @@ class FavouritesViewModel
         private val reorderFavourites: ReorderFavouritesUseCase,
         private val loadNextDeparture: LoadNextDepartureUseCase,
         private val favouritesRepository: FavouritesRepository,
+        private val favouriteJourneysRepository: FavouriteJourneysRepository,
+        private val journeyPlannerRepository: JourneyPlannerRepository,
         private val timeFormatter: RelativeTimeFormatter,
     ) : ViewModel() {
         private val nextDepartures: MutableStateFlow<Map<FavouriteKey, NextDepartureState>> =
+            MutableStateFlow(emptyMap())
+
+        /** Issue #209: per-journey-favourite "next direct service" cache, same tick as above. */
+        private val journeyNextServices: MutableStateFlow<Map<JourneyFavouriteKey, JourneyNextServiceState>> =
             MutableStateFlow(emptyMap())
 
         private val pendingUndo: MutableStateFlow<PendingUndo?> = MutableStateFlow(null)
@@ -73,18 +82,23 @@ class FavouritesViewModel
             combine(
                 // `onStart` so the combined projection produces a real `FavouritesUiState`
                 // immediately on first subscription, instead of staying in `Loading` until
-                // every upstream has fired.
-                observeFavourites().onStart { emit(emptyList()) },
-                nextDepartures,
+                // every upstream has fired. The journey favourites (issue #209) ride along in
+                // the same slot via an inner combine — `combine` only takes five typed flows.
+                observeFavourites().onStart { emit(emptyList()) }
+                    .combine(
+                        favouriteJourneysRepository.observe().onStart { emit(emptyList()) },
+                    ) { favourites, journeys -> favourites to journeys },
+                nextDepartures.combine(journeyNextServices) { nexts, journeyNexts -> nexts to journeyNexts },
                 pendingUndo,
                 editMode,
-                // `combine` only takes five typed flows, so bundle the two booleans-ish tail flows
-                // (refreshing + selectedTime) into a Pair via an inner combine, then unpack below.
+                // Same bundling for the two boolean-ish tail flows (refreshing + selectedTime).
                 isRefreshing.combine(selectedTime) { refreshing, chosen -> refreshing to chosen },
-            ) { favourites, nexts, undo, edit, refreshingAndTime ->
+            ) { (favourites, journeyFavourites), (nexts, journeyNexts), undo, edit, refreshingAndTime ->
                 projectState(
                     favourites = favourites,
+                    journeyFavourites = journeyFavourites,
                     nexts = nexts,
+                    journeyNexts = journeyNexts,
                     undo = undo,
                     editMode = edit,
                     isRefreshing = refreshingAndTime.first,
@@ -102,6 +116,7 @@ class FavouritesViewModel
                 viewModelScope.launch {
                     while (true) {
                         refreshNextDepartures()
+                        refreshJourneyNextServices()
                         delay(TICK_INTERVAL_MILLIS)
                     }
                 }
@@ -117,6 +132,7 @@ class FavouritesViewModel
                 isRefreshing.value = true
                 try {
                     refreshNextDepartures()
+                    refreshJourneyNextServices()
                 } finally {
                     isRefreshing.value = false
                 }
@@ -180,14 +196,20 @@ class FavouritesViewModel
          */
         fun setSelectedTime(instant: Instant) {
             selectedTime.value = instant
-            viewModelScope.launch { refreshNextDepartures() }
+            viewModelScope.launch {
+                refreshNextDepartures()
+                refreshJourneyNextServices()
+            }
         }
 
         /** Reset the favourites page back to live "now" (issue #182) and re-fan immediately. */
         fun clearSelectedTime() {
             if (selectedTime.value == null) return
             selectedTime.value = null
-            viewModelScope.launch { refreshNextDepartures() }
+            viewModelScope.launch {
+                refreshNextDepartures()
+                refreshJourneyNextServices()
+            }
         }
 
         private suspend fun refreshNextDepartures() {
@@ -221,6 +243,85 @@ class FavouritesViewModel
                         .toMap()
                 }
             nextDepartures.value = results
+        }
+
+        /**
+         * Issue #209: fan out one-shot `getJourneys` fetches for the journey favourites — same
+         * bounded-parallelism recipe as [refreshNextDepartures], same anchor rules (a pinned
+         * page-level time carries into every fetch). One-shot per tick, never a per-row
+         * polling loop.
+         */
+        private suspend fun refreshJourneyNextServices() {
+            val journeys: List<FavouriteJourney> =
+                withTimeoutOrNull(SNAPSHOT_TIMEOUT_MILLIS) {
+                    favouriteJourneysRepository.observe().first()
+                } ?: emptyList()
+            if (journeys.isEmpty()) {
+                journeyNextServices.value = emptyMap()
+                return
+            }
+            val semaphore = Semaphore(PARALLEL_FETCH_LIMIT)
+            val previous = journeyNextServices.value
+            val anchor = selectedTime.value
+            val results: Map<JourneyFavouriteKey, JourneyNextServiceState> =
+                coroutineScope {
+                    journeys
+                        .map { journey ->
+                            async {
+                                semaphore.withPermit {
+                                    val key = journey.toKey()
+                                    key to fetchNextService(journey, previous[key], anchor)
+                                }
+                            }
+                        }
+                        .awaitAll()
+                        .toMap()
+                }
+            journeyNextServices.value = results
+        }
+
+        private suspend fun fetchNextService(
+            journey: FavouriteJourney,
+            previous: JourneyNextServiceState?,
+            at: Instant?,
+        ): JourneyNextServiceState {
+            val result =
+                journeyPlannerRepository.getJourneys(
+                    origin = journey.origin,
+                    destination = journey.destination,
+                    at = at,
+                )
+            return when (result) {
+                is Result.Success -> {
+                    // The repository returns options in departure order, but don't rely on it —
+                    // the row promises the *soonest* boardable service.
+                    val next = result.data.minByOrNull { it.effectiveDepartureUtc }
+                    if (next == null) {
+                        JourneyNextServiceState.Empty
+                    } else {
+                        JourneyNextServiceState.Loaded(
+                            routeBadge = next.route.displayLabel,
+                            directionName = next.direction.name,
+                            relativeLabel =
+                                timeFormatter.format(
+                                    scheduled = next.scheduledDepartureUtc,
+                                    estimated = next.estimatedDepartureUtc,
+                                ),
+                            scheduledDepartureUtc = next.scheduledDepartureUtc,
+                            estimatedDepartureUtc = next.estimatedDepartureUtc,
+                            departurePlatform = next.departurePlatform?.value,
+                            arrivalUtc = next.effectiveArrivalUtc,
+                            durationMinutes =
+                                (next.effectiveArrivalUtc - next.effectiveDepartureUtc).inWholeMinutes,
+                        )
+                    }
+                }
+                is Result.Error ->
+                    // Same no-flicker rule as the stop rows: keep the prior Loaded across a
+                    // transient failure, otherwise degrade inline.
+                    (previous as? JourneyNextServiceState.Loaded) ?: JourneyNextServiceState.Error
+                Result.Loading -> previous ?: JourneyNextServiceState.Loading
+            }
         }
 
         private suspend fun fetchOne(
@@ -276,31 +377,35 @@ class FavouritesViewModel
         @Suppress("LongParameterList") // projection folds every upstream flow into one state
         private fun projectState(
             favourites: List<FavouriteDestinationAtStop>,
+            journeyFavourites: List<FavouriteJourney>,
             nexts: Map<FavouriteKey, NextDepartureState>,
+            journeyNexts: Map<JourneyFavouriteKey, JourneyNextServiceState>,
             undo: PendingUndo?,
             editMode: Boolean,
             isRefreshing: Boolean,
             selectedTime: Instant?,
         ): FavouritesUiState {
-            if (favourites.isEmpty()) {
-                return if (undo != null) {
-                    FavouritesUiState.Loaded(
-                        rows = emptyList(),
-                        pendingUndo = undo,
-                        editMode = editMode,
-                        isRefreshing = isRefreshing,
-                        selectedTime = selectedTime,
-                    )
-                } else {
-                    FavouritesUiState.Empty
-                }
+            // Empty means *nothing* starred at all — stop favourites and journey favourites both
+            // gone (issue #209). A pending undo keeps the Loaded shape so the snackbar survives.
+            if (favourites.isEmpty() && journeyFavourites.isEmpty() && undo == null) {
+                return FavouritesUiState.Empty
             }
             val rows =
                 favourites
                     .map { it.toRow(nexts[it.toKey()] ?: NextDepartureState.Loading) }
                     .sortedBy { it.position }
+            val journeyRows =
+                journeyFavourites.map { journey ->
+                    JourneyFavouriteRow(
+                        key = journey.toKey(),
+                        origin = journey.origin,
+                        destination = journey.destination,
+                        nextService = journeyNexts[journey.toKey()] ?: JourneyNextServiceState.Loading,
+                    )
+                }
             return FavouritesUiState.Loaded(
                 rows = rows,
+                journeyRows = journeyRows,
                 pendingUndo = undo,
                 editMode = editMode,
                 isRefreshing = isRefreshing,
@@ -310,6 +415,12 @@ class FavouritesViewModel
 
         private fun FavouriteDestinationAtStop.toKey(): FavouriteKey =
             FavouriteKey(stopId = stopId.value, destinationKey = destinationKey)
+
+        private fun FavouriteJourney.toKey(): JourneyFavouriteKey =
+            JourneyFavouriteKey(
+                originStopId = origin.id.value,
+                destinationStopId = destination.id.value,
+            )
 
         private fun FavouriteDestinationAtStop.toRow(next: NextDepartureState): FavouriteRow =
             FavouriteRow(

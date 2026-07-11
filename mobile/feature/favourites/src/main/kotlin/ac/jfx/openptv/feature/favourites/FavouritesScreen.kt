@@ -5,6 +5,7 @@ import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
 import ac.jfx.openptv.core.designsystem.DepartureTimeSelector
 import ac.jfx.openptv.core.designsystem.ScreenHeading
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.feature.favourites.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -73,12 +74,18 @@ import kotlin.math.roundToInt
  * `onOpenStopDetail` accepts the three values the navigation key needs: `stopId`,
  * `routeTypeCode`, `focusDestinationKey`. The app composition root translates those into an
  * `AppNavKey.StopDetail` push.
+ *
+ * `onOpenJourney` fires when a journey-favourite row is tapped (issue #209) with both endpoints
+ * — the host switches to the Journey tab and prefills the planner. Defaults to a no-op so the
+ * standalone Favourites destination (outside the Home scaffold, which owns the tabs) still
+ * composes.
  */
 @Composable
 fun FavouritesRoute(
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusDestinationKey: String?) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenJourney: (origin: Stop, destination: Stop) -> Unit = { _, _ -> },
     viewModel: FavouritesViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -96,6 +103,7 @@ fun FavouritesRoute(
         onRowClicked = { row ->
             onOpenStopDetail(row.key.stopId, row.routeType.toCode(), row.key.destinationKey)
         },
+        onJourneyRowClicked = { row -> onOpenJourney(row.origin, row.destination) },
         onReorder = viewModel::onReorder,
         onSwipeDelete = viewModel::onSwipeDelete,
         onUndoDelete = viewModel::onUndoDelete,
@@ -115,6 +123,7 @@ fun FavouritesRoute(
 internal fun FavouritesScreen(
     uiState: FavouritesUiState,
     onRowClicked: (FavouriteRow) -> Unit,
+    onJourneyRowClicked: (JourneyFavouriteRow) -> Unit,
     onReorder: (List<FavouriteKey>) -> Unit,
     onSwipeDelete: (FavouriteKey) -> Unit,
     onUndoDelete: () -> Unit,
@@ -136,7 +145,9 @@ internal fun FavouritesScreen(
     val selectedTime = loaded?.selectedTime
     // Single source of truth for "are there rows" — reused by the edit toggle and the custom-time
     // chip so neither adds its own compound condition to the screen's cyclomatic complexity.
+    // Edit mode (drag/delete) only applies to stop rows; the time chip anchors journey rows too.
     val hasRows = loaded != null && loaded.rows.isNotEmpty()
+    val hasAnyRows = hasRows || (loaded != null && loaded.journeyRows.isNotEmpty())
 
     // Wire the pending-undo state to the snackbar host. When the VM stashes a pending undo we
     // show the snackbar; the snackbar's dismissal/action result feeds back into the VM through
@@ -191,7 +202,7 @@ internal fun FavouritesScreen(
             ScreenHeading(text = stringResource(R.string.feature_favourites_title))
             // Issue #182: page-level custom-time chip. Every row's next-departure is computed
             // relative to the chosen instant. Only shown once there are favourites to anchor.
-            if (hasRows) {
+            if (hasAnyRows) {
                 TimeSelectorRow(
                     selectedTime = selectedTime,
                     onSelectTime = onSelectTime,
@@ -209,28 +220,54 @@ internal fun FavouritesScreen(
                         .fillMaxWidth()
                         .testTag(TestTagPullToRefresh),
             ) {
-                when (uiState) {
-                    FavouritesUiState.Loading ->
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
-                        }
-                    FavouritesUiState.Empty ->
-                        EmptyState(onOpenSearch = onOpenSearch)
-                    is FavouritesUiState.Loaded ->
-                        if (uiState.rows.isEmpty()) {
-                            EmptyState(onOpenSearch = onOpenSearch)
-                        } else {
-                            RowList(
-                                rows = uiState.rows,
-                                editMode = uiState.editMode,
-                                onRowClicked = onRowClicked,
-                                onReorder = onReorder,
-                                onSwipeDelete = onSwipeDelete,
-                            )
-                        }
-                }
+                FavouritesBody(
+                    uiState = uiState,
+                    onOpenSearch = onOpenSearch,
+                    onRowClicked = onRowClicked,
+                    onJourneyRowClicked = onJourneyRowClicked,
+                    onReorder = onReorder,
+                    onSwipeDelete = onSwipeDelete,
+                )
             }
         }
+    }
+}
+
+/**
+ * The loading / empty / list body under the pull-to-refresh surface. Extracted from
+ * [FavouritesScreen] to keep the screen's cyclomatic complexity under detekt's threshold once
+ * the journey-favourites section (issue #209) joined the Loaded branch.
+ */
+@Composable
+private fun FavouritesBody(
+    uiState: FavouritesUiState,
+    onOpenSearch: () -> Unit,
+    onRowClicked: (FavouriteRow) -> Unit,
+    onJourneyRowClicked: (JourneyFavouriteRow) -> Unit,
+    onReorder: (List<FavouriteKey>) -> Unit,
+    onSwipeDelete: (FavouriteKey) -> Unit,
+) {
+    when (uiState) {
+        FavouritesUiState.Loading ->
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        FavouritesUiState.Empty ->
+            EmptyState(onOpenSearch = onOpenSearch)
+        is FavouritesUiState.Loaded ->
+            if (uiState.rows.isEmpty() && uiState.journeyRows.isEmpty()) {
+                EmptyState(onOpenSearch = onOpenSearch)
+            } else {
+                RowList(
+                    rows = uiState.rows,
+                    journeyRows = uiState.journeyRows,
+                    editMode = uiState.editMode,
+                    onRowClicked = onRowClicked,
+                    onJourneyRowClicked = onJourneyRowClicked,
+                    onReorder = onReorder,
+                    onSwipeDelete = onSwipeDelete,
+                )
+            }
     }
 }
 
@@ -305,10 +342,13 @@ private fun EmptyState(onOpenSearch: () -> Unit) {
  * index-offset map so we don't pull in a third-party library.
  */
 @Composable
+@Suppress("LongMethod", "LongParameterList") // one LazyColumn hosting both favourite sections
 private fun RowList(
     rows: List<FavouriteRow>,
+    journeyRows: List<JourneyFavouriteRow>,
     editMode: Boolean,
     onRowClicked: (FavouriteRow) -> Unit,
+    onJourneyRowClicked: (JourneyFavouriteRow) -> Unit,
     onReorder: (List<FavouriteKey>) -> Unit,
     onSwipeDelete: (FavouriteKey) -> Unit,
 ) {
@@ -396,7 +436,156 @@ private fun RowList(
             )
             HorizontalDivider()
         }
+        // Journey favourites (issue #209): their own section below the stop rows. Not part of
+        // edit mode — journey favourites are unstarred from the planner's ★, and there's no
+        // manual reorder (insertion order is the stable sort).
+        if (journeyRows.isNotEmpty()) {
+            item(key = "journey-favourites-header") {
+                Text(
+                    text = stringResource(R.string.feature_favourites_journeys_header),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier =
+                        Modifier
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .testTag(TestTagJourneySectionHeader),
+                )
+            }
+            items(journeyRows, key = { it.key.asLazyListKey() }) { row ->
+                JourneyFavouriteRowContent(row = row, onClicked = { onJourneyRowClicked(row) })
+                HorizontalDivider()
+            }
+        }
     }
+}
+
+/**
+ * One journey favourite (issue #209): "Origin → Destination" as the primary line, then — once
+ * the one-shot fetch lands — the next direct service rendered like a planner result row: badge
+ * + direction + relative time, departure (+ platform), arrival + duration. Loading / no-service
+ * / error degrade to a single inline subtext so the tab never breaks.
+ *
+ * Overflow follows the CLAUDE.md rule: the badge is width-capped and wraps down, the direction
+ * takes the weight, and the relative time keeps its space on the right.
+ */
+@Composable
+private fun JourneyFavouriteRowContent(
+    row: JourneyFavouriteRow,
+    onClicked: () -> Unit,
+) {
+    Column(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClicked)
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .testTag(testTagForJourneyRow(row.key)),
+    ) {
+        Text(
+            text =
+                stringResource(
+                    R.string.feature_favourites_journey_endpoints,
+                    row.origin.name,
+                    row.destination.name,
+                ),
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        JourneyNextServiceContent(state = row.nextService)
+    }
+}
+
+@Composable
+private fun JourneyNextServiceContent(state: JourneyNextServiceState) {
+    when (state) {
+        is JourneyNextServiceState.Loaded -> JourneyNextServiceLoaded(state)
+        JourneyNextServiceState.Loading ->
+            Text(
+                text = stringResource(R.string.feature_favourites_next_loading),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        JourneyNextServiceState.Empty ->
+            Text(
+                text = stringResource(R.string.feature_favourites_journey_none),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        JourneyNextServiceState.Error ->
+            Text(
+                text = stringResource(R.string.feature_favourites_next_error),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+    }
+}
+
+@Composable
+private fun JourneyNextServiceLoaded(state: JourneyNextServiceState.Loaded) {
+    val use24Hour = rememberUse24Hour()
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+            color = MaterialTheme.colorScheme.primaryContainer,
+            shape = RoundedCornerShape(4.dp),
+            modifier = Modifier.widthIn(max = FavouriteBadgeMaxWidth),
+        ) {
+            Text(
+                text = state.routeBadge,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                softWrap = true,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = state.directionName,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = state.relativeLabel,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+    Spacer(modifier = Modifier.height(2.dp))
+    val departs =
+        stringResource(
+            R.string.feature_favourites_journey_departs,
+            AbsoluteTimeFormatter.format(state.estimatedDepartureUtc ?: state.scheduledDepartureUtc, use24Hour),
+        )
+    val platform =
+        state.departurePlatform?.let {
+            stringResource(R.string.feature_favourites_journey_platform, it)
+        }
+    Text(
+        text = listOfNotNull(departs, platform).joinToString(separator = " · "),
+        style = MaterialTheme.typography.bodySmall,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
+    val arrives =
+        stringResource(
+            R.string.feature_favourites_journey_arrives,
+            AbsoluteTimeFormatter.format(state.arrivalUtc, use24Hour),
+        )
+    val duration =
+        stringResource(R.string.feature_favourites_journey_duration, state.durationMinutes)
+    Text(
+        text = "$arrives · $duration",
+        style = MaterialTheme.typography.bodySmall,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -637,6 +826,9 @@ private fun RouteType.glyph(): String =
 internal fun testTagForRow(key: FavouriteKey): String =
     "favourites-row-${key.stopId}-${key.destinationKey}"
 
+internal fun testTagForJourneyRow(key: JourneyFavouriteKey): String =
+    "favourites-journey-row-${key.originStopId}-${key.destinationStopId}"
+
 internal fun testTagForDelete(key: FavouriteKey): String =
     "favourites-delete-${key.stopId}-${key.destinationKey}"
 
@@ -659,6 +851,14 @@ internal fun testTagForNext(key: FavouriteKey): String =
  */
 internal fun FavouriteKey.asLazyListKey(): String = "$stopId|$destinationKey"
 
+/**
+ * Bundle-safe key for the journey-favourites section (issue #209). Prefixed so it can never
+ * collide with a stop row's `"<stopId>|<destinationKey>"` key in the shared LazyColumn key
+ * space (destination keys are lowercase words, never bare numbers, but the prefix makes the
+ * disjointness structural rather than incidental).
+ */
+internal fun JourneyFavouriteKey.asLazyListKey(): String = "journey|$originStopId|$destinationStopId"
+
 /** How many pixels of vertical drag count as one row-swap. Tuned for a typical ~64.dp row. */
 private const val REORDER_THRESHOLD_PX: Float = 80f
 
@@ -674,3 +874,4 @@ internal const val TestTagEditToggle: String = "favourites-edit-toggle"
 internal const val TestTagPullToRefresh: String = "favourites-pull-to-refresh"
 internal const val TestTagSettingsGear: String = "favourites-settings-gear"
 internal const val TestTagTimeSelector: String = "favourites-time-selector"
+internal const val TestTagJourneySectionHeader: String = "favourites-journeys-header"
