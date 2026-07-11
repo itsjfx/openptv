@@ -11,6 +11,7 @@ import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.StopId
 import ac.jfx.openptv.core.navigation.AppNavKey
 import ac.jfx.openptv.feature.favourites.FavouritesRoute
+import ac.jfx.openptv.feature.journeyplanner.JourneyPlannerRoute
 import ac.jfx.openptv.feature.nearby.NearbyRoute
 import ac.jfx.openptv.feature.runpattern.RunPatternRoute
 import ac.jfx.openptv.feature.search.SearchScreen
@@ -222,6 +223,17 @@ private fun MainNavDisplay(
                                 ),
                             )
                         },
+                        // Issue #204: tapping a journey result opens the run-pattern destination
+                        // for that service, with the origin stop marked as "you are here".
+                        onOpenRunPattern = { runRef, routeTypeCode, fromStopId ->
+                            backStack.add(
+                                AppNavKey.RunPattern(
+                                    runRef = runRef,
+                                    routeTypeCode = routeTypeCode,
+                                    fromStopId = fromStopId,
+                                ),
+                            )
+                        },
                         onOpenSettings = { backStack.add(AppNavKey.Settings) },
                     )
                 }
@@ -337,6 +349,7 @@ private fun HomeScaffold(
     focusLon: Double?,
     followedTripBar: (@Composable () -> Unit)?,
     onOpenStopDetail: (stopId: Int, routeTypeCode: Int, focusDestinationKey: String?) -> Unit,
+    onOpenRunPattern: (runRef: String, routeTypeCode: Int, fromStopId: Int) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     var selectedTab by rememberSaveable {
@@ -413,6 +426,13 @@ private fun HomeScaffold(
                         },
                         onOpenSettings = onOpenSettings,
                     )
+                HomeTab.Journey ->
+                    JourneyPlannerRoute(
+                        onOpenRunPattern = { runRef, routeType, fromStopId ->
+                            onOpenRunPattern(runRef.value, routeType.toCode(), fromStopId.value)
+                        },
+                        onOpenSettings = onOpenSettings,
+                    )
             }
         }
     }
@@ -431,6 +451,10 @@ private enum class HomeTab(
     Favourites("★", R.string.bottom_nav_favourites, "Favourites tab", TestTagTabFavourites),
     Nearby("🗺", R.string.bottom_nav_nearby, "Nearby tab", TestTagTabNearby),
     Search("⌕", R.string.bottom_nav_search, "Search tab", TestTagTabSearch),
+
+    // Journey planner (issue #204) sits last: it *composes* the "find a stop" surfaces before
+    // it — you plan a journey between stops you'd otherwise find via Nearby or Search.
+    Journey("⇄", R.string.bottom_nav_journey, "Journey planner tab", TestTagTabJourney),
 }
 
 /**
@@ -583,6 +607,7 @@ internal const val TestTagHomeScaffold: String = "home-scaffold"
 internal const val TestTagTabFavourites: String = "home-tab-favourites"
 internal const val TestTagTabNearby: String = "home-tab-nearby"
 internal const val TestTagTabSearch: String = "home-tab-search"
+internal const val TestTagTabJourney: String = "home-tab-journey"
 internal const val TestTagFollowedTripBar: String = "followed-trip-bar"
 internal const val TestTagFollowedTripUnfollow: String = "followed-trip-unfollow"
 internal const val TestTagFollowedTripNextStop: String = "followed-trip-next-stop"

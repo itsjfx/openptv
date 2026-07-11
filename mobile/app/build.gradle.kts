@@ -139,6 +139,7 @@ dependencies {
 
     // Features composed by the root nav graph.
     implementation(project(":feature:favourites"))
+    implementation(project(":feature:journey-planner"))
     implementation(project(":feature:nearby"))
     implementation(project(":feature:run-pattern"))
     implementation(project(":feature:search"))

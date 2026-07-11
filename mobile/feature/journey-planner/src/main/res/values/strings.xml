@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Journey planner screen (issue #204). Resource prefix matches the AGP `resourcePrefix`
+         set by the `openptv.android.library` convention plugin: every string in
+         :feature:journey-planner starts with `feature_journey_planner_`. -->
+    <string name="feature_journey_planner_title">Journey planner</string>
+    <string name="feature_journey_planner_open_settings">Open settings</string>
+
+    <string name="feature_journey_planner_from_label">From</string>
+    <string name="feature_journey_planner_to_label">To</string>
+    <string name="feature_journey_planner_choose_stop">Choose a stop</string>
+    <string name="feature_journey_planner_swap">Swap origin and destination</string>
+
+    <string name="feature_journey_planner_departing_now">Departing now</string>
+
+    <string name="feature_journey_planner_search_label">Search stops</string>
+    <string name="feature_journey_planner_search_cancel">Cancel</string>
+    <string name="feature_journey_planner_search_idle_hint">Type a stop or station name</string>
+    <string name="feature_journey_planner_search_empty">No stops match that search</string>
+    <string name="feature_journey_planner_picker_row_content_description">%1$s, %2$s, %3$s</string>
+    <string name="feature_journey_planner_unknown_suburb">Unknown suburb</string>
+
+    <string name="feature_journey_planner_idle_hint">Choose where you\'re starting from and where you\'re going</string>
+    <string name="feature_journey_planner_no_direct_title">No direct services</string>
+    <string name="feature_journey_planner_no_direct_subtitle">No single service connects these stops. Journeys with a change aren\'t supported yet — try stops on the same line.</string>
+    <string name="feature_journey_planner_retry">Retry</string>
+
+    <string name="feature_journey_planner_departs">Departs %1$s</string>
+    <string name="feature_journey_planner_arrives">Arrives %1$s</string>
+    <string name="feature_journey_planner_duration">%1$d min</string>
+    <string name="feature_journey_planner_platform_clause">Platform %1$s</string>
+    <string name="feature_journey_planner_row_content_description">%1$s towards %2$s, departs %3$s, arrives %4$s, %5$s</string>
+
+    <string name="feature_journey_planner_route_type_train">Train</string>
+    <string name="feature_journey_planner_route_type_tram">Tram</string>
+    <string name="feature_journey_planner_route_type_bus">Bus</string>
+    <string name="feature_journey_planner_route_type_vline">V/Line</string>
+    <string name="feature_journey_planner_route_type_night_bus">Night Bus</string>
+    <string name="feature_journey_planner_route_type_unknown">Other</string>
+</resources>

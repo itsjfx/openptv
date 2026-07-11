@@ -12,6 +12,7 @@
     <string name="bottom_nav_favourites">Favourites</string>
     <string name="bottom_nav_nearby">Nearby</string>
     <string name="bottom_nav_search">Search</string>
+    <string name="bottom_nav_journey">Journey</string>
 
     <!-- Stop search strings live in :feature:search/.../strings.xml.
          Settings (theme mode + dynamic colour) strings live in :feature:settings. -->

@@ -10,7 +10,7 @@ Provide a small, fast, ad-free, Material You alternative to the official PTV app
 ## Non-goals
 
 - iOS, web, desktop. Android only at first; DI choice (Hilt) explicitly trades portability for ergonomics.
-- Trip planning (A→B). The PTV API doesn't expose one; building it client-side is out of scope.
+- Multi-leg trip planning (A→B with transfers). The PTV API doesn't expose one; building a network graph client-side is out of scope. *Direct* A→B journeys (one run, no transfer) are in scope — the journey planner (issue #204) derives them from departures + run patterns.
 - Real-time vehicle positions. Not in PTV API v3 surface.
 - Hosted multi-tenant SaaS. Each user runs the proxy themselves or trusts the OpenPTV-hosted instance.
 - Account systems, sync across devices, social features.
