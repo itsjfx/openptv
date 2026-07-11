@@ -29,4 +29,12 @@ internal object PreferenceKeys {
      * "trams only" chip configuration survives an app restart.
      */
     val MAP_ROUTE_TYPE_FILTER = stringSetPreferencesKey("map_route_type_filter")
+
+    /**
+     * The single followed trip (issue #200), serialised as a JSON object by
+     * `FollowedTripDataSource` — see that class for the wire format. Absent when nothing is
+     * followed. A structured value rather than an enum case, so it lives outside the
+     * `Preference<T>` DSL (same reasoning as [MAP_ROUTE_TYPE_FILTER]).
+     */
+    val FOLLOWED_TRIP = stringPreferencesKey("followed_trip")
 }

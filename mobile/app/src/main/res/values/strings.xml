@@ -23,4 +23,44 @@
     <string name="setup_title">Choose your server</string>
     <string name="setup_intro">OpenPTV needs to know which backend to talk to. Pick a server below.</string>
     <string name="setup_continue">Continue</string>
+
+    <!-- Pinned followed-trip bar (issue #200). The Follow/Unfollow action on the run pattern
+         screen lives in :feature:run-pattern; only the app-wide bar is :app-local. -->
+    <string name="followed_trip_return">Return to your trip</string>
+    <!-- Trip name. Slots: route label ("Lilydale", "96"), destination ("Flinders Street"). -->
+    <string name="followed_trip_format">%1$s to %2$s</string>
+    <string name="followed_trip_open_content_description">Return to your followed trip</string>
+    <string name="followed_trip_unfollow_content_description">Stop following this trip</string>
+    <!-- Live progress line. Slot: the next upcoming stop's name ("Richmond Station"). -->
+    <string name="followed_trip_next_stop">Next stop: %1$s</string>
+    <!-- Rough ETA to the armed alight stop (issue #201). Slots: rough eta ("~12 min"), the
+         alight stop's name ("Jordanville Station"). Joined onto the progress line with "·". -->
+    <string name="followed_trip_alight_eta">%1$s to %2$s</string>
+    <string name="followed_trip_eta_minutes">~%1$d min</string>
+    <string name="followed_trip_eta_under_minute">&lt;1 min</string>
+
+    <!-- Alight alerts (issue #201): the foreground service's notifications. Channel ids are a
+         one-way door (see AlightAlertNotifications); these are just their user-facing names. -->
+    <string name="alight_channel_ongoing_name">Followed trip progress</string>
+    <string name="alight_channel_ongoing_description">Quiet ongoing status while a trip with a getting-off alert is tracked.</string>
+    <string name="alight_channel_alerts_name">Getting-off alerts</string>
+    <string name="alight_channel_alerts_description">Loud alerts one stop before, and just before arriving at, your stop.</string>
+    <string name="alight_ongoing_tracking">Tracking your trip…</string>
+    <!-- Slot: alight stop name. -->
+    <plurals name="alight_ongoing_stops_away">
+        <item quantity="one">Next stop: %2$s</item>
+        <item quantity="other">%1$d stops to %2$s</item>
+    </plurals>
+    <!-- Slot: alight stop name. -->
+    <string name="alight_ongoing_arriving">Arriving at %1$s</string>
+    <!-- Slot: formatted local ETA. -->
+    <string name="alight_ongoing_eta">ETA %1$s</string>
+    <string name="alight_ongoing_schedule_only">ETA %1$s · timetable only, no live tracking</string>
+    <string name="alight_stop_following">Stop following</string>
+    <!-- Slot: alight stop name. -->
+    <string name="alight_approach_title">Get ready — next stop is %1$s</string>
+    <string name="alight_approach_text">Your stop is coming up. Time to gather your things.</string>
+    <string name="alight_arrival_title">This is your stop</string>
+    <!-- Slot: alight stop name. -->
+    <string name="alight_arrival_text">Arriving at %1$s now.</string>
 </resources>

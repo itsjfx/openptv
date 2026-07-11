@@ -13,7 +13,8 @@ set -eu -o pipefail
 
 cd "$(dirname "$0")/.."
 
-pkg="ac.jfx.openptv"
+# Debug builds carry an `applicationIdSuffix` so they install alongside release.
+pkg="ac.jfx.openptv.debug"
 db_name="openptv.db"
 apk="mobile/app/build/outputs/apk/debug/app-debug.apk"
 out_dir="mobile/build/screenshots"

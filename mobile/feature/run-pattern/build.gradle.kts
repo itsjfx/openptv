@@ -26,6 +26,10 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:datastore"))
 
+    // `rememberLauncherForActivityResult` for the contextual POST_NOTIFICATIONS / location
+    // permission prompts when arming an alight alert (issue #201) — same contracts nearby uses.
+    implementation(libs.androidx.activity.compose)
+
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.coroutines.android)

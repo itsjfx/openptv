@@ -79,6 +79,11 @@ android {
 
     buildTypes {
         debug {
+            // Distinct package id + launcher label ("OpenPTV (debug)", overridden in
+            // `src/debug/res/values/strings.xml`) so a debug build installs alongside the
+            // release app instead of replacing it. Applies to every debug APK — local
+            // `assembleDebug`, CI's PR artifact, and the preview-channel prerelease.
+            applicationIdSuffix = ".debug"
             isMinifyEnabled = false
             // Same maintainer-operated proxy as release so the picker's "Default" radio
             // resolves to one URL regardless of variant. Developers running a local Go
@@ -123,6 +128,11 @@ dependencies {
     implementation(project(":core:data"))
     implementation(project(":core:datastore"))
     implementation(project(":core:designsystem"))
+    // `AlightAlertService` (issue #201) drives the pure `AlightAlertEvaluator` and the
+    // run-pattern use case from the composition root; `AppViewModel` polls the followed run
+    // through `ObserveRunPatternUseCase` and derives the bar's "Next stop" line via the pure
+    // `TripProgress` (PR #202 follow-up).
+    implementation(project(":core:domain"))
     implementation(project(":core:model"))
     implementation(project(":core:navigation"))
     implementation(project(":core:network"))

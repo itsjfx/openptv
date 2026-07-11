@@ -64,6 +64,12 @@ abstract class DataModule {
 
     @Binds
     @Singleton
+    internal abstract fun bindFollowedTripRepository(
+        impl: FollowedTripRepositoryImpl,
+    ): FollowedTripRepository
+
+    @Binds
+    @Singleton
     internal abstract fun bindPtvUrlResolver(
         impl: SettingsPtvUrlResolver,
     ): PtvUrlResolver

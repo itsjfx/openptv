@@ -3,9 +3,16 @@ package ac.jfx.openptv.feature.runpattern
 import ac.jfx.openptv.core.common.AbsoluteTimeFormatter
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
+import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.StopId
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,11 +26,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,12 +44,17 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -53,6 +68,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 
 /**
@@ -93,21 +109,96 @@ fun RunPatternRoute(
         viewModel.stopObserving()
     }
 
+    // Alight-alert permission plumbing (issue #201). Both prompts are *contextual*: the
+    // notification one fires only when the user actually arms an alert (API 33+), the location
+    // one only when the armed run has no real-time signal (trams) so the GPS fallback matters.
+    // Neither grant is a precondition — arming proceeds regardless, and a snackbar explains
+    // what a denial degrades.
+    val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    var pendingAlightArm by remember { mutableStateOf<StopId?>(null) }
+    val notificationsDeniedMessage = stringResource(R.string.feature_run_pattern_alight_notifications_denied)
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) {
+                scope.launch { snackbarHostState.showSnackbar(notificationsDeniedMessage) }
+            }
+            pendingAlightArm?.let(viewModel::armAlightAlert)
+            pendingAlightArm = null
+        }
+    val onArmAlight: (StopId) -> Unit = { stopId ->
+        if (needsNotificationPermission(context)) {
+            pendingAlightArm = stopId
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.armAlightAlert(stopId)
+        }
+    }
+
+    val scheduleOnlyMessage = stringResource(R.string.feature_run_pattern_alight_schedule_only)
+    val locationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            if (result.values.none { it }) {
+                scope.launch { snackbarHostState.showSnackbar(scheduleOnlyMessage) }
+            }
+            viewModel.onAlightLocationPromptHandled()
+        }
+    LaunchedEffect(uiState.alightLocationPromptNeeded) {
+        if (uiState.alightLocationPromptNeeded) {
+            if (hasLocationPermission(context)) {
+                viewModel.onAlightLocationPromptHandled()
+            } else {
+                locationPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                    ),
+                )
+            }
+        }
+    }
+
     RunPatternScreenContent(
         uiState = uiState,
         onRefresh = viewModel::refresh,
         onStopClicked = onStopClicked,
         timeFormatter = viewModel.timeFormatter,
+        onFollowClicked = viewModel::followTrip,
+        onUnfollowClicked = viewModel::unfollowTrip,
+        onConfirmReplaceFollow = viewModel::confirmReplaceFollow,
+        onDismissReplaceFollow = viewModel::dismissReplaceFollow,
+        onArmAlight = onArmAlight,
+        onDisarmAlight = viewModel::disarmAlightAlert,
+        snackbarHostState = snackbarHostState,
     )
 }
 
+/** POST_NOTIFICATIONS is runtime-requestable only from API 33; below that it's implicit. */
+private fun needsNotificationPermission(context: Context): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+
+private fun hasLocationPermission(context: Context): Boolean =
+    context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+        context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList")
 internal fun RunPatternScreenContent(
     uiState: RunPatternUiState,
     onRefresh: () -> Unit,
     onStopClicked: (StopId) -> Unit,
     timeFormatter: RelativeTimeFormatter,
+    onFollowClicked: () -> Unit = {},
+    onUnfollowClicked: () -> Unit = {},
+    onConfirmReplaceFollow: () -> Unit = {},
+    onDismissReplaceFollow: () -> Unit = {},
+    onArmAlight: (StopId) -> Unit = {},
+    onDisarmAlight: () -> Unit = {},
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
 ) {
     val listState = rememberLazyListState()
 
@@ -135,13 +226,32 @@ internal fun RunPatternScreenContent(
         }
     }
 
+    // Replace-confirmation for the followed trip (issue #200): shown when the user taps Follow
+    // (or arms an alight alert) while a *different* run is already followed.
+    val replaceCandidate = uiState.followReplaceCandidate
+    if (replaceCandidate != null) {
+        FollowReplaceDialog(
+            candidate = replaceCandidate,
+            onConfirm = onConfirmReplaceFollow,
+            onDismiss = onDismissReplaceFollow,
+        )
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
                     Text(
                         text = uiState.pattern.titleText(),
                         maxLines = 1,
+                    )
+                },
+                actions = {
+                    FollowAction(
+                        uiState = uiState,
+                        onFollowClicked = onFollowClicked,
+                        onUnfollowClicked = onUnfollowClicked,
                     )
                 },
                 colors = TopAppBarDefaults.topAppBarColors(),
@@ -204,10 +314,15 @@ internal fun RunPatternScreenContent(
                             // a given run.
                             pattern.stops.forEachIndexed { index, row ->
                                 item(key = "stop-$index-${row.stop.stopId.value}") {
+                                    val isAlight = row.stop.stopId == uiState.alightStopId
                                     PatternStopRow(
                                         row = row,
                                         timeFormatter = timeFormatter,
                                         onClick = { onStopClicked(row.stop.stopId) },
+                                        isAlight = isAlight,
+                                        onToggleAlight = {
+                                            if (isAlight) onDisarmAlight() else onArmAlight(row.stop.stopId)
+                                        },
                                     )
                                     if (index != pattern.stops.lastIndex) {
                                         HorizontalDivider()
@@ -219,6 +334,84 @@ internal fun RunPatternScreenContent(
                 }
             }
         }
+    }
+}
+
+/**
+ * Follow/Unfollow top-bar action (issue #200). Only once the pattern is Loaded — the stored
+ * trip is built from the fetched terminus arrival + labels, so following a skeleton would
+ * persist garbage.
+ */
+@Composable
+private fun FollowAction(
+    uiState: RunPatternUiState,
+    onFollowClicked: () -> Unit,
+    onUnfollowClicked: () -> Unit,
+) {
+    if (uiState.pattern !is PatternState.Loaded) return
+    TextButton(
+        onClick = if (uiState.isFollowingThisRun) onUnfollowClicked else onFollowClicked,
+        modifier = Modifier.testTag(TestTagFollowButton),
+    ) {
+        Text(
+            text =
+                stringResource(
+                    if (uiState.isFollowingThisRun) {
+                        R.string.feature_run_pattern_unfollow
+                    } else {
+                        R.string.feature_run_pattern_follow
+                    },
+                ),
+        )
+    }
+}
+
+/** Confirm replacing the currently followed [candidate] trip with this run (issue #200). */
+@Composable
+private fun FollowReplaceDialog(
+    candidate: FollowedTrip,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(TestTagFollowReplaceDialog),
+        title = { Text(stringResource(R.string.feature_run_pattern_follow_replace_title)) },
+        text = {
+            Text(
+                stringResource(
+                    R.string.feature_run_pattern_follow_replace_body,
+                    candidate.displayText(),
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                modifier = Modifier.testTag(TestTagFollowReplaceConfirm),
+            ) {
+                Text(stringResource(R.string.feature_run_pattern_follow_replace_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.feature_run_pattern_follow_replace_cancel))
+            }
+        },
+    )
+}
+
+/**
+ * Human-readable name for a followed trip, used by the replace-confirmation dialog. Same
+ * route/destination collapse rule as [titleText] so "Lilydale to Lilydale" reads as "Lilydale".
+ */
+@Composable
+private fun FollowedTrip.displayText(): String {
+    val route = routeLabel
+    return when {
+        route == null -> destinationName
+        route.equals(destinationName, ignoreCase = true) -> route
+        else -> stringResource(R.string.feature_run_pattern_title_format, route, destinationName)
     }
 }
 
@@ -245,12 +438,20 @@ private fun PatternState.titleText(): String =
  * ones — Unicode glyphs keep this module off the Material Icons artifact, same trade as the rest
  * of the codebase), the stop name + scheduled time, and the live relative phrase on the trailing
  * edge. Past stops dim to `onSurfaceVariant`; the tapped-through stop gets a "This stop" chip.
+ *
+ * Upcoming rows also carry the alight-alert bell (issue #201) on the far trailing edge: dimmed
+ * while unarmed ("alert me before this stop"), full-strength plus a "Getting off here" chip once
+ * armed; tapping again disarms. Departed rows drop the bell — you can't get off at a stop the
+ * vehicle already served.
  */
 @Composable
+@Suppress("LongMethod")
 private fun PatternStopRow(
     row: PatternStopRow,
     timeFormatter: RelativeTimeFormatter,
     onClick: () -> Unit,
+    isAlight: Boolean = false,
+    onToggleAlight: () -> Unit = {},
 ) {
     val stop = row.stop
     val relative =
@@ -308,21 +509,20 @@ private fun PatternStopRow(
             if (row.isOrigin) {
                 // The "This stop" chip sits on its own line, left-aligned under the name, so a long
                 // wrapped name never crowds it and it always reads as belonging to this stop.
-                Spacer(modifier = Modifier.height(4.dp))
-                Surface(
+                StopMarkerChip(
+                    text = stringResource(R.string.feature_run_pattern_this_stop),
                     color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(4.dp),
-                    modifier = Modifier.testTag(TestTagThisStop),
-                ) {
-                    Text(
-                        text = stringResource(R.string.feature_run_pattern_this_stop),
-                        style = MaterialTheme.typography.labelSmall,
-                        // Keep the chip on one line — it should never wrap to "This / stop".
-                        maxLines = 1,
-                        softWrap = false,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                }
+                    testTag = TestTagThisStop,
+                )
+            }
+            if (isAlight) {
+                // The armed alight marker (issue #201) — same chip shape as "This stop", on the
+                // tertiary container so the two markers read as different things at a glance.
+                StopMarkerChip(
+                    text = stringResource(R.string.feature_run_pattern_alight_here),
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    testTag = TestTagAlightChip,
+                )
             }
             Text(
                 text = stringResource(R.string.feature_run_pattern_scheduled, scheduled),
@@ -339,29 +539,104 @@ private fun PatternStopRow(
                 )
             }
         }
-        Column(horizontalAlignment = Alignment.End) {
-            Text(
-                text = relative,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.SemiBold,
-                color = contentColor,
+        RelativeTimeColumn(row = row, relative = relative, contentColor = contentColor)
+        if (!row.hasDeparted) {
+            AlightBell(
+                isAlight = isAlight,
+                stopName = stop.stopName,
+                onToggleAlight = onToggleAlight,
             )
-            val delayMinutes = row.delayMinutes()
-            if (delayMinutes != null && !row.hasDeparted) {
-                val absMinutes = kotlin.math.abs(delayMinutes).toInt()
-                val pluralRes =
-                    if (delayMinutes > 0) {
-                        R.plurals.feature_run_pattern_delay_late
-                    } else {
-                        R.plurals.feature_run_pattern_delay_early
-                    }
-                Text(
-                    text = pluralStringResource(pluralRes, absMinutes, absMinutes),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
         }
+    }
+}
+
+/** The trailing live-time column: the relative phrase plus the late/early delta when known. */
+@Composable
+private fun RelativeTimeColumn(
+    row: PatternStopRow,
+    relative: String,
+    contentColor: Color,
+) {
+    Column(horizontalAlignment = Alignment.End) {
+        Text(
+            text = relative,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = if (row.hasDeparted) FontWeight.Normal else FontWeight.SemiBold,
+            color = contentColor,
+        )
+        val delayMinutes = row.delayMinutes()
+        if (delayMinutes != null && !row.hasDeparted) {
+            val absMinutes = kotlin.math.abs(delayMinutes).toInt()
+            val pluralRes =
+                if (delayMinutes > 0) {
+                    R.plurals.feature_run_pattern_delay_late
+                } else {
+                    R.plurals.feature_run_pattern_delay_early
+                }
+            Text(
+                text = pluralStringResource(pluralRes, absMinutes, absMinutes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+/** The origin / alight marker chip under a stop's name — single line, never wraps. */
+@Composable
+private fun StopMarkerChip(
+    text: String,
+    color: Color,
+    testTag: String,
+) {
+    Spacer(modifier = Modifier.height(4.dp))
+    Surface(
+        color = color,
+        shape = RoundedCornerShape(4.dp),
+        modifier = Modifier.testTag(testTag),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+/**
+ * The alight-alert bell (issue #201). An emoji glyph ignores tint (it renders in colour), so
+ * armed/unarmed is signalled through alpha + the "Getting off here" chip instead. Same
+ * no-Material-Icons trade as the rest of the codebase.
+ */
+@Composable
+private fun AlightBell(
+    isAlight: Boolean,
+    stopName: String,
+    onToggleAlight: () -> Unit,
+) {
+    val bellDescription =
+        stringResource(
+            if (isAlight) {
+                R.string.feature_run_pattern_alight_disarm_content_description
+            } else {
+                R.string.feature_run_pattern_alight_arm_content_description
+            },
+            stopName,
+        )
+    TextButton(
+        onClick = onToggleAlight,
+        modifier =
+            Modifier
+                .testTag(if (isAlight) TestTagAlightArmedButton else TestTagAlightButton)
+                .semantics { contentDescription = bellDescription },
+    ) {
+        Text(
+            text = "🔔",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.alpha(if (isAlight) 1f else UNARMED_BELL_ALPHA),
+        )
     }
 }
 
@@ -525,6 +800,9 @@ private fun String.toSpokenForm(): String =
 
 private const val SKELETON_ROWS = 8
 
+/** Unarmed bells sit back; the armed one (plus its chip) reads at full strength. */
+private const val UNARMED_BELL_ALPHA = 0.4f
+
 /** Surface luminance below this reads as a dark theme — pick the dark OpenFreeMap style. */
 private const val DARK_LUMINANCE_THRESHOLD: Float = 0.5f
 
@@ -543,3 +821,9 @@ internal const val TestTagThisStop: String = "run-pattern-this-stop"
 internal const val TestTagPlatform: String = "run-pattern-platform"
 internal const val TestTagMap: String = "run-pattern-map"
 internal const val TestTagMapToggle: String = "run-pattern-map-toggle"
+internal const val TestTagFollowButton: String = "run-pattern-follow-button"
+internal const val TestTagAlightButton: String = "run-pattern-alight-button"
+internal const val TestTagAlightArmedButton: String = "run-pattern-alight-armed-button"
+internal const val TestTagAlightChip: String = "run-pattern-alight-chip"
+internal const val TestTagFollowReplaceDialog: String = "run-pattern-follow-replace-dialog"
+internal const val TestTagFollowReplaceConfirm: String = "run-pattern-follow-replace-confirm"

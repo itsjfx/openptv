@@ -1,6 +1,8 @@
 package ac.jfx.openptv.feature.runpattern
 
+import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.RunPatternStop
+import ac.jfx.openptv.core.model.StopId
 import kotlinx.datetime.Instant
 
 /**
@@ -13,11 +15,30 @@ import kotlinx.datetime.Instant
  *
  * `asOf` is the wall-clock instant of the most recent successful emission, rendered as
  * `As of HH:mm`. Null until the first successful fetch lands.
+ *
+ * [isFollowingThisRun] mirrors the followed-trip repository (issue #200): true when the
+ * currently followed trip *is this run*, driving the Follow/Unfollow top-bar action.
+ *
+ * [followReplaceCandidate] is non-null while the "replace the followed trip?" confirmation is
+ * showing — it carries the *currently followed* (other) trip so the dialog can name it. Set when
+ * the user taps Follow (or arms an alight alert) while a different run is followed; cleared on
+ * confirm or dismiss.
+ *
+ * [alightStopId] mirrors the armed alight alert (issue #201) *for this run*: the stop whose row
+ * renders the "Getting off here" marker, null when no alert is armed or another run is followed.
+ *
+ * [alightLocationPromptNeeded] flips true right after arming an alert on a run with no live
+ * estimates (trams) — the screen reacts by requesting location permission for the GPS fallback,
+ * then acknowledges via `onAlightLocationPromptHandled`.
  */
 data class RunPatternUiState(
     val pattern: PatternState,
     val isRefreshing: Boolean = false,
     val asOf: Instant? = null,
+    val isFollowingThisRun: Boolean = false,
+    val followReplaceCandidate: FollowedTrip? = null,
+    val alightStopId: StopId? = null,
+    val alightLocationPromptNeeded: Boolean = false,
 ) {
     companion object {
         val Initial: RunPatternUiState = RunPatternUiState(pattern = PatternState.Loading)
