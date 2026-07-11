@@ -1,8 +1,11 @@
 package ac.jfx.openptv.feature.journeyplanner
 
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
+import ac.jfx.openptv.core.data.test.FakeFavouriteJourneysRepository
+import ac.jfx.openptv.core.data.test.FakeFavouritesRepository
 import ac.jfx.openptv.core.data.test.FakeJourneyPlannerRepository
 import ac.jfx.openptv.core.data.test.FakeStopSearchRepository
+import ac.jfx.openptv.core.testing.FavouriteDestinationAtStopMother
 import ac.jfx.openptv.core.testing.JourneyOptionMother
 import ac.jfx.openptv.core.testing.StopMother
 import app.cash.turbine.ReceiveTurbine
@@ -36,6 +39,8 @@ class JourneyPlannerViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val journeys = FakeJourneyPlannerRepository()
     private val search = FakeStopSearchRepository()
+    private val favourites = FakeFavouritesRepository()
+    private val favouriteJourneys = FakeFavouriteJourneysRepository()
     private lateinit var viewModel: JourneyPlannerViewModel
 
     private val richmond = StopMother.aStop().withId(1162).withName("Richmond Station").build()
@@ -48,6 +53,8 @@ class JourneyPlannerViewModelTest {
             JourneyPlannerViewModel(
                 journeyPlannerRepository = journeys,
                 stopSearchRepository = search,
+                favouritesRepository = favourites,
+                favouriteJourneysRepository = favouriteJourneys,
                 timeFormatter = RelativeTimeFormatter(FixedClock(Instant.parse("2026-05-14T09:00:00Z"))),
             )
     }
@@ -65,8 +72,9 @@ class JourneyPlannerViewModelTest {
                 assertThat(state.origin).isNull()
                 assertThat(state.destination).isNull()
                 assertThat(state.activeField).isNull()
-                assertThat(state.picker).isEqualTo(StopPickerState.Idle)
+                assertThat(state.picker).isEqualTo(StopPickerState.Idle())
                 assertThat(state.results).isEqualTo(JourneyResultsState.Idle)
+                assertThat(state.isFavouriteJourney).isFalse()
                 cancelAndIgnoreRemainingEvents()
             }
         }
@@ -235,6 +243,144 @@ class JourneyPlannerViewModelTest {
             }
             assertThat(journeys.observedKeys).isEmpty()
             assertThat(journeys.oneShotKeys).isEmpty()
+        }
+
+    @Test
+    fun `opening the picker with an empty query surfaces favourite stops distinct by stop`() =
+        runTest(dispatcher) {
+            // Two favourites at Richmond (different destinations) + one at Flinders → two
+            // distinct picker rows (issue #209).
+            favourites.seed(
+                listOf(
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1162).withStopName("Richmond Station")
+                        .withDestinationKey("city").withPosition(0).build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1162).withStopName("Richmond Station")
+                        .withDestinationKey("belgrave").withPosition(1).build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1071).withStopName("Flinders Street Railway Station")
+                        .withDestinationKey("north coburg").withPosition(2).build(),
+                ),
+            )
+            viewModel.uiState.test {
+                awaitItem()
+                viewModel.onFieldSelected(JourneyField.Origin)
+                advanceUntilIdle()
+                val state = awaitUntil { (it.picker as? StopPickerState.Idle)?.favouriteStops?.isNotEmpty() == true }
+                val stops = (state.picker as StopPickerState.Idle).favouriteStops
+                assertThat(stops.map { it.id.value }).containsExactly(1162, 1071).inOrder()
+                assertThat(stops.first().name).isEqualTo("Richmond Station")
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `typing replaces the favourite-stops idle state with search results`() =
+        runTest(dispatcher) {
+            favourites.seed(
+                listOf(
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop().withStopId(1162).build(),
+                ),
+            )
+            search.enqueueSuccess(listOf(burnley))
+            viewModel.uiState.test {
+                awaitItem()
+                viewModel.onFieldSelected(JourneyField.Origin)
+                viewModel.onQueryChanged("burn")
+                advanceTimeBy(350)
+                advanceUntilIdle()
+                val state = awaitUntil { it.picker is StopPickerState.Results }
+                assertThat((state.picker as StopPickerState.Results).stops).containsExactly(burnley)
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `toggling the favourite journey stars the pair and the star tracks it reactively`() =
+        runTest(dispatcher) {
+            // Plain collector rather than Turbine — same StateFlow-conflation trade as the swap
+            // test above: asserting the settled state after each advanceUntilIdle window is what
+            // the behaviour promises.
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            advanceUntilIdle()
+            assertThat(states.last().isFavouriteJourney).isFalse()
+
+            viewModel.onToggleFavouriteJourney()
+            advanceUntilIdle()
+            assertThat(states.last().isFavouriteJourney).isTrue()
+            assertThat(favouriteJourneys.current.single().origin).isEqualTo(richmond)
+            assertThat(favouriteJourneys.current.single().destination).isEqualTo(burnley)
+
+            viewModel.onToggleFavouriteJourney()
+            advanceUntilIdle()
+            assertThat(states.last().isFavouriteJourney).isFalse()
+            assertThat(favouriteJourneys.current).isEmpty()
+            job.cancel()
+        }
+
+    @Test
+    fun `favourite journey is direction-specific — swapping flips the star off`() =
+        runTest(dispatcher) {
+            // Plain collector — see the swap test's conflation note.
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            advanceUntilIdle()
+            viewModel.onToggleFavouriteJourney()
+            advanceUntilIdle()
+            assertThat(states.last().isFavouriteJourney).isTrue()
+
+            viewModel.onSwapStops()
+            advanceUntilIdle()
+
+            val swapped = states.last()
+            assertThat(swapped.origin).isEqualTo(burnley)
+            // A→B is starred; B→A is a different favourite and starts unstarred.
+            assertThat(swapped.isFavouriteJourney).isFalse()
+            assertThat(favouriteJourneys.current).hasSize(1)
+            assertThat(favouriteJourneys.current.single().origin).isEqualTo(richmond)
+            job.cancel()
+        }
+
+    @Test
+    fun `onToggleFavouriteJourney is a no-op until both endpoints are chosen`() =
+        runTest(dispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+                viewModel.onFieldSelected(JourneyField.Origin)
+                viewModel.onStopPicked(richmond)
+                advanceUntilIdle()
+                viewModel.onToggleFavouriteJourney()
+                advanceUntilIdle()
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(favouriteJourneys.current).isEmpty()
+        }
+
+    @Test
+    fun `onEndpointsPrefilled sets both stops, closes the picker, and starts the live fetch`() =
+        runTest(dispatcher) {
+            viewModel.uiState.test {
+                awaitItem()
+                // Simulate a half-open picker with a pinned time — the prefill must reset both.
+                viewModel.onFieldSelected(JourneyField.Origin)
+                viewModel.onTimeSelected(Instant.parse("2026-05-15T18:00:00Z"))
+                advanceUntilIdle()
+
+                viewModel.onEndpointsPrefilled(newOrigin = richmond, newDestination = burnley)
+                advanceUntilIdle()
+                val state = awaitUntil { it.origin == richmond && it.destination == burnley }
+                assertThat(state.activeField).isNull()
+                assertThat(state.query).isEmpty()
+                assertThat(state.selectedTime).isNull()
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(journeys.observedKeys).contains(richmond to burnley)
         }
 
     private fun pickBothStops() {

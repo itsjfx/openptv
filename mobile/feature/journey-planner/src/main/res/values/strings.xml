@@ -13,10 +13,14 @@
 
     <string name="feature_journey_planner_departing_now">Departing now</string>
 
+    <string name="feature_journey_planner_favourite_journey">Favourite this journey</string>
+    <string name="feature_journey_planner_unfavourite_journey">Remove this journey from favourites</string>
+
     <string name="feature_journey_planner_search_label">Search stops</string>
     <string name="feature_journey_planner_search_cancel">Cancel</string>
     <string name="feature_journey_planner_search_clear">Clear search</string>
     <string name="feature_journey_planner_search_idle_hint">Type a stop or station name</string>
+    <string name="feature_journey_planner_favourite_stops_header">Favourite stops</string>
     <string name="feature_journey_planner_search_empty">No stops match that search</string>
     <string name="feature_journey_planner_picker_row_content_description">%1$s, %2$s, %3$s</string>
     <string name="feature_journey_planner_unknown_suburb">Unknown suburb</string>

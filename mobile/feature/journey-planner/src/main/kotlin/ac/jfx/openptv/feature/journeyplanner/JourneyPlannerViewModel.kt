@@ -2,6 +2,8 @@ package ac.jfx.openptv.feature.journeyplanner
 
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.data.FavouriteJourneysRepository
+import ac.jfx.openptv.core.data.FavouritesRepository
 import ac.jfx.openptv.core.data.JourneyPlannerRepository
 import ac.jfx.openptv.core.data.StopSearchRepository
 import ac.jfx.openptv.core.model.JourneyOption
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import retrofit2.HttpException
 import java.io.IOException
@@ -49,6 +52,8 @@ class JourneyPlannerViewModel
     constructor(
         private val journeyPlannerRepository: JourneyPlannerRepository,
         private val stopSearchRepository: StopSearchRepository,
+        private val favouritesRepository: FavouritesRepository,
+        private val favouriteJourneysRepository: FavouriteJourneysRepository,
         /** Exposed for the screen's per-row relative "in N min" label, same as stop-detail. */
         val timeFormatter: RelativeTimeFormatter,
     ) : ViewModel() {
@@ -59,6 +64,27 @@ class JourneyPlannerViewModel
         private val query = MutableStateFlow("")
         private val retryCounter = MutableStateFlow(0)
 
+        /**
+         * The user's favourite stops, derived from the destination-at-stop favourites (issue
+         * #209): favourites are `(stopId, destinationKey)` pairs, so several favourites at one
+         * stop collapse to a single picker row (`distinctBy` stop id, favourites order kept).
+         */
+        private val favouriteStops: Flow<List<Stop>> =
+            favouritesRepository.observe().map { favourites ->
+                favourites
+                    .distinctBy { it.stopId }
+                    .map { favourite ->
+                        Stop(
+                            id = favourite.stopId,
+                            name = favourite.stopName,
+                            suburb = favourite.stopSuburb,
+                            routeType = favourite.routeType,
+                            latitude = favourite.lat,
+                            longitude = favourite.lng,
+                        )
+                    }
+            }
+
         private val pickerState: Flow<StopPickerState> =
             combine(
                 activeField,
@@ -66,12 +92,29 @@ class JourneyPlannerViewModel
             ) { field, term -> field to term }
                 .flatMapLatest { (field, term) ->
                     when {
-                        field == null || term.isEmpty() -> flowOf<StopPickerState>(StopPickerState.Idle)
+                        // Empty query → Idle carrying the favourite stops so the open picker
+                        // offers common endpoints before any typing (issue #209).
+                        field == null || term.isEmpty() ->
+                            favouriteStops.map<List<Stop>, StopPickerState> { StopPickerState.Idle(it) }
                         else ->
                             flow {
                                 emit(StopPickerState.Loading)
                                 emit(stopSearchRepository.searchStops(term).toPickerState())
                             }
+                    }
+                }
+
+        /** Reactive ★ state for the current pair; false while either endpoint is missing. */
+        private val isFavouriteJourney: Flow<Boolean> =
+            combine(origin, destination) { from, to -> from to to }
+                .flatMapLatest { (from, to) ->
+                    if (from == null || to == null) {
+                        flowOf(false)
+                    } else {
+                        favouriteJourneysRepository.isFavourite(
+                            originStopId = from.id,
+                            destinationStopId = to.id,
+                        )
                     }
                 }
 
@@ -106,7 +149,8 @@ class JourneyPlannerViewModel
                 combine(activeField, query) { field, term -> field to term },
                 pickerState,
                 resultsState,
-            ) { (from, to, at), (field, term), picker, results ->
+                isFavouriteJourney,
+            ) { (from, to, at), (field, term), picker, results, favourited ->
                 JourneyPlannerUiState(
                     origin = from,
                     destination = to,
@@ -115,6 +159,7 @@ class JourneyPlannerViewModel
                     query = term,
                     picker = picker,
                     results = results,
+                    isFavouriteJourney = favourited,
                 )
             }.stateIn(
                 scope = viewModelScope,
@@ -164,6 +209,34 @@ class JourneyPlannerViewModel
         /** Re-subscribes the results pipeline after an error without touching the inputs. */
         fun onRetry() {
             retryCounter.update { it + 1 }
+        }
+
+        /**
+         * Star/unstar the current origin→destination pair (issue #209). No-op unless both
+         * endpoints are set — the screen only renders the ★ once they are.
+         */
+        fun onToggleFavouriteJourney() {
+            val from = origin.value ?: return
+            val to = destination.value ?: return
+            viewModelScope.launch {
+                favouriteJourneysRepository.toggle(origin = from, destination = to)
+            }
+        }
+
+        /**
+         * Programmatic endpoint prefill (issue #209): a journey-favourite tap on the Favourites
+         * tab lands here with both stops. Closes any open picker, resets to "departing now",
+         * and sets both endpoints in one shot so the results pipeline starts the live fetch.
+         */
+        fun onEndpointsPrefilled(
+            newOrigin: Stop,
+            newDestination: Stop,
+        ) {
+            activeField.value = null
+            query.value = ""
+            selectedTime.value = null
+            origin.value = newOrigin
+            destination.value = newDestination
         }
 
         private fun Result<List<Stop>>.toPickerState(): StopPickerState =

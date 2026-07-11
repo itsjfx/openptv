@@ -10,6 +10,7 @@ import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.model.StopId
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,14 +65,29 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * [onOpenRunPattern] fires when a journey row is tapped — the app composition root pushes the
  * run-pattern destination with the origin as `fromStopId` so the timeline marks where the user
  * boards.
+ *
+ * [prefillOrigin]/[prefillDestination] are the one-shot endpoint prefill (issue #209): tapping a
+ * journey favourite on the Favourites tab switches to this tab with both stops supplied. The
+ * `LaunchedEffect` applies them once and fires [onPrefillConsumed] so the host clears the
+ * pending pair — the NearbyRoute focus-consumption pattern, but host-owned state instead of a
+ * nav-key arg because `Stop` doesn't fit in a route.
  */
 @Composable
 fun JourneyPlannerRoute(
     onOpenRunPattern: (runRef: RunRef, routeType: RouteType, fromStopId: StopId) -> Unit = { _, _, _ -> },
     onOpenSettings: () -> Unit = {},
+    prefillOrigin: Stop? = null,
+    prefillDestination: Stop? = null,
+    onPrefillConsumed: () -> Unit = {},
     viewModel: JourneyPlannerViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(prefillOrigin, prefillDestination) {
+        if (prefillOrigin != null && prefillDestination != null) {
+            viewModel.onEndpointsPrefilled(prefillOrigin, prefillDestination)
+            onPrefillConsumed()
+        }
+    }
     JourneyPlannerScreenContent(
         uiState = uiState,
         timeFormatter = viewModel.timeFormatter,
@@ -80,6 +96,7 @@ fun JourneyPlannerRoute(
         onQueryChanged = viewModel::onQueryChanged,
         onStopPicked = viewModel::onStopPicked,
         onSwapStops = viewModel::onSwapStops,
+        onToggleFavouriteJourney = viewModel::onToggleFavouriteJourney,
         onTimeSelected = viewModel::onTimeSelected,
         onTimeCleared = viewModel::onTimeCleared,
         onRetry = viewModel::onRetry,
@@ -94,6 +111,7 @@ fun JourneyPlannerRoute(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList") // one callback per screen event, unidirectional-state convention
 internal fun JourneyPlannerScreenContent(
     uiState: JourneyPlannerUiState,
     timeFormatter: RelativeTimeFormatter,
@@ -102,6 +120,7 @@ internal fun JourneyPlannerScreenContent(
     onQueryChanged: (String) -> Unit,
     onStopPicked: (Stop) -> Unit,
     onSwapStops: () -> Unit,
+    onToggleFavouriteJourney: () -> Unit,
     onTimeSelected: (kotlinx.datetime.Instant) -> Unit,
     onTimeCleared: () -> Unit,
     onRetry: () -> Unit,
@@ -127,8 +146,10 @@ internal fun JourneyPlannerScreenContent(
             EndpointFields(
                 origin = uiState.origin,
                 destination = uiState.destination,
+                isFavouriteJourney = uiState.isFavouriteJourney,
                 onFieldSelected = onFieldSelected,
                 onSwapStops = onSwapStops,
+                onToggleFavouriteJourney = onToggleFavouriteJourney,
             )
 
             if (uiState.activeField != null) {
@@ -157,16 +178,19 @@ internal fun JourneyPlannerScreenContent(
 }
 
 /**
- * The From / To rows plus the swap control. Each row is one tap target that opens the inline
+ * The From / To rows plus the swap control and — once both endpoints are chosen — the ★
+ * journey-favourite toggle (issue #209). Each row is one tap target that opens the inline
  * picker for that endpoint. Long stop names (V/Line stress case) wrap down, bounded at one
- * line with ellipsis — the swap button keeps its tap target via the text column's weight.
+ * line with ellipsis — the buttons keep their tap targets via the text column's weight.
  */
 @Composable
 private fun EndpointFields(
     origin: Stop?,
     destination: Stop?,
+    isFavouriteJourney: Boolean,
     onFieldSelected: (JourneyField) -> Unit,
     onSwapStops: () -> Unit,
+    onToggleFavouriteJourney: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -187,6 +211,12 @@ private fun EndpointFields(
                 testTag = TestTagDestinationField,
             )
         }
+        if (origin != null && destination != null) {
+            FavouriteJourneyToggle(
+                isFavourite = isFavouriteJourney,
+                onClick = onToggleFavouriteJourney,
+            )
+        }
         val swapDescription = stringResource(R.string.feature_journey_planner_swap)
         IconButton(
             onClick = onSwapStops,
@@ -196,6 +226,45 @@ private fun EndpointFields(
                     .semantics { contentDescription = swapDescription },
         ) {
             Text(text = "⇅", style = MaterialTheme.typography.titleLarge)
+        }
+    }
+}
+
+/**
+ * ★ toggle for the current origin→destination pair (issue #209). Filled when favourited,
+ * hollow otherwise — the stop-detail favourite-star trade: a text glyph with a `Crossfade`,
+ * no Material Icons artifact. Only composed once both endpoints are set; A→B and B→A are
+ * distinct favourites, so swapping the stops flips the star to the other pair's state.
+ */
+@Composable
+private fun FavouriteJourneyToggle(
+    isFavourite: Boolean,
+    onClick: () -> Unit,
+) {
+    val description =
+        if (isFavourite) {
+            stringResource(R.string.feature_journey_planner_unfavourite_journey)
+        } else {
+            stringResource(R.string.feature_journey_planner_favourite_journey)
+        }
+    IconButton(
+        onClick = onClick,
+        modifier =
+            Modifier
+                .testTag(TestTagFavouriteJourneyToggle)
+                .semantics { contentDescription = description },
+    ) {
+        Crossfade(targetState = isFavourite, label = "favourite-journey-star") { favourited ->
+            Text(
+                text = if (favourited) "★" else "☆",
+                style = MaterialTheme.typography.titleLarge,
+                color =
+                    if (favourited) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+            )
         }
     }
 }
@@ -274,8 +343,12 @@ private fun StopPickerSection(
         }
 
         when (picker) {
-            StopPickerState.Idle ->
-                CenteredMessage(stringResource(R.string.feature_journey_planner_search_idle_hint))
+            is StopPickerState.Idle ->
+                if (picker.favouriteStops.isEmpty()) {
+                    CenteredMessage(stringResource(R.string.feature_journey_planner_search_idle_hint))
+                } else {
+                    FavouriteStopsList(stops = picker.favouriteStops, onStopPicked = onStopPicked)
+                }
             StopPickerState.Loading -> CenteredLoader()
             StopPickerState.Empty ->
                 CenteredMessage(stringResource(R.string.feature_journey_planner_search_empty))
@@ -291,6 +364,32 @@ private fun StopPickerSection(
     }
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
+    }
+}
+
+/**
+ * Favourite stops offered while the picker query is empty (issue #209): the user's starred
+ * stops, one row per distinct stop, so common endpoints are one tap away before any typing.
+ * Rows reuse [PickerStopRow] — tapping selects the stop exactly like a search result.
+ */
+@Composable
+private fun FavouriteStopsList(
+    stops: List<Stop>,
+    onStopPicked: (Stop) -> Unit,
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize().testTag(TestTagPickerFavouriteStops)) {
+        item(key = "favourite-stops-header") {
+            Text(
+                text = stringResource(R.string.feature_journey_planner_favourite_stops_header),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
+        }
+        items(stops, key = { it.id.value to it.routeType }) { stop ->
+            PickerStopRow(stop = stop, onClick = { onStopPicked(stop) })
+            HorizontalDivider()
+        }
     }
 }
 
@@ -597,6 +696,8 @@ internal const val TestTagTimeSelector: String = "journey-time-selector"
 internal const val TestTagPickerQueryField: String = "journey-picker-query-field"
 internal const val TestTagPickerCancel: String = "journey-picker-cancel"
 internal const val TestTagPickerClearButton: String = "journey-picker-clear-button"
+internal const val TestTagPickerFavouriteStops: String = "journey-picker-favourite-stops"
+internal const val TestTagFavouriteJourneyToggle: String = "journey-favourite-toggle"
 internal const val TestTagPickerResults: String = "journey-picker-results"
 internal const val TestTagPickerStopRow: String = "journey-picker-stop-row"
 internal const val TestTagResultsIdle: String = "journey-results-idle"
