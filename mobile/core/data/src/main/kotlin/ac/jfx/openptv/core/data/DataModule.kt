@@ -70,6 +70,12 @@ abstract class DataModule {
 
     @Binds
     @Singleton
+    internal abstract fun bindJourneyPlannerRepository(
+        impl: JourneyPlannerRepositoryImpl,
+    ): JourneyPlannerRepository
+
+    @Binds
+    @Singleton
     internal abstract fun bindPtvUrlResolver(
         impl: SettingsPtvUrlResolver,
     ): PtvUrlResolver

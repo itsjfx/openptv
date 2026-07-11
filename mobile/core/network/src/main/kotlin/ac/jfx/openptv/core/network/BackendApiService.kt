@@ -4,6 +4,7 @@ import ac.jfx.openptv.core.network.model.DeparturesResponseDto
 import ac.jfx.openptv.core.network.model.NearbyStopsResponseDto
 import ac.jfx.openptv.core.network.model.PatternResponseDto
 import ac.jfx.openptv.core.network.model.RouteShapeResponseDto
+import ac.jfx.openptv.core.network.model.RouteStopsResponseDto
 import ac.jfx.openptv.core.network.model.SearchResponseDto
 import ac.jfx.openptv.core.network.model.StopResponseDto
 import retrofit2.http.GET
@@ -82,4 +83,16 @@ internal interface BackendApiService {
     suspend fun getRouteShape(
         @Url url: String,
     ): RouteShapeResponseDto
+
+    /**
+     * PTV `GET /api/v3/stops/route/{route_id}/route_type/{route_type}?direction_id={d}` — the
+     * route's stops with `stop_sequence` populated along the given direction of travel. Used by
+     * the journey planner (issue #204) to check the origin precedes the destination before
+     * fetching a run's full pattern. Same endpoint as [getRouteShape], different projection —
+     * see [RouteStopsResponseDto].
+     */
+    @GET
+    suspend fun getRouteStops(
+        @Url url: String,
+    ): RouteStopsResponseDto
 }
