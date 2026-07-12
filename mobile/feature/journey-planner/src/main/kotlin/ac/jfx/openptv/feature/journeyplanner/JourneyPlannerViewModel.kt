@@ -226,6 +226,18 @@ class JourneyPlannerViewModel
             destination.value = from
         }
 
+        /**
+         * Clear one endpoint back to "Choose a stop" (issue #215). The other endpoint and any
+         * pinned time are untouched; the results pipeline maps a missing endpoint to Idle, which
+         * also cancels the live poll for the old pair via flatMapLatest.
+         */
+        fun onStopCleared(field: JourneyField) {
+            when (field) {
+                JourneyField.Origin -> origin.value = null
+                JourneyField.Destination -> destination.value = null
+            }
+        }
+
         fun onTimeSelected(instant: Instant) {
             selectedTime.value = instant
         }

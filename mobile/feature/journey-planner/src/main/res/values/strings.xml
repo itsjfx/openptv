@@ -10,6 +10,8 @@
     <string name="feature_journey_planner_to_label">To</string>
     <string name="feature_journey_planner_choose_stop">Choose a stop</string>
     <string name="feature_journey_planner_swap">Swap origin and destination</string>
+    <string name="feature_journey_planner_clear_origin">Clear origin stop</string>
+    <string name="feature_journey_planner_clear_destination">Clear destination stop</string>
 
     <string name="feature_journey_planner_departing_now">Departing now</string>
 

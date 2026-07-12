@@ -210,6 +210,52 @@ class JourneyPlannerViewModelTest {
         }
 
     @Test
+    fun `clearing one endpoint returns results to Idle and keeps the other endpoint`() =
+        runTest(dispatcher) {
+            // Plain collector for the same StateFlow-conflation reason as the swap test.
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            // Pinning a time triggers the one-shot fetch — seed it or the fake fails loud.
+            journeys.enqueueSuccess(emptyList())
+            viewModel.onTimeSelected(Instant.parse("2026-05-15T18:00:00Z"))
+            advanceUntilIdle()
+            viewModel.onStopCleared(JourneyField.Origin)
+            advanceUntilIdle()
+
+            val settled = states.last()
+            assertThat(settled.origin).isNull()
+            assertThat(settled.destination).isEqualTo(burnley)
+            // The pinned time survives the clear; only the endpoint resets.
+            assertThat(settled.selectedTime).isEqualTo(Instant.parse("2026-05-15T18:00:00Z"))
+            assertThat(settled.results).isEqualTo(JourneyResultsState.Idle)
+            job.cancel()
+        }
+
+    @Test
+    fun `clearing the destination stops the live subscription without new fetches`() =
+        runTest(dispatcher) {
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            advanceUntilIdle()
+            val subscriptionsBeforeClear = journeys.observedKeys.size
+            viewModel.onStopCleared(JourneyField.Destination)
+            advanceUntilIdle()
+
+            val settled = states.last()
+            assertThat(settled.destination).isNull()
+            assertThat(settled.origin).isEqualTo(richmond)
+            assertThat(settled.results).isEqualTo(JourneyResultsState.Idle)
+            // A missing endpoint short-circuits to Idle — no repository call for a half pair.
+            assertThat(journeys.observedKeys).hasSize(subscriptionsBeforeClear)
+            assertThat(journeys.oneShotKeys).isEmpty()
+            job.cancel()
+        }
+
+    @Test
     fun `repository error maps to a user-facing reason and retry re-subscribes`() =
         runTest(dispatcher) {
             viewModel.uiState.test {
