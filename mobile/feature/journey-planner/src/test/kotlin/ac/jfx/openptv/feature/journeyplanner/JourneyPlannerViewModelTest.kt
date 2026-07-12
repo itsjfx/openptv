@@ -5,6 +5,7 @@ import ac.jfx.openptv.core.data.test.FakeFavouriteJourneysRepository
 import ac.jfx.openptv.core.data.test.FakeFavouritesRepository
 import ac.jfx.openptv.core.data.test.FakeJourneyPlannerRepository
 import ac.jfx.openptv.core.data.test.FakeStopSearchRepository
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.testing.FavouriteDestinationAtStopMother
 import ac.jfx.openptv.core.testing.JourneyOptionMother
 import ac.jfx.openptv.core.testing.StopMother
@@ -273,6 +274,100 @@ class JourneyPlannerViewModelTest {
                 assertThat(stops.first().name).isEqualTo("Richmond Station")
                 cancelAndIgnoreRemainingEvents()
             }
+        }
+
+    @Test
+    fun `picker search with no chips selected requests all modes`() =
+        runTest(dispatcher) {
+            search.enqueueSuccess(listOf(richmond))
+            viewModel.uiState.test {
+                awaitItem()
+                viewModel.onFieldSelected(JourneyField.Origin)
+                viewModel.onQueryChanged("rich")
+                advanceTimeBy(350)
+                advanceUntilIdle()
+                awaitUntil { it.picker is StopPickerState.Results }
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(search.requestedRouteTypes).containsExactly(emptySet<RouteType>())
+        }
+
+    @Test
+    fun `toggling a chip re-runs the current picker search immediately with the filter on the wire`() =
+        runTest(dispatcher) {
+            search.enqueueSuccess(listOf(richmond, burnley))
+            search.enqueueSuccess(listOf(richmond))
+            viewModel.uiState.test {
+                awaitItem()
+                viewModel.onFieldSelected(JourneyField.Origin)
+                viewModel.onQueryChanged("rich")
+                advanceTimeBy(350)
+                advanceUntilIdle()
+                awaitUntil { (it.picker as? StopPickerState.Results)?.stops?.size == 2 }
+
+                viewModel.onRouteTypeFilterToggled(RouteType.Train)
+                // Well inside the 300 ms debounce window — the filter combines in *after* the
+                // debounce, so the re-query must not wait for it.
+                advanceTimeBy(50)
+                advanceUntilIdle()
+                val state = awaitUntil { (it.picker as? StopPickerState.Results)?.stops?.size == 1 }
+                assertThat(state.routeTypeFilter).containsExactly(RouteType.Train)
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertThat(search.requestedTerms).containsExactly("rich", "rich").inOrder()
+            assertThat(search.requestedRouteTypes)
+                .containsExactly(emptySet<RouteType>(), setOf(RouteType.Train))
+                .inOrder()
+        }
+
+    @Test
+    fun `chip filter narrows the favourite-stops idle list client-side and widens back on deselect`() =
+        runTest(dispatcher) {
+            favourites.seed(
+                listOf(
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(1162).withStopName("Richmond Station")
+                        .withRouteType(RouteType.Train).withPosition(0).build(),
+                    FavouriteDestinationAtStopMother.aFavouriteDestinationAtStop()
+                        .withStopId(2500).withStopName("Bourke St / Spencer St")
+                        .withRouteType(RouteType.Tram).withPosition(1).build(),
+                ),
+            )
+            // Plain collector rather than Turbine — the same StateFlow-conflation trade as the
+            // swap test above: each advanceUntilIdle window settles the state we assert on.
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            viewModel.onFieldSelected(JourneyField.Origin)
+            advanceUntilIdle()
+            assertThat((states.last().picker as StopPickerState.Idle).favouriteStops).hasSize(2)
+
+            viewModel.onRouteTypeFilterToggled(RouteType.Train)
+            advanceUntilIdle()
+            val filtered = (states.last().picker as StopPickerState.Idle).favouriteStops
+            assertThat(filtered.map { it.id.value }).containsExactly(1162)
+
+            viewModel.onRouteTypeFilterToggled(RouteType.Train)
+            advanceUntilIdle()
+            assertThat((states.last().picker as StopPickerState.Idle).favouriteStops).hasSize(2)
+            // Favourites are local — no network search was ever issued.
+            assertThat(search.requestedTerms).isEmpty()
+            job.cancel()
+        }
+
+    @Test
+    fun `toggling Unknown is a no-op`() =
+        runTest(dispatcher) {
+            // Plain collector so the pipeline is live while the (ignored) toggle lands.
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            viewModel.onFieldSelected(JourneyField.Origin)
+            advanceUntilIdle()
+            viewModel.onRouteTypeFilterToggled(RouteType.Unknown)
+            advanceUntilIdle()
+            assertThat(states.last().routeTypeFilter).isEmpty()
+            job.cancel()
         }
 
     @Test
