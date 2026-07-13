@@ -4,16 +4,19 @@ A third-party open-source alternative for the Public Transport Victoria (PTV) An
 
 OpenPTV is presented in [Material You](https://m3.material.io) style
 <div align="center">
-  <img width="24%" alt="light-favourites" src="https://github.com/user-attachments/assets/278084f3-8a03-4b7c-a56d-a2e055fda98b" />
-  <img width="24%" alt="light-nearby-map" src="https://github.com/user-attachments/assets/9c14f8d9-292b-44b6-98d7-c4132740d6cb" />
-  <img width="24%" alt="light-stop-detail" src="https://github.com/user-attachments/assets/e0082221-527b-498c-b6ff-067aa9faaecd" />
-  <img width="24%" alt="light-run-pattern" src="https://github.com/user-attachments/assets/4bd7252d-2f40-4e59-9c45-86dc151d6a2d" />
+  
+  <img width="19%"  alt="light-favourites" src="https://github.com/user-attachments/assets/4e77e0e4-8684-4998-bb17-adfba242aafe" />
+  <img width="19%"  alt="light-nearby-map" src="https://github.com/user-attachments/assets/6caeec65-8f58-4431-83c3-d9e302bb3c4a" />
+  <img width="19%"  alt="light-stop-detail" src="https://github.com/user-attachments/assets/5d3dc2be-5c0f-4fea-b70f-b04b8362efd4" />
+  <img width="19%"  alt="light-run-pattern" src="https://github.com/user-attachments/assets/818d7c6f-0ba9-479b-b2be-4464d22fc783" />
+  <img width="19%"  alt="light-journey-planner" src="https://github.com/user-attachments/assets/67cf582f-27ed-48ab-b62c-e9c8cabde43b" />
   <p>Light mode</p>
   <br>
-  <img width="24%" alt="dark-favourites" src="https://github.com/user-attachments/assets/ed4b4e7e-82a2-4b60-881b-615e6bbdd001" />
-  <img width="24%" alt="dark-nearby-map" src="https://github.com/user-attachments/assets/f1f2e4ed-0082-4387-8fad-e64d1374730b" />
-  <img width="24%" alt="dark-stop-detail" src="https://github.com/user-attachments/assets/956f152c-7a2c-49ef-846c-26cbbd3d679e" />
-  <img width="24%" alt="dark-run-pattern" src="https://github.com/user-attachments/assets/00d378a9-14ca-4681-bc95-5add21e38042" />
+  <img width="19%" alt="dark-favourites" src="https://github.com/user-attachments/assets/7d0ac7b3-58ff-4bd5-b7da-a358e72bf888" />
+  <img width="19%" alt="dark-nearby-map" src="https://github.com/user-attachments/assets/200eabf9-1858-410d-bc11-fd4f4b664245" />
+  <img width="19%" alt="dark-stop-detail" src="https://github.com/user-attachments/assets/962e5103-7adc-49ef-9196-52a937f48368" />
+  <img width="19%" alt="dark-run-pattern" src="https://github.com/user-attachments/assets/935bd3ff-e9dd-43d6-9428-203568ee084a" />
+  <img width="19%" alt="dark-journey-planner" src="https://github.com/user-attachments/assets/4ef26ee3-e8ec-4ddd-80d0-e0273ecd051d" />
   <p>Dark mode</p>
 </div>
 
@@ -24,7 +27,10 @@ OpenPTV is presented in [Material You](https://m3.material.io) style
 * [x] View information for stops and routes; including scheduled departures and live ETA times
 * [x] Favourites list, with scheduled and live ETA departure times
 * [x] Information about departure (what stations it's been to, when, and where it's going)
-* [ ] Journey planner (may be tricky)
+* [x] Follow trips (pin to screen), and notification when nearing destination stop
+* [x] Basic single-stop journey planner
+* [ ] Basic multi-stop journey planner
+* [ ] Multi-stop journey planner (with directions)
 * [ ] Route path highlight on map
 
 ## Quick start
