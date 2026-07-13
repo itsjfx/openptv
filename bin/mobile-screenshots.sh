@@ -203,13 +203,14 @@ INSERT INTO favourite_journeys VALUES
 SQL
 }
 
-# Capture all five screens for one UI mode ("light" or "dark") into $out_dir/<mode>/.
+# Capture all five screens for one UI mode ("light" or "dark") as $out_dir/<mode>-<screen>.png.
+# Flat, mode-prefixed names so the whole set can be dragged into the GitHub README editor
+# without light/dark basenames colliding.
 # Theme defaults to "System" on a fresh install, so `cmd uimode night` flips the app.
 capture_set() {
-  local mode="$1" night dir
+  local mode="$1" night prefix
   [[ "$mode" == dark ]] && night=yes || night=no
-  dir="$out_dir/$mode"
-  mkdir -p "$dir"
+  prefix="$out_dir/$mode"
 
   log "[$mode] uimode night = $night"
   adb shell cmd uimode night "$night" >/dev/null
@@ -224,7 +225,7 @@ capture_set() {
   # the previous mode's journey-planner burst.
   wait_for "min journey" 45
   sleep 1
-  screenshot "$dir/favourites.png"
+  screenshot "$prefix-favourites.png"
 
   log "[$mode] capturing stop-detail (Flinders Street)"
   tap "Flinders Street · Melbourne City"
@@ -232,14 +233,14 @@ capture_set() {
   # section no longer exists)
   wait_for "Show stop on map"
   sleep 2
-  screenshot "$dir/stop-detail.png"
+  screenshot "$prefix-stop-detail.png"
 
   log "[$mode] capturing run-pattern (first Sandringham departure)"
   # row content-desc; the favourited Sandringham group is pinned first, so this is the top row
   tap "Route Sandringham to Sandringham"
   wait_for "This stop"
   sleep 5 # let the route-line map tiles + geopath render
-  screenshot "$dir/run-pattern.png"
+  screenshot "$prefix-run-pattern.png"
 
   log "[$mode] capturing journey planner (Richmond → Flinders Street)"
   adb shell input keyevent KEYCODE_BACK
@@ -249,7 +250,7 @@ capture_set() {
   wait_for "Departing now" # planner screen is up
   wait_for "towards" 30    # result rows' content-desc; live fetch fans out several API calls
   sleep 1
-  screenshot "$dir/journey-planner.png"
+  screenshot "$prefix-journey-planner.png"
 
   log "[$mode] capturing nearby map"
   tap "Nearby tab"
@@ -257,7 +258,7 @@ capture_set() {
   # Default zoom frames ~2-3 CBD blocks with the stops nicely spread. The initial camera-idle
   # fetch populates the pins on load, so no zoom/nudge is needed.
   sleep 5 # let map tiles + stop pins render
-  screenshot "$dir/nearby-map.png"
+  screenshot "$prefix-nearby-map.png"
 }
 
 adb get-state &>/dev/null || {
@@ -304,4 +305,4 @@ capture_set dark
 
 adb shell cmd uimode night no >/dev/null # leave the device back in light mode
 demo_off
-log "done — screenshots in $out_dir/{light,dark}"
+log "done — screenshots in $out_dir/{light,dark}-*.png"
