@@ -184,6 +184,11 @@ launch() { adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1 >/de
 # network call; the destinationKeys match real PTV direction names so each row shows a live
 # next departure. Display names are kept short so they don't truncate mid-word. Tapping the
 # first row (Flinders Street, a train station) opens its stop-detail screen.
+#
+# Also one journey favourite (Richmond → Flinders Street, both trains): tapping it on the
+# Favourites tab flips to the Journey tab with both endpoints prefilled, which is how the
+# journey-planner screenshot gets a deterministic origin/destination without driving the
+# stop picker. Coordinates are the real PTV values (stop ids 1162 and 1071).
 seed_favourites() {
   adb shell run-as "$pkg" sqlite3 "databases/$db_name" <<SQL
 DELETE FROM favourite_destinations_at_stop;
@@ -191,10 +196,14 @@ INSERT INTO favourite_destinations_at_stop VALUES
  (1071,'sandringham','Train','Flinders Street','Melbourne City','Sandringham',-37.8183,144.9671,0,$added_at),
  (2206,'melbourne university','Tram','Bourke St Mall','Melbourne City','Melbourne University',-37.8136,144.9648,1,$added_at),
  (14163,'la trobe university','Bus','Bourke St/Queen St','Melbourne City','La Trobe University',-37.8146,144.9614,2,$added_at);
+DELETE FROM favourite_journeys;
+INSERT INTO favourite_journeys VALUES
+ (1162,'Richmond','Richmond','Train',-37.8241,144.9902,
+  1071,'Flinders Street','Melbourne City','Train',-37.8183,144.9670,$added_at);
 SQL
 }
 
-# Capture all three screens for one UI mode ("light" or "dark") into $out_dir/<mode>/.
+# Capture all five screens for one UI mode ("light" or "dark") into $out_dir/<mode>/.
 # Theme defaults to "System" on a fresh install, so `cmd uimode night` flips the app.
 capture_set() {
   local mode="$1" night dir
@@ -210,6 +219,10 @@ capture_set() {
 
   log "[$mode] capturing favourites"
   wait_for "to Sandringham"
+  # the Journeys section's next-service line loads async — "N min journey" means it's in.
+  # Generous timeout: the fetch fans out several PTV calls and the API can be slow after
+  # the previous mode's journey-planner burst.
+  wait_for "min journey" 45
   sleep 1
   screenshot "$dir/favourites.png"
 
@@ -228,9 +241,17 @@ capture_set() {
   sleep 5 # let the route-line map tiles + geopath render
   screenshot "$dir/run-pattern.png"
 
+  log "[$mode] capturing journey planner (Richmond → Flinders Street)"
+  adb shell input keyevent KEYCODE_BACK
+  adb shell input keyevent KEYCODE_BACK
+  # back on Favourites; the seeded journey favourite prefills the planner and starts the fetch
+  tap "Richmond → Flinders Street"
+  wait_for "Departing now" # planner screen is up
+  wait_for "towards" 30    # result rows' content-desc; live fetch fans out several API calls
+  sleep 1
+  screenshot "$dir/journey-planner.png"
+
   log "[$mode] capturing nearby map"
-  adb shell input keyevent KEYCODE_BACK
-  adb shell input keyevent KEYCODE_BACK
   tap "Nearby tab"
   wait_for "Nearby stops"
   # Default zoom frames ~2-3 CBD blocks with the stops nicely spread. The initial camera-idle
