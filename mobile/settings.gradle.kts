@@ -51,6 +51,7 @@ include(":core:testing")
 // feature convention plugin guards those with `findProject` so missing ones are
 // a no-op, not a build break).
 include(":feature:favourites")
+include(":feature:journey-planner")
 include(":feature:nearby")
 include(":feature:run-pattern")
 include(":feature:search")

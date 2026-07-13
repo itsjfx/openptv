@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.data.test
 
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.StopSearchRepository
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -22,6 +23,9 @@ class FakeStopSearchRepository
         private val queue: ArrayDeque<Result<List<Stop>>> = ArrayDeque()
         val requestedTerms: MutableList<String> = mutableListOf()
 
+        /** Route-type filter recorded per call, index-aligned with [requestedTerms] (issue #213). */
+        val requestedRouteTypes: MutableList<Set<RouteType>> = mutableListOf()
+
         fun enqueueResult(result: Result<List<Stop>>) {
             queue.addLast(result)
         }
@@ -34,8 +38,12 @@ class FakeStopSearchRepository
             queue.addLast(Result.Error(throwable))
         }
 
-        override suspend fun searchStops(term: String): Result<List<Stop>> {
+        override suspend fun searchStops(
+            term: String,
+            routeTypes: Set<RouteType>,
+        ): Result<List<Stop>> {
             requestedTerms += term
+            requestedRouteTypes += routeTypes
             return queue.removeFirstOrNull() ?: Result.Success(emptyList())
         }
     }

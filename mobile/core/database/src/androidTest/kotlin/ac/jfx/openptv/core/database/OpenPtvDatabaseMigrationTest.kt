@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.database
 
 import ac.jfx.openptv.OpenPtvDatabase
 import ac.jfx.openptv.core.database.migration.MIGRATION_1_2
+import ac.jfx.openptv.core.database.migration.MIGRATION_2_3
 import androidx.room.testing.MigrationTestHelper
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -160,6 +161,78 @@ class OpenPtvDatabaseMigrationTest {
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'favourite_routes_at_stop'",
         ).use { cursor ->
             assertThat(cursor.count).isEqualTo(0)
+        }
+    }
+
+    @Test
+    fun createsV3Database() {
+        helper.createDatabase(TEST_DB_NAME, 3).use { db ->
+            assertThat(db.version).isEqualTo(3)
+        }
+    }
+
+    @Test
+    fun migrate_v2_to_v3_keepsExistingFavouritesAndCreatesEmptyJourneysTable() {
+        helper.createDatabase(TEST_DB_NAME, 2).use { db ->
+            db.execSQL(
+                "INSERT INTO favourite_destinations_at_stop " +
+                    "(stopId, destinationKey, routeType, stopName, stopSuburb, destinationName, " +
+                    "lat, lng, position, addedAt) " +
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                arrayOf<Any>(
+                    FLINDERS_STOP_ID,
+                    "north coburg",
+                    "Tram",
+                    "Flinders Street Railway Station",
+                    "Melbourne City",
+                    "North Coburg",
+                    -37.8183,
+                    144.9671,
+                    0,
+                    1_000L,
+                ),
+            )
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB_NAME, 3, true, MIGRATION_2_3)
+
+        migrated.query("SELECT stopId FROM favourite_destinations_at_stop").use { cursor ->
+            assertThat(cursor.count).isEqualTo(1)
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getInt(0)).isEqualTo(FLINDERS_STOP_ID)
+        }
+        migrated.query("SELECT COUNT(*) FROM favourite_journeys").use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getInt(0)).isEqualTo(0)
+        }
+    }
+
+    @Test
+    fun migrate_v1_to_v3_chainsBothMigrations() {
+        helper.createDatabase(TEST_DB_NAME, 1).use { db ->
+            db.insertV1Row(
+                stopId = CAULFIELD_STOP_ID,
+                routeId = 1,
+                directionId = 1,
+                directionName = "City",
+                position = 0,
+                addedAt = 1_000L,
+            )
+        }
+
+        val migrated =
+            helper.runMigrationsAndValidate(TEST_DB_NAME, 3, true, MIGRATION_1_2, MIGRATION_2_3)
+
+        migrated.query(
+            "SELECT destinationKey FROM favourite_destinations_at_stop WHERE stopId = ?",
+            arrayOf<Any>(CAULFIELD_STOP_ID),
+        ).use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getString(0)).isEqualTo("city")
+        }
+        migrated.query("SELECT COUNT(*) FROM favourite_journeys").use { cursor ->
+            assertThat(cursor.moveToFirst()).isTrue()
+            assertThat(cursor.getInt(0)).isEqualTo(0)
         }
     }
 

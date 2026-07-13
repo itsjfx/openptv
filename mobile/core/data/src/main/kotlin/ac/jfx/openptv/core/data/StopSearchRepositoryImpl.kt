@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.network.StopSearchDataSource
 import kotlinx.coroutines.CancellationException
@@ -24,9 +25,12 @@ internal class StopSearchRepositoryImpl
         // `Result.Error` so callers don't have to know the underlying type lattice. Catching
         // `Throwable` is the conventional shape; see KDoc above for the cancellation contract.
         @Suppress("TooGenericExceptionCaught")
-        override suspend fun searchStops(term: String): Result<List<Stop>> =
+        override suspend fun searchStops(
+            term: String,
+            routeTypes: Set<RouteType>,
+        ): Result<List<Stop>> =
             try {
-                Result.Success(dataSource.searchStops(term))
+                Result.Success(dataSource.searchStops(term, routeTypes))
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (t: Throwable) {

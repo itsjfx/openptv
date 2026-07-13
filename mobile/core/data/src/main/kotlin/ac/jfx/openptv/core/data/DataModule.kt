@@ -52,6 +52,12 @@ abstract class DataModule {
 
     @Binds
     @Singleton
+    internal abstract fun bindFavouriteJourneysRepository(
+        impl: FavouriteJourneysRepositoryImpl,
+    ): FavouriteJourneysRepository
+
+    @Binds
+    @Singleton
     internal abstract fun bindNearbyStopsRepository(
         impl: NearbyStopsRepositoryImpl,
     ): NearbyStopsRepository
@@ -67,6 +73,12 @@ abstract class DataModule {
     internal abstract fun bindFollowedTripRepository(
         impl: FollowedTripRepositoryImpl,
     ): FollowedTripRepository
+
+    @Binds
+    @Singleton
+    internal abstract fun bindJourneyPlannerRepository(
+        impl: JourneyPlannerRepositoryImpl,
+    ): JourneyPlannerRepository
 
     @Binds
     @Singleton

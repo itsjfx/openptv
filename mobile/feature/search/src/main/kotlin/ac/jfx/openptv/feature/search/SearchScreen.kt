@@ -4,16 +4,21 @@ import ac.jfx.openptv.core.designsystem.ScreenHeading
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.feature.search.R
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,11 +51,14 @@ fun SearchScreen(
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     val query by viewModel.query.collectAsStateWithLifecycle()
+    val routeTypeFilter by viewModel.routeTypeFilter.collectAsStateWithLifecycle()
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     SearchScreenContent(
         query = query,
+        routeTypeFilter = routeTypeFilter,
         uiState = uiState,
         onQueryChanged = viewModel::onQueryChanged,
+        onRouteTypeFilterToggled = viewModel::onRouteTypeFilterToggled,
         onStopSelected = onStopSelected,
         onOpenSettings = onOpenSettings,
     )
@@ -60,8 +68,10 @@ fun SearchScreen(
 @Composable
 internal fun SearchScreenContent(
     query: String,
+    routeTypeFilter: Set<RouteType>,
     uiState: SearchUiState,
     onQueryChanged: (String) -> Unit,
+    onRouteTypeFilterToggled: (RouteType) -> Unit,
     onStopSelected: (Stop) -> Unit,
     onOpenSettings: () -> Unit = {},
 ) {
@@ -105,6 +115,15 @@ internal fun SearchScreenContent(
                         androidx.compose.foundation.text.KeyboardOptions(
                             imeAction = ImeAction.Search,
                         ),
+                )
+
+                RouteTypeFilterRow(
+                    selected = routeTypeFilter,
+                    onToggle = onRouteTypeFilterToggled,
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .testTag(TestTagFilterRow),
                 )
 
                 when (val state = uiState) {
@@ -208,6 +227,46 @@ private fun CenteredMessage(text: String) {
     }
 }
 
+/**
+ * Horizontal row of [FilterChip]s, one per visible [RouteType] — a per-feature mirror of the
+ * Nearby map's chip strip (issue #213; duplicated rather than promoted to `:core:designsystem`
+ * because designsystem doesn't depend on `:core:model` and this composable isn't worth adding
+ * that edge for). Unlike Nearby's filter, empty selection is allowed and means "all modes".
+ * The row scrolls horizontally so the five chips fit on a 360-dp width device.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RouteTypeFilterRow(
+    selected: Set<RouteType>,
+    onToggle: (RouteType) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val rowDescription = stringResource(R.string.feature_search_filter_row_description)
+    Row(
+        modifier =
+            modifier
+                .horizontalScroll(rememberScrollState())
+                .semantics { contentDescription = rowDescription },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        filterTypes.forEach { routeType ->
+            FilterChip(
+                selected = selected.contains(routeType),
+                onClick = { onToggle(routeType) },
+                label = { Text(routeType.label()) },
+                leadingIcon = { Text(routeType.glyph()) },
+                colors = FilterChipDefaults.filterChipColors(),
+                modifier = Modifier.testTag(filterChipTestTag(routeType)),
+            )
+        }
+    }
+}
+
+/** The user-facing modes, chip order matching Nearby's strip. [RouteType.Unknown] is a runtime fallback, never a chip. */
+private val filterTypes: List<RouteType> =
+    listOf(RouteType.Train, RouteType.Tram, RouteType.Bus, RouteType.VLine, RouteType.NightBus)
+
 @Composable
 private fun RouteType.label(): String =
     when (this) {
@@ -217,6 +276,17 @@ private fun RouteType.label(): String =
         RouteType.VLine -> stringResource(R.string.feature_search_route_type_vline)
         RouteType.NightBus -> stringResource(R.string.feature_search_route_type_night_bus)
         RouteType.Unknown -> stringResource(R.string.feature_search_route_type_unknown)
+    }
+
+/** Same glyph set as the Nearby chip strip so the modes read identically across surfaces. */
+private fun RouteType.glyph(): String =
+    when (this) {
+        RouteType.Train -> "🚆"
+        RouteType.Tram -> "🚊"
+        RouteType.Bus -> "🚌"
+        RouteType.VLine -> "🚉"
+        RouteType.NightBus -> "🌙"
+        RouteType.Unknown -> "•"
     }
 
 /**
@@ -244,3 +314,6 @@ private fun SettingsGearButton(onClick: () -> Unit) {
 internal const val TestTagQueryField: String = "search-query-field"
 internal const val TestTagResults: String = "search-results-list"
 internal const val TestTagSettingsGear: String = "search-settings-gear"
+internal const val TestTagFilterRow: String = "search-filter-row"
+
+internal fun filterChipTestTag(routeType: RouteType): String = "search-filter-chip-${routeType.name.lowercase()}"
