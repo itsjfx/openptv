@@ -1,6 +1,7 @@
 package ac.jfx.openptv.feature.journeyplanner
 
 import ac.jfx.openptv.core.model.JourneyOption
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import kotlinx.datetime.Instant
 
@@ -12,9 +13,13 @@ enum class JourneyField { Origin, Destination }
  * `SearchUiState` because the picker *is* that screen's pipeline embedded in this one. Kept
  * separate (not reused across modules) so the two features stay independent per the module
  * rules; the shape is four states and not worth a shared module.
+ *
+ * [Idle] (empty query) carries the user's favourite stops (issue #209) — derived from the
+ * destination-at-stop favourites, distinct by stop — so common endpoints are one tap away
+ * before any typing. Empty list falls back to the "type a stop name" hint.
  */
 sealed interface StopPickerState {
-    data object Idle : StopPickerState
+    data class Idle(val favouriteStops: List<Stop> = emptyList()) : StopPickerState
 
     data object Loading : StopPickerState
 
@@ -48,6 +53,14 @@ sealed interface JourneyResultsState {
  * picker text so the text field echoes keystrokes instantly; the debounced search pipeline
  * feeds [picker] separately. `selectedTime` null means "departing now" — the results poll live;
  * non-null pins a static snapshot, mirroring stop-detail's custom-time behaviour.
+ *
+ * `isFavouriteJourney` (issue #209) is the ★ toggle's state for the current (origin,
+ * destination) pair; always false while either endpoint is missing (the star isn't rendered
+ * then).
+ *
+ * `routeTypeFilter` (issue #213) is the picker's mode-chip selection — empty means "all modes".
+ * It scopes both the search results (via PTV's `route_types` parameter) and the favourite-stops
+ * idle list (client-side). Session-scoped, not persisted.
  */
 data class JourneyPlannerUiState(
     val origin: Stop? = null,
@@ -55,6 +68,8 @@ data class JourneyPlannerUiState(
     val selectedTime: Instant? = null,
     val activeField: JourneyField? = null,
     val query: String = "",
-    val picker: StopPickerState = StopPickerState.Idle,
+    val routeTypeFilter: Set<RouteType> = emptySet(),
+    val picker: StopPickerState = StopPickerState.Idle(),
     val results: JourneyResultsState = JourneyResultsState.Idle,
+    val isFavouriteJourney: Boolean = false,
 )

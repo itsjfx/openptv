@@ -2,7 +2,9 @@ package ac.jfx.openptv.feature.favourites
 
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.data.test.FakeDepartureRepository
+import ac.jfx.openptv.core.data.test.FakeFavouriteJourneysRepository
 import ac.jfx.openptv.core.data.test.FakeFavouritesRepository
+import ac.jfx.openptv.core.data.test.FakeJourneyPlannerRepository
 import ac.jfx.openptv.core.domain.LoadNextDepartureUseCase
 import ac.jfx.openptv.core.domain.ObserveFavouritesUseCase
 import ac.jfx.openptv.core.domain.ReorderFavouritesUseCase
@@ -40,6 +42,8 @@ class FavouritesViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val favouritesRepository = FakeFavouritesRepository()
     private val departureRepository = FakeDepartureRepository()
+    private val favouriteJourneysRepository = FakeFavouriteJourneysRepository()
+    private val journeyPlannerRepository = FakeJourneyPlannerRepository()
     private val clock = FakeClock(Instant.parse("2026-05-14T09:00:00Z"))
     private val formatter = RelativeTimeFormatter(clock)
 
@@ -63,6 +67,8 @@ class FavouritesViewModelTest {
             reorderFavourites = ReorderFavouritesUseCase(favouritesRepository),
             loadNextDeparture = LoadNextDepartureUseCase(departureRepository),
             favouritesRepository = favouritesRepository,
+            favouriteJourneysRepository = favouriteJourneysRepository,
+            journeyPlannerRepository = journeyPlannerRepository,
             timeFormatter = formatter,
         ).also { activeViewModel = it }
 

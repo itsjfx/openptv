@@ -1,5 +1,6 @@
 package ac.jfx.openptv.core.network
 
+import ac.jfx.openptv.core.model.RouteType
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.SerializationException
@@ -114,5 +115,39 @@ class RetrofitStopSearchDataSourceTest {
 
             val recorded = server.takeRequest()
             assertThat(recorded.path).isEqualTo("/api/v3/search/flinders")
+        }
+
+    @Test
+    fun `empty route-type filter appends no query parameters`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
+
+            dataSource.searchStops("flinders", routeTypes = emptySet())
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).isEqualTo("/api/v3/search/flinders")
+        }
+
+    @Test
+    fun `single route type appends one route_types parameter`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
+
+            dataSource.searchStops("richmond", routeTypes = setOf(RouteType.Train))
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).isEqualTo("/api/v3/search/richmond?route_types=0")
+        }
+
+    @Test
+    fun `multiple route types repeat the parameter sorted by wire code`() =
+        runTest {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[]}"""))
+
+            // Insertion order deliberately reversed vs wire codes — the URL must sort them.
+            dataSource.searchStops("richmond", routeTypes = setOf(RouteType.VLine, RouteType.Train))
+
+            val recorded = server.takeRequest()
+            assertThat(recorded.path).isEqualTo("/api/v3/search/richmond?route_types=0&route_types=3")
         }
 }

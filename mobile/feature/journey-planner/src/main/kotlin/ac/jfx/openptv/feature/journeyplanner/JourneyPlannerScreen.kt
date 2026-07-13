@@ -10,7 +10,9 @@ import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.model.StopId
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,10 +26,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,22 +69,40 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
  * [onOpenRunPattern] fires when a journey row is tapped — the app composition root pushes the
  * run-pattern destination with the origin as `fromStopId` so the timeline marks where the user
  * boards.
+ *
+ * [prefillOrigin]/[prefillDestination] are the one-shot endpoint prefill (issue #209): tapping a
+ * journey favourite on the Favourites tab switches to this tab with both stops supplied. The
+ * `LaunchedEffect` applies them once and fires [onPrefillConsumed] so the host clears the
+ * pending pair — the NearbyRoute focus-consumption pattern, but host-owned state instead of a
+ * nav-key arg because `Stop` doesn't fit in a route.
  */
 @Composable
 fun JourneyPlannerRoute(
     onOpenRunPattern: (runRef: RunRef, routeType: RouteType, fromStopId: StopId) -> Unit = { _, _, _ -> },
     onOpenSettings: () -> Unit = {},
+    prefillOrigin: Stop? = null,
+    prefillDestination: Stop? = null,
+    onPrefillConsumed: () -> Unit = {},
     viewModel: JourneyPlannerViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    LaunchedEffect(prefillOrigin, prefillDestination) {
+        if (prefillOrigin != null && prefillDestination != null) {
+            viewModel.onEndpointsPrefilled(prefillOrigin, prefillDestination)
+            onPrefillConsumed()
+        }
+    }
     JourneyPlannerScreenContent(
         uiState = uiState,
         timeFormatter = viewModel.timeFormatter,
         onFieldSelected = viewModel::onFieldSelected,
+        onStopCleared = viewModel::onStopCleared,
         onPickerDismissed = viewModel::onPickerDismissed,
         onQueryChanged = viewModel::onQueryChanged,
+        onRouteTypeFilterToggled = viewModel::onRouteTypeFilterToggled,
         onStopPicked = viewModel::onStopPicked,
         onSwapStops = viewModel::onSwapStops,
+        onToggleFavouriteJourney = viewModel::onToggleFavouriteJourney,
         onTimeSelected = viewModel::onTimeSelected,
         onTimeCleared = viewModel::onTimeCleared,
         onRetry = viewModel::onRetry,
@@ -94,14 +117,18 @@ fun JourneyPlannerRoute(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+@Suppress("LongParameterList") // one callback per screen event, unidirectional-state convention
 internal fun JourneyPlannerScreenContent(
     uiState: JourneyPlannerUiState,
     timeFormatter: RelativeTimeFormatter,
     onFieldSelected: (JourneyField) -> Unit,
+    onStopCleared: (JourneyField) -> Unit,
     onPickerDismissed: () -> Unit,
     onQueryChanged: (String) -> Unit,
+    onRouteTypeFilterToggled: (RouteType) -> Unit,
     onStopPicked: (Stop) -> Unit,
     onSwapStops: () -> Unit,
+    onToggleFavouriteJourney: () -> Unit,
     onTimeSelected: (kotlinx.datetime.Instant) -> Unit,
     onTimeCleared: () -> Unit,
     onRetry: () -> Unit,
@@ -127,15 +154,20 @@ internal fun JourneyPlannerScreenContent(
             EndpointFields(
                 origin = uiState.origin,
                 destination = uiState.destination,
+                isFavouriteJourney = uiState.isFavouriteJourney,
                 onFieldSelected = onFieldSelected,
+                onStopCleared = onStopCleared,
                 onSwapStops = onSwapStops,
+                onToggleFavouriteJourney = onToggleFavouriteJourney,
             )
 
             if (uiState.activeField != null) {
                 StopPickerSection(
                     query = uiState.query,
+                    routeTypeFilter = uiState.routeTypeFilter,
                     picker = uiState.picker,
                     onQueryChanged = onQueryChanged,
+                    onRouteTypeFilterToggled = onRouteTypeFilterToggled,
                     onStopPicked = onStopPicked,
                     onPickerDismissed = onPickerDismissed,
                 )
@@ -157,16 +189,20 @@ internal fun JourneyPlannerScreenContent(
 }
 
 /**
- * The From / To rows plus the swap control. Each row is one tap target that opens the inline
+ * The From / To rows plus the swap control and — once both endpoints are chosen — the ★
+ * journey-favourite toggle (issue #209). Each row is one tap target that opens the inline
  * picker for that endpoint. Long stop names (V/Line stress case) wrap down, bounded at one
- * line with ellipsis — the swap button keeps its tap target via the text column's weight.
+ * line with ellipsis — the buttons keep their tap targets via the text column's weight.
  */
 @Composable
 private fun EndpointFields(
     origin: Stop?,
     destination: Stop?,
+    isFavouriteJourney: Boolean,
     onFieldSelected: (JourneyField) -> Unit,
+    onStopCleared: (JourneyField) -> Unit,
     onSwapStops: () -> Unit,
+    onToggleFavouriteJourney: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -176,15 +212,29 @@ private fun EndpointFields(
             EndpointRow(
                 label = stringResource(R.string.feature_journey_planner_from_label),
                 stop = origin,
+                clearContentDescription =
+                    stringResource(R.string.feature_journey_planner_clear_origin),
                 onClick = { onFieldSelected(JourneyField.Origin) },
+                onClear = { onStopCleared(JourneyField.Origin) },
                 testTag = TestTagOriginField,
+                clearTestTag = TestTagOriginClear,
             )
             HorizontalDivider()
             EndpointRow(
                 label = stringResource(R.string.feature_journey_planner_to_label),
                 stop = destination,
+                clearContentDescription =
+                    stringResource(R.string.feature_journey_planner_clear_destination),
                 onClick = { onFieldSelected(JourneyField.Destination) },
+                onClear = { onStopCleared(JourneyField.Destination) },
                 testTag = TestTagDestinationField,
+                clearTestTag = TestTagDestinationClear,
+            )
+        }
+        if (origin != null && destination != null) {
+            FavouriteJourneyToggle(
+                isFavourite = isFavouriteJourney,
+                onClick = onToggleFavouriteJourney,
             )
         }
         val swapDescription = stringResource(R.string.feature_journey_planner_swap)
@@ -200,44 +250,117 @@ private fun EndpointFields(
     }
 }
 
+/**
+ * ★ toggle for the current origin→destination pair (issue #209). Filled when favourited,
+ * hollow otherwise — the stop-detail favourite-star trade: a text glyph with a `Crossfade`,
+ * no Material Icons artifact. Only composed once both endpoints are set; A→B and B→A are
+ * distinct favourites, so swapping the stops flips the star to the other pair's state.
+ */
+@Composable
+private fun FavouriteJourneyToggle(
+    isFavourite: Boolean,
+    onClick: () -> Unit,
+) {
+    val description =
+        if (isFavourite) {
+            stringResource(R.string.feature_journey_planner_unfavourite_journey)
+        } else {
+            stringResource(R.string.feature_journey_planner_favourite_journey)
+        }
+    IconButton(
+        onClick = onClick,
+        modifier =
+            Modifier
+                .testTag(TestTagFavouriteJourneyToggle)
+                .semantics { contentDescription = description },
+    ) {
+        Crossfade(targetState = isFavourite, label = "favourite-journey-star") { favourited ->
+            Text(
+                text = if (favourited) "★" else "☆",
+                style = MaterialTheme.typography.titleLarge,
+                color =
+                    if (favourited) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+            )
+        }
+    }
+}
+
+/**
+ * One endpoint field. The text column is the open-picker tap target; the ✕ (issue #215, only
+ * composed once a stop is chosen) is its own target that clears just this endpoint — clearing
+ * either endpoint drops the results back to the idle hint, since results need both.
+ */
 @Composable
 private fun EndpointRow(
     label: String,
     stop: Stop?,
+    clearContentDescription: String,
     onClick: () -> Unit,
+    onClear: () -> Unit,
     testTag: String,
+    clearTestTag: String,
 ) {
-    Column(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(vertical = 10.dp)
-                .testTag(testTag),
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = label, style = MaterialTheme.typography.labelMedium)
-        Text(
-            text = stop?.name ?: stringResource(R.string.feature_journey_planner_choose_stop),
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (stop != null) FontWeight.Medium else FontWeight.Normal,
-            color =
-                if (stop != null) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Column(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .clickable(onClick = onClick)
+                    .padding(vertical = 10.dp)
+                    .testTag(testTag),
+        ) {
+            Text(text = label, style = MaterialTheme.typography.labelMedium)
+            Text(
+                text = stop?.name ?: stringResource(R.string.feature_journey_planner_choose_stop),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (stop != null) FontWeight.Medium else FontWeight.Normal,
+                color =
+                    if (stop != null) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (stop != null) {
+            IconButton(
+                onClick = onClear,
+                modifier =
+                    Modifier
+                        .testTag(clearTestTag)
+                        .semantics { contentDescription = clearContentDescription },
+            ) {
+                Text(
+                    text = "✕",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
-/** The inline stop picker: search field (auto-focused) + result rows, `:feature:search` UX. */
+/**
+ * The inline stop picker: search field (auto-focused) + mode chips + result rows,
+ * `:feature:search` UX. The chip row (issue #213) filters both the search results (on the wire)
+ * and the favourite-stops idle list (client-side, in the ViewModel).
+ */
 @Composable
 private fun StopPickerSection(
     query: String,
+    routeTypeFilter: Set<RouteType>,
     picker: StopPickerState,
     onQueryChanged: (String) -> Unit,
+    onRouteTypeFilterToggled: (RouteType) -> Unit,
     onStopPicked: (Stop) -> Unit,
     onPickerDismissed: () -> Unit,
 ) {
@@ -273,9 +396,22 @@ private fun StopPickerSection(
             }
         }
 
+        RouteTypeFilterRow(
+            selected = routeTypeFilter,
+            onToggle = onRouteTypeFilterToggled,
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .testTag(TestTagPickerFilterRow),
+        )
+
         when (picker) {
-            StopPickerState.Idle ->
-                CenteredMessage(stringResource(R.string.feature_journey_planner_search_idle_hint))
+            is StopPickerState.Idle ->
+                if (picker.favouriteStops.isEmpty()) {
+                    CenteredMessage(stringResource(R.string.feature_journey_planner_search_idle_hint))
+                } else {
+                    FavouriteStopsList(stops = picker.favouriteStops, onStopPicked = onStopPicked)
+                }
             StopPickerState.Loading -> CenteredLoader()
             StopPickerState.Empty ->
                 CenteredMessage(stringResource(R.string.feature_journey_planner_search_empty))
@@ -291,6 +427,32 @@ private fun StopPickerSection(
     }
     LaunchedEffect(Unit) {
         focusRequester.requestFocus()
+    }
+}
+
+/**
+ * Favourite stops offered while the picker query is empty (issue #209): the user's starred
+ * stops, one row per distinct stop, so common endpoints are one tap away before any typing.
+ * Rows reuse [PickerStopRow] — tapping selects the stop exactly like a search result.
+ */
+@Composable
+private fun FavouriteStopsList(
+    stops: List<Stop>,
+    onStopPicked: (Stop) -> Unit,
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize().testTag(TestTagPickerFavouriteStops)) {
+        item(key = "favourite-stops-header") {
+            Text(
+                text = stringResource(R.string.feature_journey_planner_favourite_stops_header),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
+        }
+        items(stops, key = { it.id.value to it.routeType }) { stop ->
+            PickerStopRow(stop = stop, onClick = { onStopPicked(stop) })
+            HorizontalDivider()
+        }
     }
 }
 
@@ -572,6 +734,57 @@ private fun RouteType.label(): String =
         RouteType.Unknown -> stringResource(R.string.feature_journey_planner_route_type_unknown)
     }
 
+/**
+ * Horizontal row of [FilterChip]s, one per visible [RouteType] — a per-feature mirror of the
+ * Nearby map's chip strip (issue #213; duplicated rather than promoted to `:core:designsystem`
+ * because designsystem doesn't depend on `:core:model` and this composable isn't worth adding
+ * that edge for). Unlike Nearby's filter, empty selection is allowed and means "all modes".
+ * The row scrolls horizontally so the five chips fit on a 360-dp width device.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RouteTypeFilterRow(
+    selected: Set<RouteType>,
+    onToggle: (RouteType) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val rowDescription = stringResource(R.string.feature_journey_planner_filter_row_description)
+    Row(
+        modifier =
+            modifier
+                .horizontalScroll(rememberScrollState())
+                .semantics { contentDescription = rowDescription },
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        filterTypes.forEach { routeType ->
+            FilterChip(
+                selected = selected.contains(routeType),
+                onClick = { onToggle(routeType) },
+                label = { Text(routeType.label()) },
+                leadingIcon = { Text(routeType.glyph()) },
+                colors = FilterChipDefaults.filterChipColors(),
+                modifier = Modifier.testTag(filterChipTestTag(routeType)),
+            )
+        }
+    }
+}
+
+/** The user-facing modes, chip order matching Nearby's strip. [RouteType.Unknown] is a runtime fallback, never a chip. */
+private val filterTypes: List<RouteType> =
+    listOf(RouteType.Train, RouteType.Tram, RouteType.Bus, RouteType.VLine, RouteType.NightBus)
+
+/** Same glyph set as the Nearby chip strip so the modes read identically across surfaces. */
+private fun RouteType.glyph(): String =
+    when (this) {
+        RouteType.Train -> "🚆"
+        RouteType.Tram -> "🚊"
+        RouteType.Bus -> "🚌"
+        RouteType.VLine -> "🚉"
+        RouteType.NightBus -> "🌙"
+        RouteType.Unknown -> "•"
+    }
+
 /** Top-left settings gear — same trade as the other main screens (issue #111). */
 @Composable
 private fun SettingsGearButton(onClick: () -> Unit) {
@@ -592,11 +805,16 @@ private const val ROUTE_BADGE_MAX_LINES = 3
 
 internal const val TestTagOriginField: String = "journey-origin-field"
 internal const val TestTagDestinationField: String = "journey-destination-field"
+internal const val TestTagOriginClear: String = "journey-origin-clear"
+internal const val TestTagDestinationClear: String = "journey-destination-clear"
 internal const val TestTagSwapButton: String = "journey-swap-button"
 internal const val TestTagTimeSelector: String = "journey-time-selector"
 internal const val TestTagPickerQueryField: String = "journey-picker-query-field"
 internal const val TestTagPickerCancel: String = "journey-picker-cancel"
+internal const val TestTagPickerFilterRow: String = "journey-picker-filter-row"
 internal const val TestTagPickerClearButton: String = "journey-picker-clear-button"
+internal const val TestTagPickerFavouriteStops: String = "journey-picker-favourite-stops"
+internal const val TestTagFavouriteJourneyToggle: String = "journey-favourite-toggle"
 internal const val TestTagPickerResults: String = "journey-picker-results"
 internal const val TestTagPickerStopRow: String = "journey-picker-stop-row"
 internal const val TestTagResultsIdle: String = "journey-results-idle"
@@ -605,3 +823,5 @@ internal const val TestTagJourneyRow: String = "journey-row"
 internal const val TestTagNoDirectServices: String = "journey-no-direct-services"
 internal const val TestTagRetryButton: String = "journey-retry-button"
 internal const val TestTagSettingsGear: String = "journey-settings-gear"
+
+internal fun filterChipTestTag(routeType: RouteType): String = "journey-picker-filter-chip-${routeType.name.lowercase()}"

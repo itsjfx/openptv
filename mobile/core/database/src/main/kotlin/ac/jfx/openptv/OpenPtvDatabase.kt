@@ -2,7 +2,9 @@ package ac.jfx.openptv
 
 import ac.jfx.openptv.core.database.converter.RouteTypeConverter
 import ac.jfx.openptv.core.database.dao.FavouriteDestinationAtStopDao
+import ac.jfx.openptv.core.database.dao.FavouriteJourneyDao
 import ac.jfx.openptv.core.database.entity.FavouriteDestinationAtStopEntity
+import ac.jfx.openptv.core.database.entity.FavouriteJourneyEntity
 import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
@@ -16,12 +18,14 @@ import androidx.room.TypeConverters
  * v1 — per-route favourites (`favourite_routes_at_stop`, keyed `(stopId, routeId, directionId)`).
  * v2 — per-destination favourites (`favourite_destinations_at_stop`, keyed `(stopId, destinationKey)`).
  * Migration in `core.database.migration.MIGRATION_1_2` collapses by `LOWER(directionName)` per stop.
+ * v3 — journey favourites (`favourite_journeys`, keyed `(originStopId, destinationStopId)`, issue
+ * #209). `MIGRATION_2_3` is purely additive.
  *
  * `exportSchema = true` so Room writes `<version>.json` under the configured schema directory at
  * build time. JSONs are committed; the migration test uses them as the source of truth.
  */
 @Database(
-    entities = [FavouriteDestinationAtStopEntity::class],
+    entities = [FavouriteDestinationAtStopEntity::class, FavouriteJourneyEntity::class],
     version = OpenPtvDatabase.VERSION,
     exportSchema = true,
 )
@@ -29,8 +33,10 @@ import androidx.room.TypeConverters
 abstract class OpenPtvDatabase : RoomDatabase() {
     abstract fun favouriteDestinationAtStopDao(): FavouriteDestinationAtStopDao
 
+    abstract fun favouriteJourneyDao(): FavouriteJourneyDao
+
     companion object {
-        const val VERSION: Int = 2
+        const val VERSION: Int = 3
 
         /**
          * Filename used by `Room.databaseBuilder`. Centralised so the migration test harness

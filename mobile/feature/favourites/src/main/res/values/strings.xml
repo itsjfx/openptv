@@ -28,6 +28,15 @@
     <!-- "to {destinationName}" secondary line on the row. -->
     <string name="feature_favourites_to_destination">to %1$s</string>
 
+    <!-- Journey favourites section (issue #209) -->
+    <string name="feature_favourites_journeys_header">Journeys</string>
+    <string name="feature_favourites_journey_endpoints">%1$s → %2$s</string>
+    <string name="feature_favourites_journey_departs">Departs %1$s</string>
+    <string name="feature_favourites_journey_arrives">Arrives %1$s</string>
+    <string name="feature_favourites_journey_duration">%1$d min journey</string>
+    <string name="feature_favourites_journey_platform">Platform %1$s</string>
+    <string name="feature_favourites_journey_none">No direct services right now</string>
+
     <!-- Row content description: stop, suburb, destination, next departure phrase -->
     <string name="feature_favourites_row_content_description">%1$s, %2$s. To %3$s. Next departure %4$s.</string>
 

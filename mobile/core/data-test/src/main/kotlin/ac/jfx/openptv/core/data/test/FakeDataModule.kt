@@ -2,6 +2,7 @@ package ac.jfx.openptv.core.data.test
 
 import ac.jfx.openptv.core.data.DataModule
 import ac.jfx.openptv.core.data.DepartureRepository
+import ac.jfx.openptv.core.data.FavouriteJourneysRepository
 import ac.jfx.openptv.core.data.FavouritesRepository
 import ac.jfx.openptv.core.data.FollowedTripRepository
 import ac.jfx.openptv.core.data.JourneyPlannerRepository
@@ -56,6 +57,12 @@ abstract class FakeDataModule {
     internal abstract fun bindFavouritesRepository(
         impl: FakeFavouritesRepository,
     ): FavouritesRepository
+
+    @Binds
+    @Singleton
+    internal abstract fun bindFavouriteJourneysRepository(
+        impl: FakeFavouriteJourneysRepository,
+    ): FavouriteJourneysRepository
 
     @Binds
     @Singleton

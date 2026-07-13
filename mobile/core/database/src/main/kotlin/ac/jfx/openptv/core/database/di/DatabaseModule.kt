@@ -2,7 +2,9 @@ package ac.jfx.openptv.core.database.di
 
 import ac.jfx.openptv.OpenPtvDatabase
 import ac.jfx.openptv.core.database.dao.FavouriteDestinationAtStopDao
+import ac.jfx.openptv.core.database.dao.FavouriteJourneyDao
 import ac.jfx.openptv.core.database.migration.MIGRATION_1_2
+import ac.jfx.openptv.core.database.migration.MIGRATION_2_3
 import android.content.Context
 import androidx.room.Room
 import dagger.Module
@@ -33,10 +35,13 @@ internal object DatabaseModule {
             klass = OpenPtvDatabase::class.java,
             name = OpenPtvDatabase.DATABASE_NAME,
         )
-            .addMigrations(MIGRATION_1_2)
+            .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
             .build()
 
     @Provides
     fun provideFavouriteDestinationAtStopDao(database: OpenPtvDatabase): FavouriteDestinationAtStopDao =
         database.favouriteDestinationAtStopDao()
+
+    @Provides
+    fun provideFavouriteJourneyDao(database: OpenPtvDatabase): FavouriteJourneyDao = database.favouriteJourneyDao()
 }

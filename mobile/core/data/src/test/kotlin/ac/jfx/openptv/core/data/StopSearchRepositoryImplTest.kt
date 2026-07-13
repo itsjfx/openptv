@@ -1,6 +1,7 @@
 package ac.jfx.openptv.core.data
 
 import ac.jfx.openptv.core.common.Result
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.network.StopSearchDataSource
 import ac.jfx.openptv.core.testing.StopMother
@@ -74,6 +75,19 @@ class StopSearchRepositoryImplTest {
             repo.searchStops("flinders street")
 
             assertThat(ds.calls).containsExactly("flinders street")
+            assertThat(ds.requestedRouteTypes).containsExactly(emptySet<RouteType>())
+        }
+
+    @Test
+    fun `route-type filter is passed through to the data source untouched`() =
+        runTest {
+            val ds = FakeDataSource(returning = emptyList())
+            val repo = StopSearchRepositoryImpl(ds)
+
+            repo.searchStops("richmond", routeTypes = setOf(RouteType.Train, RouteType.VLine))
+
+            assertThat(ds.requestedRouteTypes)
+                .containsExactly(setOf(RouteType.Train, RouteType.VLine))
         }
 
     private class FakeDataSource(
@@ -81,9 +95,14 @@ class StopSearchRepositoryImplTest {
         private val throwing: Throwable? = null,
     ) : StopSearchDataSource {
         val calls: MutableList<String> = mutableListOf()
+        val requestedRouteTypes: MutableList<Set<RouteType>> = mutableListOf()
 
-        override suspend fun searchStops(term: String): List<Stop> {
+        override suspend fun searchStops(
+            term: String,
+            routeTypes: Set<RouteType>,
+        ): List<Stop> {
             calls += term
+            requestedRouteTypes += routeTypes
             throwing?.let { throw it }
             return returning
         }
