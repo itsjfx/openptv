@@ -96,6 +96,7 @@ fun JourneyPlannerRoute(
         uiState = uiState,
         timeFormatter = viewModel.timeFormatter,
         onFieldSelected = viewModel::onFieldSelected,
+        onStopCleared = viewModel::onStopCleared,
         onPickerDismissed = viewModel::onPickerDismissed,
         onQueryChanged = viewModel::onQueryChanged,
         onRouteTypeFilterToggled = viewModel::onRouteTypeFilterToggled,
@@ -121,6 +122,7 @@ internal fun JourneyPlannerScreenContent(
     uiState: JourneyPlannerUiState,
     timeFormatter: RelativeTimeFormatter,
     onFieldSelected: (JourneyField) -> Unit,
+    onStopCleared: (JourneyField) -> Unit,
     onPickerDismissed: () -> Unit,
     onQueryChanged: (String) -> Unit,
     onRouteTypeFilterToggled: (RouteType) -> Unit,
@@ -154,6 +156,7 @@ internal fun JourneyPlannerScreenContent(
                 destination = uiState.destination,
                 isFavouriteJourney = uiState.isFavouriteJourney,
                 onFieldSelected = onFieldSelected,
+                onStopCleared = onStopCleared,
                 onSwapStops = onSwapStops,
                 onToggleFavouriteJourney = onToggleFavouriteJourney,
             )
@@ -197,6 +200,7 @@ private fun EndpointFields(
     destination: Stop?,
     isFavouriteJourney: Boolean,
     onFieldSelected: (JourneyField) -> Unit,
+    onStopCleared: (JourneyField) -> Unit,
     onSwapStops: () -> Unit,
     onToggleFavouriteJourney: () -> Unit,
 ) {
@@ -208,15 +212,23 @@ private fun EndpointFields(
             EndpointRow(
                 label = stringResource(R.string.feature_journey_planner_from_label),
                 stop = origin,
+                clearContentDescription =
+                    stringResource(R.string.feature_journey_planner_clear_origin),
                 onClick = { onFieldSelected(JourneyField.Origin) },
+                onClear = { onStopCleared(JourneyField.Origin) },
                 testTag = TestTagOriginField,
+                clearTestTag = TestTagOriginClear,
             )
             HorizontalDivider()
             EndpointRow(
                 label = stringResource(R.string.feature_journey_planner_to_label),
                 stop = destination,
+                clearContentDescription =
+                    stringResource(R.string.feature_journey_planner_clear_destination),
                 onClick = { onFieldSelected(JourneyField.Destination) },
+                onClear = { onStopCleared(JourneyField.Destination) },
                 testTag = TestTagDestinationField,
+                clearTestTag = TestTagDestinationClear,
             )
         }
         if (origin != null && destination != null) {
@@ -277,35 +289,63 @@ private fun FavouriteJourneyToggle(
     }
 }
 
+/**
+ * One endpoint field. The text column is the open-picker tap target; the ✕ (issue #215, only
+ * composed once a stop is chosen) is its own target that clears just this endpoint — clearing
+ * either endpoint drops the results back to the idle hint, since results need both.
+ */
 @Composable
 private fun EndpointRow(
     label: String,
     stop: Stop?,
+    clearContentDescription: String,
     onClick: () -> Unit,
+    onClear: () -> Unit,
     testTag: String,
+    clearTestTag: String,
 ) {
-    Column(
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onClick)
-                .padding(vertical = 10.dp)
-                .testTag(testTag),
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(text = label, style = MaterialTheme.typography.labelMedium)
-        Text(
-            text = stop?.name ?: stringResource(R.string.feature_journey_planner_choose_stop),
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = if (stop != null) FontWeight.Medium else FontWeight.Normal,
-            color =
-                if (stop != null) {
-                    MaterialTheme.colorScheme.onSurface
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Column(
+            modifier =
+                Modifier
+                    .weight(1f)
+                    .clickable(onClick = onClick)
+                    .padding(vertical = 10.dp)
+                    .testTag(testTag),
+        ) {
+            Text(text = label, style = MaterialTheme.typography.labelMedium)
+            Text(
+                text = stop?.name ?: stringResource(R.string.feature_journey_planner_choose_stop),
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (stop != null) FontWeight.Medium else FontWeight.Normal,
+                color =
+                    if (stop != null) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (stop != null) {
+            IconButton(
+                onClick = onClear,
+                modifier =
+                    Modifier
+                        .testTag(clearTestTag)
+                        .semantics { contentDescription = clearContentDescription },
+            ) {
+                Text(
+                    text = "✕",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
@@ -765,6 +805,8 @@ private const val ROUTE_BADGE_MAX_LINES = 3
 
 internal const val TestTagOriginField: String = "journey-origin-field"
 internal const val TestTagDestinationField: String = "journey-destination-field"
+internal const val TestTagOriginClear: String = "journey-origin-clear"
+internal const val TestTagDestinationClear: String = "journey-destination-clear"
 internal const val TestTagSwapButton: String = "journey-swap-button"
 internal const val TestTagTimeSelector: String = "journey-time-selector"
 internal const val TestTagPickerQueryField: String = "journey-picker-query-field"
