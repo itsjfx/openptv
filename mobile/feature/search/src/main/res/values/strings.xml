@@ -19,6 +19,9 @@
     <string name="feature_search_route_type_night_bus">Night Bus</string>
     <string name="feature_search_route_type_unknown">Stop</string>
 
+    <!-- Route-type filter chips under the query field (issue #213). -->
+    <string name="feature_search_filter_row_description">Filter by mode</string>
+
     <!-- Top-left gear (issue #111) — opens settings, replaces the old Settings bottom-nav tab. -->
     <string name="feature_search_open_settings">Open settings</string>
 </resources>

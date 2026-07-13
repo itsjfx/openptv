@@ -7,6 +7,7 @@ import ac.jfx.openptv.core.data.FavouritesRepository
 import ac.jfx.openptv.core.data.JourneyPlannerRepository
 import ac.jfx.openptv.core.data.StopSearchRepository
 import ac.jfx.openptv.core.model.JourneyOption
+import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.Stop
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -38,6 +39,9 @@ import javax.inject.Inject
  *  - **Picker**: `query → debounce(300 ms) → distinctUntilChanged → flatMapLatest { search }`,
  *    the exact `:feature:search` recipe, active only while a field is being picked. The raw
  *    query is combined into the UiState undebounced so the text field echoes keystrokes.
+ *    The route-type filter (issue #213) combines in after the debounce so a chip tap re-runs
+ *    the current search immediately; the same selection filters the favourite-stops idle list
+ *    client-side. Session-scoped, empty set = all modes — the `:feature:search` semantics.
  *  - **Results**: `(origin, destination, selectedTime, retry) → flatMapLatest { fetch }`. Live
  *    "departing now" collects the repository's 30 s polling Flow; a pinned custom time is a
  *    static snapshot and gets a one-shot fetch instead (mirrors stop-detail's rule). Collection
@@ -62,6 +66,7 @@ class JourneyPlannerViewModel
         private val selectedTime = MutableStateFlow<Instant?>(null)
         private val activeField = MutableStateFlow<JourneyField?>(null)
         private val query = MutableStateFlow("")
+        private val routeTypeFilter = MutableStateFlow<Set<RouteType>>(emptySet())
         private val retryCounter = MutableStateFlow(0)
 
         /**
@@ -89,17 +94,22 @@ class JourneyPlannerViewModel
             combine(
                 activeField,
                 query.debounce(DEBOUNCE_MILLIS).distinctUntilChanged(),
-            ) { field, term -> field to term }
-                .flatMapLatest { (field, term) ->
+                routeTypeFilter,
+            ) { field, term, filter -> Triple(field, term, filter) }
+                .distinctUntilChanged()
+                .flatMapLatest { (field, term, filter) ->
                     when {
                         // Empty query → Idle carrying the favourite stops so the open picker
-                        // offers common endpoints before any typing (issue #209).
+                        // offers common endpoints before any typing (issue #209). The chip
+                        // filter applies client-side here — favourites are already local.
                         field == null || term.isEmpty() ->
-                            favouriteStops.map<List<Stop>, StopPickerState> { StopPickerState.Idle(it) }
+                            favouriteStops.map<List<Stop>, StopPickerState> { stops ->
+                                StopPickerState.Idle(stops.filteredBy(filter))
+                            }
                         else ->
                             flow {
                                 emit(StopPickerState.Loading)
-                                emit(stopSearchRepository.searchStops(term).toPickerState())
+                                emit(stopSearchRepository.searchStops(term, filter).toPickerState())
                             }
                     }
                 }
@@ -146,17 +156,20 @@ class JourneyPlannerViewModel
         val uiState: StateFlow<JourneyPlannerUiState> =
             combine(
                 combine(origin, destination, selectedTime) { from, to, at -> Triple(from, to, at) },
-                combine(activeField, query) { field, term -> field to term },
+                combine(activeField, query, routeTypeFilter) { field, term, filter ->
+                    Triple(field, term, filter)
+                },
                 pickerState,
                 resultsState,
                 isFavouriteJourney,
-            ) { (from, to, at), (field, term), picker, results, favourited ->
+            ) { (from, to, at), (field, term, filter), picker, results, favourited ->
                 JourneyPlannerUiState(
                     origin = from,
                     destination = to,
                     selectedTime = at,
                     activeField = field,
                     query = term,
+                    routeTypeFilter = filter,
                     picker = picker,
                     results = results,
                     isFavouriteJourney = favourited,
@@ -167,11 +180,50 @@ class JourneyPlannerViewModel
                 initialValue = JourneyPlannerUiState(),
             )
 
-        /** Open the inline stop picker for [field]; the previous query is cleared. */
+        /**
+         * Open the inline stop picker for [field]; the previous query is cleared. If the *other*
+         * endpoint is already chosen, the route-type chips default to its mode (issue #217) —
+         * the planner only supports same-mode journeys, so the picker leads with stops that can
+         * actually pair up. It's only a default: the chips stay fully interactive.
+         */
         fun onFieldSelected(field: JourneyField) {
             query.value = ""
             activeField.value = field
+            defaultRouteTypeFilterFrom(otherEndpoint = field.other().stop(), picked = field.stop())
         }
+
+        /**
+         * Apply the issue-#217 default, or leave the session-sticky selection (issue #213)
+         * untouched when it doesn't apply. No default when:
+         *
+         *  - the other endpoint isn't chosen,
+         *  - its mode is [RouteType.Unknown] (never a chip), or
+         *  - both endpoints are set with *differing* modes (a cross-mode pair is reachable —
+         *    results just show "no direct services" — and re-picking from it is ambiguous).
+         *
+         * The default is derived as a set so a future multi-mode `Stop` slots in unchanged.
+         */
+        private fun defaultRouteTypeFilterFrom(
+            otherEndpoint: Stop?,
+            picked: Stop?,
+        ) {
+            val other = otherEndpoint ?: return
+            if (other.routeType == RouteType.Unknown) return
+            if (picked != null && picked.routeType != other.routeType) return
+            routeTypeFilter.value = setOf(other.routeType)
+        }
+
+        private fun JourneyField.other(): JourneyField =
+            when (this) {
+                JourneyField.Origin -> JourneyField.Destination
+                JourneyField.Destination -> JourneyField.Origin
+            }
+
+        private fun JourneyField.stop(): Stop? =
+            when (this) {
+                JourneyField.Origin -> origin.value
+                JourneyField.Destination -> destination.value
+            }
 
         fun onPickerDismissed() {
             activeField.value = null
@@ -180,6 +232,21 @@ class JourneyPlannerViewModel
 
         fun onQueryChanged(newQuery: String) {
             query.value = newQuery
+        }
+
+        /**
+         * Toggle a mode chip in the picker (issue #213). Same semantics as `:feature:search`:
+         * empty selection means "all modes" (no non-empty invariant — deselecting the last chip
+         * widens back out), and the pipeline re-runs the current search immediately because the
+         * filter combines in after the debounce. The selection also filters the favourite-stops
+         * idle list client-side, and survives picker close/reopen for the ViewModel's lifetime.
+         */
+        fun onRouteTypeFilterToggled(routeType: RouteType) {
+            // Unknown isn't a chip — it's a runtime fallback for unexpected wire codes.
+            if (routeType == RouteType.Unknown) return
+            routeTypeFilter.update { current ->
+                if (current.contains(routeType)) current - routeType else current + routeType
+            }
         }
 
         /** Commit the picked stop to whichever field the picker is open for, then close it. */
@@ -196,6 +263,18 @@ class JourneyPlannerViewModel
             val from = origin.value
             origin.value = destination.value
             destination.value = from
+        }
+
+        /**
+         * Clear one endpoint back to "Choose a stop" (issue #215). The other endpoint and any
+         * pinned time are untouched; the results pipeline maps a missing endpoint to Idle, which
+         * also cancels the live poll for the old pair via flatMapLatest.
+         */
+        fun onStopCleared(field: JourneyField) {
+            when (field) {
+                JourneyField.Origin -> origin.value = null
+                JourneyField.Destination -> destination.value = null
+            }
         }
 
         fun onTimeSelected(instant: Instant) {
@@ -238,6 +317,10 @@ class JourneyPlannerViewModel
             origin.value = newOrigin
             destination.value = newDestination
         }
+
+        /** Empty filter = all modes; otherwise keep only stops whose mode is selected. */
+        private fun List<Stop>.filteredBy(selected: Set<RouteType>): List<Stop> =
+            if (selected.isEmpty()) this else filter { it.routeType in selected }
 
         private fun Result<List<Stop>>.toPickerState(): StopPickerState =
             when (this) {
