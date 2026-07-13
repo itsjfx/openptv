@@ -4,10 +4,15 @@ import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.common.Result
 import ac.jfx.openptv.core.data.FavouriteJourneysRepository
 import ac.jfx.openptv.core.data.FavouritesRepository
+import ac.jfx.openptv.core.data.FollowedTripRepository
 import ac.jfx.openptv.core.data.JourneyPlannerRepository
 import ac.jfx.openptv.core.data.StopSearchRepository
+import ac.jfx.openptv.core.model.AlightAlert
+import ac.jfx.openptv.core.model.Coordinates
+import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.JourneyOption
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.Stop
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -28,6 +34,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import retrofit2.HttpException
 import java.io.IOException
@@ -47,10 +54,16 @@ import javax.inject.Inject
  *    static snapshot and gets a one-shot fetch instead (mirrors stop-detail's rule). Collection
  *    follows `WhileSubscribed`, so polling stops when the screen leaves the composition.
  *
+ * A third, smaller slice (issue #220) mirrors the followed-trip repository into the per-row
+ * alight-bell state — see [alightState] and [armAlightAlert].
+ *
  * Events come in as method calls per the unidirectional-state convention.
  */
 @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 @HiltViewModel
+// One public method per screen event is the unidirectional-state convention; this screen simply
+// has many events (picker, endpoints, time, favourites, and now the alight bell).
+@Suppress("TooManyFunctions")
 class JourneyPlannerViewModel
     @Inject
     constructor(
@@ -58,6 +71,8 @@ class JourneyPlannerViewModel
         private val stopSearchRepository: StopSearchRepository,
         private val favouritesRepository: FavouritesRepository,
         private val favouriteJourneysRepository: FavouriteJourneysRepository,
+        private val followedTripRepository: FollowedTripRepository,
+        private val clock: Clock,
         /** Exposed for the screen's per-row relative "in N min" label, same as stop-detail. */
         val timeFormatter: RelativeTimeFormatter,
     ) : ViewModel() {
@@ -68,6 +83,16 @@ class JourneyPlannerViewModel
         private val query = MutableStateFlow("")
         private val routeTypeFilter = MutableStateFlow<Set<RouteType>>(emptySet())
         private val retryCounter = MutableStateFlow(0)
+        private val followReplaceCandidate = MutableStateFlow<FollowedTrip?>(null)
+        private val alightLocationPromptNeeded = MutableStateFlow(false)
+
+        /**
+         * The option an in-flight replace-confirmation wants to arm (issue #220): set when
+         * arming raised the dialog, consumed by [confirmReplaceFollow], cleared on dismiss —
+         * run-pattern's `pendingAlightStopId`, but the whole option since the trip is built
+         * from it.
+         */
+        private var pendingReplaceOption: JourneyOption? = null
 
         /**
          * The user's favourite stops, derived from the destination-at-stop favourites (issue
@@ -153,6 +178,27 @@ class JourneyPlannerViewModel
                     }
                 }
 
+        /**
+         * The run whose result-row bell renders armed (issue #220): the followed trip's run when
+         * its alight alert targets the current destination. Derived from the repository — not a
+         * local flag — so arming/disarming anywhere (run-pattern screen, the ongoing
+         * notification's action) is reflected here, and a destination change disarms the bells
+         * without touching the stored trip.
+         */
+        private val alightState: Flow<AlightUiSlice> =
+            combine(
+                followedTripRepository.followedTrip,
+                destination,
+                followReplaceCandidate,
+                alightLocationPromptNeeded,
+            ) { trip, to, replaceCandidate, locationPrompt ->
+                val armedRunRef =
+                    trip?.runRef?.takeIf {
+                        to != null && trip.alightAlert?.stopId == to.id
+                    }
+                AlightUiSlice(armedRunRef, replaceCandidate, locationPrompt)
+            }
+
         val uiState: StateFlow<JourneyPlannerUiState> =
             combine(
                 combine(origin, destination, selectedTime) { from, to, at -> Triple(from, to, at) },
@@ -160,9 +206,11 @@ class JourneyPlannerViewModel
                     Triple(field, term, filter)
                 },
                 pickerState,
-                resultsState,
-                isFavouriteJourney,
-            ) { (from, to, at), (field, term, filter), picker, results, favourited ->
+                combine(resultsState, isFavouriteJourney) { results, favourited ->
+                    results to favourited
+                },
+                alightState,
+            ) { (from, to, at), (field, term, filter), picker, (results, favourited), alight ->
                 JourneyPlannerUiState(
                     origin = from,
                     destination = to,
@@ -173,6 +221,9 @@ class JourneyPlannerViewModel
                     picker = picker,
                     results = results,
                     isFavouriteJourney = favourited,
+                    alightArmedRunRef = alight.armedRunRef,
+                    followReplaceCandidate = alight.replaceCandidate,
+                    alightLocationPromptNeeded = alight.locationPromptNeeded,
                 )
             }.stateIn(
                 scope = viewModelScope,
@@ -318,6 +369,121 @@ class JourneyPlannerViewModel
             destination.value = newDestination
         }
 
+        /**
+         * Arm the "I'm getting off here" alert for [option] straight from the results row
+         * (issue #220): follow the run with an [AlightAlert] at the current destination —
+         * the one-tap version of opening the run pattern and belling the destination stop.
+         * If a *different* run is already followed, the replace-confirmation is raised instead
+         * (issue #200's rule: one followed trip at a time) and nothing is written until
+         * [confirmReplaceFollow].
+         *
+         * The trip is built from planner data alone — no pattern fetch at tap time. That seeds
+         * `completesAtUtc` with the arrival at the *destination* rather than the run's terminus;
+         * `AlightAlertService` corrects it from the pattern on its first poll (it starts the
+         * moment an alert is stored), and the 5-minute completion grace covers the gap. When the
+         * option looks schedule-only (trams never carry real-time on patterns — CLAUDE.md
+         * quirks), [JourneyPlannerUiState.alightLocationPromptNeeded] flips so the screen can
+         * contextually request location for the GPS fallback, mirroring run-pattern.
+         */
+        fun armAlightAlert(option: JourneyOption) {
+            val from = origin.value ?: return
+            val to = destination.value ?: return
+            viewModelScope.launch {
+                val current = followedTripRepository.followedTrip.first()
+                if (current != null && current.runRef != option.runRef) {
+                    pendingReplaceOption = option
+                    followReplaceCandidate.value = current
+                } else {
+                    followedTripRepository.follow(option.toFollowedTrip(from, to, existing = current))
+                    if (option.lacksRealTimeSignal(from.routeType)) {
+                        alightLocationPromptNeeded.value = true
+                    }
+                }
+            }
+        }
+
+        /**
+         * Stop tracking [option] — the armed bell tapped again. Unlike run-pattern's disarm
+         * (which keeps the follow, because Follow is its own top-bar action there), the planner
+         * bell *is* the whole "track this journey" affordance, so toggling it off returns to the
+         * pre-tap state: no alert, no followed trip. No-op unless the stored trip is this run
+         * with its alert at the current destination — exactly the state the bell renders armed.
+         */
+        fun disarmAlightAlert(option: JourneyOption) {
+            val to = destination.value ?: return
+            viewModelScope.launch {
+                val current = followedTripRepository.followedTrip.first() ?: return@launch
+                if (current.runRef != option.runRef || current.alightAlert?.stopId != to.id) return@launch
+                followedTripRepository.unfollow()
+            }
+        }
+
+        /** Confirm replacing the previously followed trip with the pending option's run. */
+        fun confirmReplaceFollow() {
+            val option = pendingReplaceOption
+            val from = origin.value
+            val to = destination.value
+            pendingReplaceOption = null
+            followReplaceCandidate.value = null
+            if (option == null || from == null || to == null) return
+            viewModelScope.launch {
+                followedTripRepository.follow(option.toFollowedTrip(from, to, existing = null))
+                if (option.lacksRealTimeSignal(from.routeType)) {
+                    alightLocationPromptNeeded.value = true
+                }
+            }
+        }
+
+        /** Dismiss the replace confirmation without touching the stored trip. */
+        fun dismissReplaceFollow() {
+            pendingReplaceOption = null
+            followReplaceCandidate.value = null
+        }
+
+        /** The screen has dealt with the location-permission prompt (granted, denied, or moot). */
+        fun onAlightLocationPromptHandled() {
+            alightLocationPromptNeeded.value = false
+        }
+
+        /**
+         * Build the stored trip from the result row's data (issue #220). When [existing] already
+         * follows this run the write is an upsert: `followedAtUtc` survives, but the alert is
+         * always rebuilt fresh — re-arming resets the fire-once latches, run-pattern's semantic.
+         */
+        private fun JourneyOption.toFollowedTrip(
+            from: Stop,
+            to: Stop,
+            existing: FollowedTrip?,
+        ): FollowedTrip {
+            val sameRun = existing?.takeIf { it.runRef == runRef }
+            return FollowedTrip(
+                runRef = runRef,
+                routeType = from.routeType,
+                fromStopId = from.id,
+                routeLabel = route.displayLabel,
+                destinationName = direction.name,
+                completesAtUtc = effectiveArrivalUtc,
+                followedAtUtc = sameRun?.followedAtUtc ?: clock.now(),
+                alightAlert =
+                    AlightAlert(
+                        stopId = to.id,
+                        stopName = to.name,
+                        coordinates = Coordinates(lat = to.latitude, lng = to.longitude),
+                    ),
+            )
+        }
+
+        /**
+         * True when the GPS fallback will matter for this run's alert: trams never expose
+         * real-time on the pattern endpoint the alert service polls (even though their
+         * departures feeds do), and a run with no estimate at either end is schedule-only on
+         * any mode. The pattern-derived check run-pattern uses isn't available here — the
+         * planner never fetched one.
+         */
+        private fun JourneyOption.lacksRealTimeSignal(routeType: RouteType): Boolean =
+            routeType == RouteType.Tram ||
+                (estimatedDepartureUtc == null && estimatedArrivalUtc == null)
+
         /** Empty filter = all modes; otherwise keep only stops whose mode is selected. */
         private fun List<Stop>.filteredBy(selected: Set<RouteType>): List<Stop> =
             if (selected.isEmpty()) this else filter { it.routeType in selected }
@@ -361,6 +527,13 @@ class JourneyPlannerViewModel
             val destination: Stop?,
             val at: Instant?,
             val retry: Int,
+        )
+
+        /** The alight-bell slice of the UiState (issue #220), grouped to keep [combine] at arity 5. */
+        private data class AlightUiSlice(
+            val armedRunRef: RunRef?,
+            val replaceCandidate: FollowedTrip?,
+            val locationPromptNeeded: Boolean,
         )
 
         companion object {

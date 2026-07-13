@@ -3,10 +3,15 @@ package ac.jfx.openptv.feature.journeyplanner
 import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.data.test.FakeFavouriteJourneysRepository
 import ac.jfx.openptv.core.data.test.FakeFavouritesRepository
+import ac.jfx.openptv.core.data.test.FakeFollowedTripRepository
 import ac.jfx.openptv.core.data.test.FakeJourneyPlannerRepository
 import ac.jfx.openptv.core.data.test.FakeStopSearchRepository
+import ac.jfx.openptv.core.model.Coordinates
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.model.RunRef
+import ac.jfx.openptv.core.testing.AlightAlertMother
 import ac.jfx.openptv.core.testing.FavouriteDestinationAtStopMother
+import ac.jfx.openptv.core.testing.FollowedTripMother
 import ac.jfx.openptv.core.testing.JourneyOptionMother
 import ac.jfx.openptv.core.testing.StopMother
 import app.cash.turbine.ReceiveTurbine
@@ -36,12 +41,15 @@ import java.io.IOException
  * crossed with `advanceTimeBy(350)` exactly like [SearchViewModelTest] in `:feature:search`.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass") // One test class per ViewModel — same trade as NearbyViewModelTest.
 class JourneyPlannerViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val journeys = FakeJourneyPlannerRepository()
     private val search = FakeStopSearchRepository()
     private val favourites = FakeFavouritesRepository()
     private val favouriteJourneys = FakeFavouriteJourneysRepository()
+    private val followedTrips = FakeFollowedTripRepository()
+    private val fixedNow = Instant.parse("2026-05-14T09:00:00Z")
     private lateinit var viewModel: JourneyPlannerViewModel
 
     private val richmond = StopMother.aStop().withId(1162).withName("Richmond Station").build()
@@ -59,7 +67,9 @@ class JourneyPlannerViewModelTest {
                 stopSearchRepository = search,
                 favouritesRepository = favourites,
                 favouriteJourneysRepository = favouriteJourneys,
-                timeFormatter = RelativeTimeFormatter(FixedClock(Instant.parse("2026-05-14T09:00:00Z"))),
+                followedTripRepository = followedTrips,
+                clock = FixedClock(fixedNow),
+                timeFormatter = RelativeTimeFormatter(FixedClock(fixedNow)),
             )
     }
 
@@ -675,6 +685,228 @@ class JourneyPlannerViewModelTest {
                 cancelAndIgnoreRemainingEvents()
             }
             assertThat(journeys.observedKeys).contains(richmond to burnley)
+        }
+
+    @Test
+    fun `arming the bell follows the run with an alert at the destination`() =
+        runTest(dispatcher) {
+            val option = JourneyOptionMother.aJourneyOption().build()
+            pickBothStops()
+            viewModel.armAlightAlert(option)
+            advanceUntilIdle()
+
+            val trip = followedTrips.current
+            assertThat(trip).isNotNull()
+            assertThat(trip!!.runRef).isEqualTo(option.runRef)
+            assertThat(trip.routeType).isEqualTo(richmond.routeType)
+            assertThat(trip.fromStopId).isEqualTo(richmond.id)
+            assertThat(trip.routeLabel).isEqualTo(option.route.displayLabel)
+            assertThat(trip.destinationName).isEqualTo(option.direction.name)
+            // Seeded with the arrival at the destination — the alert service refreshes it to the
+            // true terminus arrival on its first pattern poll.
+            assertThat(trip.completesAtUtc).isEqualTo(option.effectiveArrivalUtc)
+            assertThat(trip.followedAtUtc).isEqualTo(fixedNow)
+            val alert = trip.alightAlert
+            assertThat(alert).isNotNull()
+            assertThat(alert!!.stopId).isEqualTo(burnley.id)
+            assertThat(alert.stopName).isEqualTo(burnley.name)
+            assertThat(alert.coordinates)
+                .isEqualTo(Coordinates(lat = burnley.latitude, lng = burnley.longitude))
+        }
+
+    @Test
+    fun `the armed run surfaces in uiState and clears when the destination changes`() =
+        runTest(dispatcher) {
+            val option = JourneyOptionMother.aJourneyOption().build()
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            viewModel.armAlightAlert(option)
+            advanceUntilIdle()
+            assertThat(states.last().alightArmedRunRef).isEqualTo(option.runRef)
+
+            // Swapping re-points the destination at the origin — the stored alert no longer
+            // targets it, so no row should render armed. The stored trip itself is untouched.
+            viewModel.onSwapStops()
+            advanceUntilIdle()
+            assertThat(states.last().alightArmedRunRef).isNull()
+            assertThat(followedTrips.current).isNotNull()
+            job.cancel()
+        }
+
+    @Test
+    fun `arming reflects a trip followed elsewhere with an alert at the destination`() =
+        runTest(dispatcher) {
+            // Armed from the run-pattern screen (issue #201) before this screen composed.
+            followedTrips.seed(
+                FollowedTripMother.aFollowedTrip()
+                    .withRunRef("951825")
+                    .withAlightAlert(
+                        AlightAlertMother.anAlightAlert().withStopId(1030).build(),
+                    ).build(),
+            )
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            advanceUntilIdle()
+            assertThat(states.last().alightArmedRunRef).isEqualTo(RunRef("951825"))
+            job.cancel()
+        }
+
+    @Test
+    fun `tapping the armed bell stops tracking entirely`() =
+        runTest(dispatcher) {
+            val option = JourneyOptionMother.aJourneyOption().build()
+            pickBothStops()
+            viewModel.armAlightAlert(option)
+            advanceUntilIdle()
+            assertThat(followedTrips.current).isNotNull()
+
+            viewModel.disarmAlightAlert(option)
+            advanceUntilIdle()
+            assertThat(followedTrips.current).isNull()
+        }
+
+    @Test
+    fun `disarm is a no-op when the stored alert targets a different stop`() =
+        runTest(dispatcher) {
+            val option = JourneyOptionMother.aJourneyOption().build()
+            val elsewhere =
+                FollowedTripMother.aFollowedTrip()
+                    .withRunRef(option.runRef.value)
+                    .withAlightAlert(AlightAlertMother.anAlightAlert().withStopId(9999).build())
+                    .build()
+            followedTrips.seed(elsewhere)
+            pickBothStops()
+            viewModel.disarmAlightAlert(option)
+            advanceUntilIdle()
+            assertThat(followedTrips.current).isEqualTo(elsewhere)
+        }
+
+    @Test
+    fun `re-arming a run already followed keeps followedAtUtc and rebuilds the alert`() =
+        runTest(dispatcher) {
+            val option = JourneyOptionMother.aJourneyOption().build()
+            val earlier = Instant.parse("2026-05-14T08:50:00Z")
+            followedTrips.seed(
+                FollowedTripMother.aFollowedTrip()
+                    .withRunRef(option.runRef.value)
+                    .withFollowedAtUtc(earlier)
+                    .withAlightAlert(
+                        AlightAlertMother.anAlightAlert().withStopId(9999).withApproachFired(true).build(),
+                    ).build(),
+            )
+            pickBothStops()
+            viewModel.armAlightAlert(option)
+            advanceUntilIdle()
+
+            val trip = followedTrips.current
+            assertThat(trip!!.followedAtUtc).isEqualTo(earlier)
+            // A fresh alert at the destination — the fire-once latches reset (issue #201 re-arm).
+            assertThat(trip.alightAlert!!.stopId).isEqualTo(burnley.id)
+            assertThat(trip.alightAlert!!.approachFired).isFalse()
+        }
+
+    @Test
+    fun `arming while a different run is followed raises the replace confirmation`() =
+        runTest(dispatcher) {
+            val other = FollowedTripMother.aFollowedTrip().withRunRef("111111").build()
+            followedTrips.seed(other)
+            val option = JourneyOptionMother.aJourneyOption().build()
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            viewModel.armAlightAlert(option)
+            advanceUntilIdle()
+
+            // Nothing written until the user confirms.
+            assertThat(states.last().followReplaceCandidate).isEqualTo(other)
+            assertThat(followedTrips.current).isEqualTo(other)
+
+            viewModel.confirmReplaceFollow()
+            advanceUntilIdle()
+            assertThat(states.last().followReplaceCandidate).isNull()
+            assertThat(followedTrips.current!!.runRef).isEqualTo(option.runRef)
+            assertThat(followedTrips.current!!.alightAlert!!.stopId).isEqualTo(burnley.id)
+            job.cancel()
+        }
+
+    @Test
+    fun `dismissing the replace confirmation leaves the stored trip untouched`() =
+        runTest(dispatcher) {
+            val other = FollowedTripMother.aFollowedTrip().withRunRef("111111").build()
+            followedTrips.seed(other)
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            viewModel.armAlightAlert(JourneyOptionMother.aJourneyOption().build())
+            advanceUntilIdle()
+
+            viewModel.dismissReplaceFollow()
+            advanceUntilIdle()
+            assertThat(states.last().followReplaceCandidate).isNull()
+            assertThat(followedTrips.current).isEqualTo(other)
+
+            // The pending option was consumed — a stray confirm can't arm it any more.
+            viewModel.confirmReplaceFollow()
+            advanceUntilIdle()
+            assertThat(followedTrips.current).isEqualTo(other)
+            job.cancel()
+        }
+
+    @Test
+    fun `arming a schedule-only option flips the location prompt until handled`() =
+        runTest(dispatcher) {
+            val option = JourneyOptionMother.aScheduledOnlyJourneyOption().build()
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            viewModel.armAlightAlert(option)
+            advanceUntilIdle()
+            assertThat(states.last().alightLocationPromptNeeded).isTrue()
+
+            viewModel.onAlightLocationPromptHandled()
+            advanceUntilIdle()
+            assertThat(states.last().alightLocationPromptNeeded).isFalse()
+            job.cancel()
+        }
+
+    @Test
+    fun `arming a tram journey prompts for location even with live estimates`() =
+        runTest(dispatcher) {
+            // Trams carry estimates on the departures feeds this option was derived from, but
+            // never on the pattern endpoint the alert service polls (CLAUDE.md quirks) — the
+            // GPS fallback matters, so the prompt must fire on mode, not on the estimates.
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            viewModel.onFieldSelected(JourneyField.Origin)
+            viewModel.onStopPicked(bourkeSt)
+            viewModel.onFieldSelected(JourneyField.Destination)
+            viewModel.onStopPicked(StopMother.aTramStop().withId(2600).withName("Spring St").build())
+            viewModel.armAlightAlert(JourneyOptionMother.aJourneyOption().build())
+            advanceUntilIdle()
+            assertThat(states.last().alightLocationPromptNeeded).isTrue()
+            job.cancel()
+        }
+
+    @Test
+    fun `arming an option with live estimates does not prompt for location`() =
+        runTest(dispatcher) {
+            val states = mutableListOf<JourneyPlannerUiState>()
+            val job = viewModel.uiState.onEach { states += it }.launchIn(this)
+            advanceUntilIdle()
+            pickBothStops()
+            viewModel.armAlightAlert(JourneyOptionMother.aJourneyOption().build())
+            advanceUntilIdle()
+            assertThat(states.last().alightLocationPromptNeeded).isFalse()
+            assertThat(followedTrips.current).isNotNull()
+            job.cancel()
         }
 
     private fun pickBothStops() {

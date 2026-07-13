@@ -5,11 +5,18 @@ import ac.jfx.openptv.core.common.RelativeTimeFormatter
 import ac.jfx.openptv.core.datastore.preference.rememberUse24Hour
 import ac.jfx.openptv.core.designsystem.DepartureTimeSelector
 import ac.jfx.openptv.core.designsystem.ScreenHeading
+import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.JourneyOption
 import ac.jfx.openptv.core.model.RouteType
 import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.Stop
 import ac.jfx.openptv.core.model.StopId
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -29,6 +36,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -38,6 +46,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -45,11 +55,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -60,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 
 /**
  * Stateful entry point wired from the navigation graph (issue #204). Hoists
@@ -92,6 +108,58 @@ fun JourneyPlannerRoute(
             onPrefillConsumed()
         }
     }
+
+    // Alight-alert permission plumbing (issue #220) — the RunPatternRoute recipe verbatim: both
+    // prompts are contextual (notifications on arm, location only when the armed run is
+    // schedule-only), neither grant is a precondition, and a snackbar explains what a denial
+    // degrades.
+    val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    var pendingAlightArm by remember { mutableStateOf<JourneyOption?>(null) }
+    val notificationsDeniedMessage =
+        stringResource(R.string.feature_journey_planner_alight_notifications_denied)
+    val notificationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) {
+                scope.launch { snackbarHostState.showSnackbar(notificationsDeniedMessage) }
+            }
+            pendingAlightArm?.let(viewModel::armAlightAlert)
+            pendingAlightArm = null
+        }
+    val onArmAlight: (JourneyOption) -> Unit = { option ->
+        if (needsNotificationPermission(context)) {
+            pendingAlightArm = option
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.armAlightAlert(option)
+        }
+    }
+
+    val scheduleOnlyMessage = stringResource(R.string.feature_journey_planner_alight_schedule_only)
+    val locationPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+            if (result.values.none { it }) {
+                scope.launch { snackbarHostState.showSnackbar(scheduleOnlyMessage) }
+            }
+            viewModel.onAlightLocationPromptHandled()
+        }
+    LaunchedEffect(uiState.alightLocationPromptNeeded) {
+        if (uiState.alightLocationPromptNeeded) {
+            if (hasLocationPermission(context)) {
+                viewModel.onAlightLocationPromptHandled()
+            } else {
+                locationPermissionLauncher.launch(
+                    arrayOf(
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                    ),
+                )
+            }
+        }
+    }
+
     JourneyPlannerScreenContent(
         uiState = uiState,
         timeFormatter = viewModel.timeFormatter,
@@ -111,9 +179,23 @@ fun JourneyPlannerRoute(
                 onOpenRunPattern(option.runRef, origin.routeType, origin.id)
             }
         },
+        onArmAlight = onArmAlight,
+        onDisarmAlight = viewModel::disarmAlightAlert,
+        onConfirmReplaceFollow = viewModel::confirmReplaceFollow,
+        onDismissReplaceFollow = viewModel::dismissReplaceFollow,
+        snackbarHostState = snackbarHostState,
         onOpenSettings = onOpenSettings,
     )
 }
+
+/** POST_NOTIFICATIONS is runtime-requestable only from API 33; below that it's implicit. */
+private fun needsNotificationPermission(context: Context): Boolean =
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+
+private fun hasLocationPermission(context: Context): Boolean =
+    context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+        context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -133,9 +215,26 @@ internal fun JourneyPlannerScreenContent(
     onTimeCleared: () -> Unit,
     onRetry: () -> Unit,
     onJourneySelected: (JourneyOption) -> Unit,
+    onArmAlight: (JourneyOption) -> Unit = {},
+    onDisarmAlight: (JourneyOption) -> Unit = {},
+    onConfirmReplaceFollow: () -> Unit = {},
+    onDismissReplaceFollow: () -> Unit = {},
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onOpenSettings: () -> Unit = {},
 ) {
+    // Replace-confirmation for the followed trip (issue #200 rule, surfaced here by the
+    // result-row bell): shown when arming while a *different* run is already followed.
+    val replaceCandidate = uiState.followReplaceCandidate
+    if (replaceCandidate != null) {
+        FollowReplaceDialog(
+            candidate = replaceCandidate,
+            onConfirm = onConfirmReplaceFollow,
+            onDismiss = onDismissReplaceFollow,
+        )
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {},
@@ -179,9 +278,12 @@ internal fun JourneyPlannerScreenContent(
                 )
                 ResultsSection(
                     results = uiState.results,
+                    alightArmedRunRef = uiState.alightArmedRunRef,
                     timeFormatter = timeFormatter,
                     onRetry = onRetry,
                     onJourneySelected = onJourneySelected,
+                    onArmAlight = onArmAlight,
+                    onDisarmAlight = onDisarmAlight,
                 )
             }
         }
@@ -543,9 +645,12 @@ private fun TimeSelectorRow(
 @Composable
 private fun ResultsSection(
     results: JourneyResultsState,
+    alightArmedRunRef: RunRef?,
     timeFormatter: RelativeTimeFormatter,
     onRetry: () -> Unit,
     onJourneySelected: (JourneyOption) -> Unit,
+    onArmAlight: (JourneyOption) -> Unit,
+    onDisarmAlight: (JourneyOption) -> Unit,
 ) {
     when (results) {
         JourneyResultsState.Idle ->
@@ -558,10 +663,15 @@ private fun ResultsSection(
         is JourneyResultsState.Loaded ->
             LazyColumn(modifier = Modifier.fillMaxSize().testTag(TestTagResultsList)) {
                 items(results.options, key = { it.runRef.value }) { option ->
+                    val isAlightArmed = option.runRef == alightArmedRunRef
                     JourneyRow(
                         option = option,
                         timeFormatter = timeFormatter,
                         onClicked = { onJourneySelected(option) },
+                        isAlightArmed = isAlightArmed,
+                        onToggleAlight = {
+                            if (isAlightArmed) onDisarmAlight(option) else onArmAlight(option)
+                        },
                     )
                     HorizontalDivider()
                 }
@@ -584,12 +694,18 @@ private fun ResultsSection(
  * One direct service. Layout follows stop-detail's departure row and the CLAUDE.md overflow
  * rule: the badge is width-capped and wraps down, the text column takes the weight, and the
  * relative time keeps its space on the right.
+ *
+ * The trailing bell (issue #220) arms/disarms the alight alert at the journey's destination —
+ * the one-tap version of run-pattern's per-stop bell — signalled through alpha like that
+ * screen's, since an emoji glyph ignores tint.
  */
 @Composable
 private fun JourneyRow(
     option: JourneyOption,
     timeFormatter: RelativeTimeFormatter,
     onClicked: () -> Unit,
+    isAlightArmed: Boolean = false,
+    onToggleAlight: () -> Unit = {},
 ) {
     val use24Hour = rememberUse24Hour()
     val relative =
@@ -626,7 +742,7 @@ private fun JourneyRow(
             duration,
         )
 
-    Column(
+    Row(
         modifier =
             Modifier
                 .fillMaxWidth()
@@ -634,53 +750,147 @@ private fun JourneyRow(
                 .padding(horizontal = 16.dp, vertical = 12.dp)
                 .semantics { contentDescription = talkback }
                 .testTag(TestTagJourneyRow),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = RoundedCornerShape(4.dp),
-                modifier = Modifier.widthIn(max = RouteBadgeMaxWidth),
-            ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(4.dp),
+                    modifier = Modifier.widthIn(max = RouteBadgeMaxWidth),
+                ) {
+                    Text(
+                        text = option.route.displayLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        softWrap = true,
+                        maxLines = ROUTE_BADGE_MAX_LINES,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = option.route.displayLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    softWrap = true,
-                    maxLines = ROUTE_BADGE_MAX_LINES,
+                    text = option.direction.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Text(
+                    text = relative,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
-            Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.height(4.dp))
+            // Stacked, not dot-joined into one run-on string (issue #208): departure (+ platform)
+            // then arrival (+ duration), so each fact keeps its own line and stays scannable on
+            // narrow screens.
             Text(
-                text = option.direction.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
+                text = listOfNotNull(departs, platformClause).joinToString(separator = " · "),
+                style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = relative,
+                text = listOf(arrives, duration).joinToString(separator = " · "),
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        // Stacked, not dot-joined into one run-on string (issue #208): departure (+ platform)
-        // then arrival (+ duration), so each fact keeps its own line and stays scannable on
-        // narrow screens.
-        Text(
-            text = listOfNotNull(departs, platformClause).joinToString(separator = " · "),
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        AlightBell(
+            isAlightArmed = isAlightArmed,
+            onToggleAlight = onToggleAlight,
         )
-        Text(
-            text = listOf(arrives, duration).joinToString(separator = " · "),
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+    }
+}
+
+/**
+ * The result-row alight-alert bell (issue #220). An emoji glyph ignores tint (it renders in
+ * colour), so armed/unarmed is signalled through alpha — the run-pattern `AlightBell` trade.
+ * Same no-Material-Icons trade as the rest of the codebase.
+ */
+@Composable
+private fun AlightBell(
+    isAlightArmed: Boolean,
+    onToggleAlight: () -> Unit,
+) {
+    val bellDescription =
+        stringResource(
+            if (isAlightArmed) {
+                R.string.feature_journey_planner_alight_disarm_content_description
+            } else {
+                R.string.feature_journey_planner_alight_arm_content_description
+            },
         )
+    IconButton(
+        onClick = onToggleAlight,
+        modifier =
+            Modifier
+                .testTag(if (isAlightArmed) TestTagAlightArmedButton else TestTagAlightButton)
+                .semantics { contentDescription = bellDescription },
+    ) {
+        Text(
+            text = "🔔",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.alpha(if (isAlightArmed) 1f else UNARMED_BELL_ALPHA),
+        )
+    }
+}
+
+/** Confirm replacing the currently followed [candidate] trip with the tapped journey's run. */
+@Composable
+private fun FollowReplaceDialog(
+    candidate: FollowedTrip,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.testTag(TestTagFollowReplaceDialog),
+        title = { Text(stringResource(R.string.feature_journey_planner_follow_replace_title)) },
+        text = {
+            Text(
+                stringResource(
+                    R.string.feature_journey_planner_follow_replace_body,
+                    candidate.displayText(),
+                ),
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                modifier = Modifier.testTag(TestTagFollowReplaceConfirm),
+            ) {
+                Text(stringResource(R.string.feature_journey_planner_follow_replace_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.feature_journey_planner_follow_replace_cancel))
+            }
+        },
+    )
+}
+
+/**
+ * Human-readable name for a followed trip in the replace-confirmation dialog — run-pattern's
+ * collapse rule, so "Lilydale to Lilydale" reads as "Lilydale".
+ */
+@Composable
+private fun FollowedTrip.displayText(): String {
+    val route = routeLabel
+    return when {
+        route == null -> destinationName
+        route.equals(destinationName, ignoreCase = true) -> route
+        else ->
+            stringResource(
+                R.string.feature_journey_planner_follow_replace_trip_format,
+                route,
+                destinationName,
+            )
     }
 }
 
@@ -803,6 +1013,9 @@ private fun SettingsGearButton(onClick: () -> Unit) {
 private val RouteBadgeMaxWidth = 160.dp
 private const val ROUTE_BADGE_MAX_LINES = 3
 
+/** Same dim as run-pattern's unarmed bell, so the two surfaces read identically. */
+private const val UNARMED_BELL_ALPHA = 0.4f
+
 internal const val TestTagOriginField: String = "journey-origin-field"
 internal const val TestTagDestinationField: String = "journey-destination-field"
 internal const val TestTagOriginClear: String = "journey-origin-clear"
@@ -820,6 +1033,10 @@ internal const val TestTagPickerStopRow: String = "journey-picker-stop-row"
 internal const val TestTagResultsIdle: String = "journey-results-idle"
 internal const val TestTagResultsList: String = "journey-results-list"
 internal const val TestTagJourneyRow: String = "journey-row"
+internal const val TestTagAlightButton: String = "journey-alight-bell"
+internal const val TestTagAlightArmedButton: String = "journey-alight-bell-armed"
+internal const val TestTagFollowReplaceDialog: String = "journey-follow-replace-dialog"
+internal const val TestTagFollowReplaceConfirm: String = "journey-follow-replace-confirm"
 internal const val TestTagNoDirectServices: String = "journey-no-direct-services"
 internal const val TestTagRetryButton: String = "journey-retry-button"
 internal const val TestTagSettingsGear: String = "journey-settings-gear"

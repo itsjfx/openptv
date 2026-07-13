@@ -40,6 +40,20 @@
     <string name="feature_journey_planner_platform_clause">Platform %1$s</string>
     <string name="feature_journey_planner_row_content_description">%1$s towards %2$s, departs %3$s, arrives %4$s, %5$s</string>
 
+    <!-- Alight-alert bell on each result row (issue #220): one tap follows the run and arms the
+         "I'm getting off here" alert (issue #201) at the journey's destination stop. -->
+    <string name="feature_journey_planner_alight_arm_content_description">Track this journey and alert me before my stop</string>
+    <string name="feature_journey_planner_alight_disarm_content_description">Stop tracking this journey</string>
+    <string name="feature_journey_planner_alight_notifications_denied">Notifications are blocked — getting-off alerts can\'t be shown.</string>
+    <string name="feature_journey_planner_alight_schedule_only">No live tracking for this service — alerts will follow the timetable only.</string>
+    <!-- Replace-confirmation when a different trip is already followed (issue #200 rule). Slot:
+         the currently followed trip's name ("Lilydale to Flinders Street"). -->
+    <string name="feature_journey_planner_follow_replace_title">Track this journey instead?</string>
+    <string name="feature_journey_planner_follow_replace_body">You\'re following %1$s. Only one trip can be followed at a time — tracking this journey replaces it.</string>
+    <string name="feature_journey_planner_follow_replace_confirm">Replace</string>
+    <string name="feature_journey_planner_follow_replace_cancel">Cancel</string>
+    <string name="feature_journey_planner_follow_replace_trip_format">%1$s to %2$s</string>
+
     <string name="feature_journey_planner_route_type_train">Train</string>
     <string name="feature_journey_planner_route_type_tram">Tram</string>
     <string name="feature_journey_planner_route_type_bus">Bus</string>
