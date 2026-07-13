@@ -180,11 +180,50 @@ class JourneyPlannerViewModel
                 initialValue = JourneyPlannerUiState(),
             )
 
-        /** Open the inline stop picker for [field]; the previous query is cleared. */
+        /**
+         * Open the inline stop picker for [field]; the previous query is cleared. If the *other*
+         * endpoint is already chosen, the route-type chips default to its mode (issue #217) —
+         * the planner only supports same-mode journeys, so the picker leads with stops that can
+         * actually pair up. It's only a default: the chips stay fully interactive.
+         */
         fun onFieldSelected(field: JourneyField) {
             query.value = ""
             activeField.value = field
+            defaultRouteTypeFilterFrom(otherEndpoint = field.other().stop(), picked = field.stop())
         }
+
+        /**
+         * Apply the issue-#217 default, or leave the session-sticky selection (issue #213)
+         * untouched when it doesn't apply. No default when:
+         *
+         *  - the other endpoint isn't chosen,
+         *  - its mode is [RouteType.Unknown] (never a chip), or
+         *  - both endpoints are set with *differing* modes (a cross-mode pair is reachable —
+         *    results just show "no direct services" — and re-picking from it is ambiguous).
+         *
+         * The default is derived as a set so a future multi-mode `Stop` slots in unchanged.
+         */
+        private fun defaultRouteTypeFilterFrom(
+            otherEndpoint: Stop?,
+            picked: Stop?,
+        ) {
+            val other = otherEndpoint ?: return
+            if (other.routeType == RouteType.Unknown) return
+            if (picked != null && picked.routeType != other.routeType) return
+            routeTypeFilter.value = setOf(other.routeType)
+        }
+
+        private fun JourneyField.other(): JourneyField =
+            when (this) {
+                JourneyField.Origin -> JourneyField.Destination
+                JourneyField.Destination -> JourneyField.Origin
+            }
+
+        private fun JourneyField.stop(): Stop? =
+            when (this) {
+                JourneyField.Origin -> origin.value
+                JourneyField.Destination -> destination.value
+            }
 
         fun onPickerDismissed() {
             activeField.value = null
