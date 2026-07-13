@@ -177,6 +177,42 @@ class JourneyPlannerRepositoryImplTest {
             assertThat(patterns.callCount.get()).isEqualTo(0)
         }
 
+    @Test
+    fun `destination entry a day later is not a join and the pattern settles the candidate`() =
+        runTest {
+            // The two feeds page different window depths (4 vs 12 per route), so around midnight
+            // the destination feed can hold *tomorrow's* instance of a ref the origin holds for
+            // today. A ~24 h-later entry must not join (+23 h "journey"); the candidate falls
+            // through to the date-anchored pattern, which supplies the same-day arrival.
+            val origin = outboundDeparture("951825", "2026-05-14T09:07:00Z")
+            val atBurnleyNextDay = outboundDeparture("951825", "2026-05-15T09:11:00Z")
+            val sameDayPattern =
+                RunPatternMother.aRunPattern()
+                    .withStops(
+                        listOf(
+                            patternStop(RICHMOND, "2026-05-14T09:07:00Z"),
+                            patternStop(BURNLEY, "2026-05-14T09:11:00Z"),
+                        ),
+                    )
+                    .build()
+            val repo =
+                repository(
+                    departures =
+                        FakeDepartureDataSource(
+                            mapOf(
+                                StopId(RICHMOND) to atStop(listOf(origin)),
+                                StopId(BURNLEY) to atStop(listOf(atBurnleyNextDay)),
+                            ),
+                        ),
+                    patterns = FakeRunPatternDataSource(mapOf(RunRef("951825") to sameDayPattern)),
+                )
+
+            val result = repo.getJourneys(richmond, burnley)
+
+            val option = (result as Result.Success).data.single()
+            assertThat(option.scheduledArrivalUtc).isEqualTo(Instant.parse("2026-05-14T09:11:00Z"))
+        }
+
     // ---------- Pattern fallback ----------
 
     @Test
@@ -211,6 +247,71 @@ class JourneyPlannerRepositoryImplTest {
             val option = (result as Result.Success).data.single()
             assertThat(option.scheduledArrivalUtc).isEqualTo(Instant.parse("2026-05-14T09:10:00Z"))
             assertThat(option.estimatedArrivalUtc).isEqualTo(Instant.parse("2026-05-14T09:11:00Z"))
+        }
+
+    @Test
+    fun `pattern fetch is anchored to the candidate's scheduled departure`() =
+        runTest {
+            // Timetable run_refs recur daily; without an anchor the endpoint resolves *today's*
+            // instance, joining a next-day candidate to yesterday-relative times (issue #211).
+            val origin = outboundDeparture("951823", "2026-05-14T09:07:00Z")
+            val pattern =
+                RunPatternMother.aRunPattern()
+                    .withStops(
+                        listOf(
+                            patternStop(RICHMOND, "2026-05-14T09:07:00Z"),
+                            patternStop(BURNLEY, "2026-05-14T09:10:00Z"),
+                        ),
+                    )
+                    .build()
+            val patterns = FakeRunPatternDataSource(mapOf(RunRef("951823") to pattern))
+            val repo =
+                repository(
+                    departures =
+                        FakeDepartureDataSource(
+                            mapOf(
+                                StopId(RICHMOND) to atStop(listOf(origin)),
+                                StopId(BURNLEY) to atStop(emptyList()),
+                            ),
+                        ),
+                    patterns = patterns,
+                )
+
+            repo.getJourneys(richmond, burnley)
+
+            assertThat(patterns.lastDateUtc).isEqualTo(Instant.parse("2026-05-14T09:07:00Z"))
+        }
+
+    @Test
+    fun `pattern resolved to the previous day's instance yields no option`() =
+        runTest {
+            // The -1436 min case: the pattern comes back a day early (wrong instance), so the
+            // "arrival" precedes the departure by ~24 h. Must be dropped, not rendered.
+            val origin = outboundDeparture("951823", "2026-05-14T09:07:00Z")
+            val previousDayPattern =
+                RunPatternMother.aRunPattern()
+                    .withStops(
+                        listOf(
+                            patternStop(RICHMOND, "2026-05-13T09:07:00Z"),
+                            patternStop(BURNLEY, "2026-05-13T09:10:00Z"),
+                        ),
+                    )
+                    .build()
+            val repo =
+                repository(
+                    departures =
+                        FakeDepartureDataSource(
+                            mapOf(
+                                StopId(RICHMOND) to atStop(listOf(origin)),
+                                StopId(BURNLEY) to atStop(emptyList()),
+                            ),
+                        ),
+                    patterns = FakeRunPatternDataSource(mapOf(RunRef("951823") to previousDayPattern)),
+                )
+
+            val result = repo.getJourneys(richmond, burnley)
+
+            assertThat((result as Result.Success).data).isEmpty()
         }
 
     @Test
@@ -591,13 +692,16 @@ class JourneyPlannerRepositoryImplTest {
         private val throwing: Throwable? = null,
     ) : RunPatternDataSource {
         val callCount: AtomicInteger = AtomicInteger(0)
+        var lastDateUtc: Instant? = null
         private val requested = ConcurrentHashMap.newKeySet<String>()
 
         override suspend fun getRunPattern(
             runRef: RunRef,
             routeType: RouteType,
+            dateUtc: Instant?,
         ): RunPattern {
             callCount.incrementAndGet()
+            lastDateUtc = dateUtc
             requested.add(runRef.value)
             throwing?.let { throw it }
             return patterns[runRef] ?: error("FakeRunPatternDataSource: no fixture for $runRef")
