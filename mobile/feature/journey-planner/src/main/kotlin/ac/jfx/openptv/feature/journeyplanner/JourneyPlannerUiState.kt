@@ -1,7 +1,9 @@
 package ac.jfx.openptv.feature.journeyplanner
 
+import ac.jfx.openptv.core.model.FollowedTrip
 import ac.jfx.openptv.core.model.JourneyOption
 import ac.jfx.openptv.core.model.RouteType
+import ac.jfx.openptv.core.model.RunRef
 import ac.jfx.openptv.core.model.Stop
 import kotlinx.datetime.Instant
 
@@ -61,6 +63,13 @@ sealed interface JourneyResultsState {
  * `routeTypeFilter` (issue #213) is the picker's mode-chip selection — empty means "all modes".
  * It scopes both the search results (via PTV's `route_types` parameter) and the favourite-stops
  * idle list (client-side). Session-scoped, not persisted.
+ *
+ * `alightArmedRunRef` (issue #220) is the run whose result-row bell renders armed: the followed
+ * trip's run when its alight alert targets the *current* destination, null otherwise. Derived
+ * reactively from the followed-trip repository, so arming/disarming on the run-pattern screen
+ * keeps the planner's bells honest. `followReplaceCandidate` mirrors run-pattern's
+ * replace-confirmation (issue #200); `alightLocationPromptNeeded` mirrors its contextual
+ * location request for schedule-only services (issue #201).
  */
 data class JourneyPlannerUiState(
     val origin: Stop? = null,
@@ -72,4 +81,7 @@ data class JourneyPlannerUiState(
     val picker: StopPickerState = StopPickerState.Idle(),
     val results: JourneyResultsState = JourneyResultsState.Idle,
     val isFavouriteJourney: Boolean = false,
+    val alightArmedRunRef: RunRef? = null,
+    val followReplaceCandidate: FollowedTrip? = null,
+    val alightLocationPromptNeeded: Boolean = false,
 )

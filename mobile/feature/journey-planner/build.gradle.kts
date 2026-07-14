@@ -26,6 +26,9 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:datastore"))
 
+    // Contextual POST_NOTIFICATIONS / location requests for the result-row alight bell
+    // (issue #220) — same plumbing as :feature:run-pattern.
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.coroutines.android)
