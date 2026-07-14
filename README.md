@@ -5,18 +5,18 @@ A third-party open-source alternative for the Public Transport Victoria (PTV) An
 OpenPTV is presented in [Material You](https://m3.material.io) style
 <div align="center">
   
-  <img width="19%"  alt="light-favourites" src="https://github.com/user-attachments/assets/4e77e0e4-8684-4998-bb17-adfba242aafe" />
-  <img width="19%"  alt="light-nearby-map" src="https://github.com/user-attachments/assets/6caeec65-8f58-4431-83c3-d9e302bb3c4a" />
-  <img width="19%"  alt="light-stop-detail" src="https://github.com/user-attachments/assets/5d3dc2be-5c0f-4fea-b70f-b04b8362efd4" />
-  <img width="19%"  alt="light-run-pattern" src="https://github.com/user-attachments/assets/818d7c6f-0ba9-479b-b2be-4464d22fc783" />
-  <img width="19%"  alt="light-journey-planner" src="https://github.com/user-attachments/assets/67cf582f-27ed-48ab-b62c-e9c8cabde43b" />
+  <img width="19%" alt="light-favourites" src="https://github.com/user-attachments/assets/32e0ec48-6c6a-4769-a8fe-a20f03b6e467" />
+  <img width="19%" alt="light-journey-planner" src="https://github.com/user-attachments/assets/664e5d86-3751-401c-923d-e70cd1fb2f96" />
+  <img width="19%" alt="light-nearby-map" src="https://github.com/user-attachments/assets/e5fa853f-701a-47e3-b448-451682a4ad1a" />
+  <img width="19%" alt="light-stop-detail" src="https://github.com/user-attachments/assets/5045f014-d08d-422e-8438-ca7a8bb33b44" />
+  <img width="19%" alt="light-run-pattern" src="https://github.com/user-attachments/assets/dc07ea8e-1f88-487d-88be-f7df9aca35c0" />
   <p>Light mode</p>
   <br>
-  <img width="19%" alt="dark-favourites" src="https://github.com/user-attachments/assets/7d0ac7b3-58ff-4bd5-b7da-a358e72bf888" />
-  <img width="19%" alt="dark-nearby-map" src="https://github.com/user-attachments/assets/200eabf9-1858-410d-bc11-fd4f4b664245" />
-  <img width="19%" alt="dark-stop-detail" src="https://github.com/user-attachments/assets/962e5103-7adc-49ef-9196-52a937f48368" />
-  <img width="19%" alt="dark-run-pattern" src="https://github.com/user-attachments/assets/935bd3ff-e9dd-43d6-9428-203568ee084a" />
-  <img width="19%" alt="dark-journey-planner" src="https://github.com/user-attachments/assets/4ef26ee3-e8ec-4ddd-80d0-e0273ecd051d" />
+  <img width="19%" alt="dark-favourites" src="https://github.com/user-attachments/assets/28861d1e-062c-4c06-88a3-363f67923f72" />
+  <img width="19%" alt="dark-journey-planner" src="https://github.com/user-attachments/assets/ce0275f7-3b31-4e4d-a377-0b48c237e194" />
+  <img width="19%" alt="dark-nearby-map" src="https://github.com/user-attachments/assets/eca82cb8-3c35-4a6f-90f9-bfbccff1ad43" />
+  <img width="19%" alt="dark-stop-detail" src="https://github.com/user-attachments/assets/6f30ade0-a025-4356-a166-45fd866c5221" />
+  <img width="19%" alt="dark-run-pattern" src="https://github.com/user-attachments/assets/66b2952a-d4f5-479d-a510-4c7ac1af6737" />
   <p>Dark mode</p>
 </div>
 
