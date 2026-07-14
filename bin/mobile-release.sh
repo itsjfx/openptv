@@ -11,10 +11,15 @@
 # KEY_ALIAS / KEY_PASSWORD); the build leaves the APK unsigned if they're
 # absent, so we check first and fail loudly rather than shipping an unsigned
 # APK to the Releases page.
+#
+# The "What's new" half of the notes is written by a human in
+# mobile/CHANGELOG.md — a version with no entry there doesn't get released.
 
 set -eu -o pipefail
 
 cd "$(dirname "$(readlink -f "$0")")/.."
+
+source bin/lib/changelog.sh
 
 gradle_file="mobile/app/build.gradle.kts"
 apk_src="mobile/app/build/outputs/apk/release/app-release.apk"
@@ -70,6 +75,14 @@ if [[ -z "${KEYSTORE_PATH:-}" || ! -f "${KEYSTORE_PATH:-}" ]]; then
   exit 1
 fi
 
+# Fail before the build, not after: a release with no human-written notes is
+# incomplete, and the fix (write them) is a code change anyway.
+whats_new="$(changelog_section "$name")"
+if [[ -z "$whats_new" ]]; then
+  echo "::error::${changelog} has no '## ${name}' section (or it's empty) — write the What's new notes for this version before releasing. See mobile/RELEASE.md." >&2
+  exit 1
+fi
+
 echo "Building signed release $tag (versionCode $code)..." >&2
 ( cd mobile && ./gradlew :app:assembleRelease )
 
@@ -89,6 +102,12 @@ notes="$(mktemp)"
 trap 'code="$?"; rm -f -- "$notes"; exit "$code"' EXIT
 cat >"$notes" <<EOF
 # OpenPTV ${name}
+
+## What's new
+
+${whats_new}
+
+## Build info
 
 Signed release build — versionCode \`${code}\`, versionName \`${name}\`.
 
