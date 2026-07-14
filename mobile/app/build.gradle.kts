@@ -67,8 +67,8 @@ android {
     defaultConfig {
         applicationId = "ac.jfx.openptv"
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         // Custom runner lives in `:core:testing` and swaps the production `@HiltAndroidApp`
         // for `HiltTestApplication`. Required for any `@HiltAndroidTest`. Mirrors NIA's
