@@ -13,15 +13,50 @@ touches the signing keystore.
    [`app/build.gradle.kts`](app/build.gradle.kts). `versionCode` **must** increase
    every release — Android refuses to install an APK with a lower code over an
    existing one.
-2. Merge to `master`. The `mobile-release` workflow detects the changed version
+2. In [`CHANGELOG.md`](CHANGELOG.md), rename `## Unreleased` to `## <versionName>`
+   and open a fresh empty `## Unreleased` above it. That section is the **What's
+   new** block on the release page — see [Release notes](#release-notes) below.
+3. Merge to `master`. The `mobile-release` workflow detects the changed version
    line and builds + publishes the signed APK automatically.
-3. Alternatively, run **Actions → mobile-release → Run workflow** to build a release
+4. Alternatively, run **Actions → mobile-release → Run workflow** to build a release
    from the current `master` without a version bump (the `force` input defaults to
    on). Re-running an existing tag replaces that release in place.
 
 The build leaves the APK **unsigned** when signing credentials are absent, so a
 plain `assembleRelease` on a fresh checkout still succeeds; the release script
 refuses to publish an unsigned APK.
+
+## Release notes
+
+The notes on a GitHub Release are half hand-written and half generated:
+
+- **What's new** — the `## <versionName>` section of [`CHANGELOG.md`](CHANGELOG.md),
+  spliced in verbatim by `bin/mobile-release.sh`. Nobody generates this. Write it
+  for someone about to sideload the APK.
+- **Build info / Install / Signing certificate** — generated: version, commit,
+  build timestamp, and the certificate fingerprint read off the APK that was just
+  signed.
+
+`bin/mobile-release.sh` **fails before it builds** if `CHANGELOG.md` has no
+section for the version being released, or the section is empty. If a release run
+dies with `no '## x.y.z' section`, that's this check: write the notes, merge, and
+re-run the workflow.
+
+The preview channel gets the same treatment — `bin/mobile-preview-release.sh`
+splices the `## Unreleased` section into the preview notes when it's non-empty, so
+add your line to the changelog in the same PR as the change and testers see it on
+the next `master` push. An empty `## Unreleased` just omits the section.
+
+## CI gate
+
+Both publish workflows run the full `mobile-ci` suite (lint, spotless, detekt,
+unit tests, dependency guard, `assembleDebug`) against the commit being released
+and only publish if it's green — `mobile-ci.yml` is called as a reusable workflow
+via `workflow_call` and both `prerelease` and `release` jobs `needs: ci`. A red
+`master` therefore can't ship a preview APK, and it certainly can't ship a signed,
+tagged release that users install over the top of their existing one. The
+emulator-backed `connected-test` job stays opt-in and is **not** part of the gate;
+it would add ~10 min to every release.
 
 ## Signing config
 
