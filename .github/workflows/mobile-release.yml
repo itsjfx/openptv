@@ -36,7 +36,17 @@ permissions:
   contents: write # create the tag + release
 
 jobs:
+  # Gate. A signed release can't be walked back — `versionCode` only goes up and
+  # users have already installed it — so the full CI suite has to be green on
+  # this exact commit before we build, sign, tag and publish.
+  ci:
+    uses: ./.github/workflows/mobile-ci.yml
+    permissions:
+      contents: read
+      pull-requests: write # mobile-ci's assemble-debug job asks for this
+
   release:
+    needs: ci
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
