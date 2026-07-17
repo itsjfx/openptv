@@ -296,9 +296,10 @@ class StopDetailViewModel
         }
 
         /**
-         * Fetch one more page for the group keyed by [key], anchored at that group's last cached
-         * departure so the new rows continue *this* destination rather than wherever the busiest
-         * route happens to reach (PTV's `/departures` is per-stop/per-route, not per-destination).
+         * Fetch one more page for the group keyed by [key], anchored at [currentGroupTail] — the
+         * earliest of the group's per-route tails — so the new rows continue *this* destination
+         * without skipping the near-term departures of a denser route that shares it (PTV's
+         * `/departures` is per-stop/per-route, not per-destination).
          * Coalesces concurrent taps — a fetch already in flight wins. If the group doesn't grow,
          * it's reached the end of service, so we stop offering "Show more" for it.
          */
@@ -479,13 +480,30 @@ class StopDetailViewModel
             flatMap { it.disruptions }.distinctBy { it.id.value }
 
         /**
-         * The effective departure instant of the tapped group's last cached row — the anchor for
-         * its next "show more" fetch. Null when the group has no rows to anchor on.
+         * The anchor instant for the tapped group's next "show more" fetch — the *earliest* of each
+         * constituent route's last cached departure, not the group's overall last row.
+         *
+         * A destination group can merge several routes with very different headways (Union Station's
+         * "City" block carries both the Belgrave line, running every few minutes at peak, and the
+         * sparse Lilydale line). PTV's `/departures` pages each route independently from `date_utc`,
+         * so anchoring at the group's single latest row — which is the *sparsest* route's far-future
+         * departure — makes `loadMore` request only what comes after that instant and silently skip
+         * every near-term departure of the denser route. That is the Union bug: the 8:11/8:15
+         * Belgrave-to-City trains sit between the head-poll window and the Lilydale line's distant
+         * tail, so no request ever covers them.
+         *
+         * Anchoring at the minimum per-route tail guarantees no route's upcoming departures are
+         * jumped. Rows we already hold for the later routes simply re-arrive in the page and dedupe
+         * by `runRef`. Null when the group has no rows to anchor on.
          */
         private fun currentGroupTail(key: GroupKey): Instant? {
             val loaded = _uiState.value.departures as? DeparturesState.Loaded ?: return null
             val group = loaded.groups.firstOrNull { it.key == key } ?: return null
-            return group.departures.lastOrNull()?.effectiveDepartureUtc()
+            return group.departures
+                .groupBy { it.routeId.value }
+                .values
+                .mapNotNull { runsForRoute -> runsForRoute.maxOfOrNull { it.effectiveDepartureUtc() } }
+                .minOrNull()
         }
 
         /** How many rows the tapped group currently holds — used to detect end-of-service. */

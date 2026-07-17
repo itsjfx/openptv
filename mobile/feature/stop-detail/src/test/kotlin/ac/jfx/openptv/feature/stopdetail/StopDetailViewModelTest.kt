@@ -1180,6 +1180,76 @@ class StopDetailViewModelTest {
         }
 
     @Test
+    fun `showMore on a multi-route destination anchors at the earliest per-route tail — Union bug`() =
+        runTest(dispatcher) {
+            stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
+            val viewModel = newViewModel()
+            advanceUntilIdle()
+            viewModel.startObserving()
+            advanceUntilIdle()
+
+            // Union Station: two lines both run to "City", collapsing into one destination group.
+            // The Belgrave line (route 2) is dense at peak; the Lilydale line (route 9) is sparse,
+            // so its last cached row sits hours out. The group's overall last row is therefore the
+            // Lilydale one — anchoring there would skip the Belgrave line's near-term departures.
+            val belgraveNear =
+                DepartureMother.aDeparture()
+                    .withRouteId(2)
+                    .withRunRef("BEL-1")
+                    .withScheduledDepartureUtc(clock.now() + 2.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 2.minutes)
+                    .build()
+            val belgraveTail =
+                DepartureMother.aDeparture()
+                    .withRouteId(2)
+                    .withRunRef("BEL-2")
+                    .withScheduledDepartureUtc(clock.now() + 6.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 6.minutes)
+                    .build()
+            val lilydaleNear =
+                DepartureMother.aDeparture()
+                    .withRouteId(9)
+                    .withRunRef("LIL-1")
+                    .withScheduledDepartureUtc(clock.now() + 20.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 20.minutes)
+                    .build()
+            val lilydaleTail =
+                DepartureMother.aDeparture()
+                    .withRouteId(9)
+                    .withRunRef("LIL-2")
+                    .withScheduledDepartureUtc(clock.now() + 160.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 160.minutes)
+                    .build()
+            departureRepository.emitSuccess(listOf(belgraveNear, belgraveTail, lilydaleNear, lilydaleTail))
+            advanceUntilIdle()
+
+            val key = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single().key
+
+            // The next Belgrave-to-City train — the one the Union bug dropped, because it falls
+            // between the head window and the Lilydale line's distant tail.
+            val belgraveNext =
+                DepartureMother.aDeparture()
+                    .withRouteId(2)
+                    .withRunRef("BEL-3")
+                    .withScheduledDepartureUtc(clock.now() + 10.minutes)
+                    .withEstimatedDepartureUtc(clock.now() + 10.minutes)
+                    .build()
+            departureRepository.enqueueLoadMoreSuccess(listOf(belgraveNext))
+
+            // Four rows cached, so revealing +3 runs past the cache and triggers a fetch.
+            viewModel.showMore(key)
+            advanceUntilIdle()
+
+            val call = departureRepository.loadMoreCalls.single()
+            // Anchored at the Belgrave line's tail (the earliest per-route tail), NOT the Lilydale
+            // line's far-future last row — so the Belgrave near-term departures are requested.
+            assertThat(call.after).isEqualTo(clock.now() + 6.minutes)
+            assertThat(call.after).isNotEqualTo(clock.now() + 160.minutes)
+            val group = (viewModel.uiState.value.departures as DeparturesState.Loaded).groups.single()
+            assertThat(group.departures.map { it.runRef.value }).contains("BEL-3")
+        }
+
+    @Test
     fun `showMore that returns nothing marks the group exhausted and drops Show more`() =
         runTest(dispatcher) {
             stopDetailRepository.enqueueSuccess(StopDetailMother.aStopDetail().build())
