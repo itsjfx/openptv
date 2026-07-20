@@ -12,14 +12,12 @@
 # absent, so we check first and fail loudly rather than shipping an unsigned
 # APK to the Releases page.
 #
-# The "What's new" half of the notes is written by a human in
-# mobile/CHANGELOG.md — a version with no entry there doesn't get released.
+# The notes carry an empty "What's new" section for a human to fill in by
+# editing the release on GitHub afterwards — nothing generates that part.
 
 set -eu -o pipefail
 
 cd "$(dirname "$(readlink -f "$0")")/.."
-
-source bin/lib/changelog.sh
 
 gradle_file="mobile/app/build.gradle.kts"
 apk_src="mobile/app/build/outputs/apk/release/app-release.apk"
@@ -75,14 +73,6 @@ if [[ -z "${KEYSTORE_PATH:-}" || ! -f "${KEYSTORE_PATH:-}" ]]; then
   exit 1
 fi
 
-# Fail before the build, not after: a release with no human-written notes is
-# incomplete, and the fix (write them) is a code change anyway.
-whats_new="$(changelog_section "$name")"
-if [[ -z "$whats_new" ]]; then
-  echo "::error::${changelog} has no '## ${name}' section (or it's empty) — write the What's new notes for this version before releasing. See mobile/RELEASE.md." >&2
-  exit 1
-fi
-
 echo "Building signed release $tag (versionCode $code)..." >&2
 ( cd mobile && ./gradlew :app:assembleRelease )
 
@@ -105,7 +95,10 @@ cat >"$notes" <<EOF
 
 ## What's new
 
-${whats_new}
+<!-- Fill this in: click "Edit release" above and replace this comment with the
+     highlights of ${name}, written for someone about to sideload the APK.
+     Nothing generates this section. Until it's written it renders as an empty
+     heading — an HTML comment doesn't show on the release page. -->
 
 ## Build info
 

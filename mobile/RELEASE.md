@@ -13,14 +13,14 @@ touches the signing keystore.
    [`app/build.gradle.kts`](app/build.gradle.kts). `versionCode` **must** increase
    every release — Android refuses to install an APK with a lower code over an
    existing one.
-2. In [`CHANGELOG.md`](CHANGELOG.md), rename `## Unreleased` to `## <versionName>`
-   and open a fresh empty `## Unreleased` above it. That section is the **What's
-   new** block on the release page — see [Release notes](#release-notes) below.
-3. Merge to `master`. The `mobile-release` workflow detects the changed version
+2. Merge to `master`. The `mobile-release` workflow detects the changed version
    line and builds + publishes the signed APK automatically.
-4. Alternatively, run **Actions → mobile-release → Run workflow** to build a release
+3. Alternatively, run **Actions → mobile-release → Run workflow** to build a release
    from the current `master` without a version bump (the `force` input defaults to
    on). Re-running an existing tag replaces that release in place.
+4. **Write the "What's new" notes**: open the published release, click **Edit
+   release**, and replace the placeholder comment under `## What's new`. See
+   [Release notes](#release-notes) below.
 
 The build leaves the APK **unsigned** when signing credentials are absent, so a
 plain `assembleRelease` on a fresh checkout still succeeds; the release script
@@ -28,24 +28,26 @@ refuses to publish an unsigned APK.
 
 ## Release notes
 
-The notes on a GitHub Release are half hand-written and half generated:
+The notes on a GitHub Release are part hand-written, part generated:
 
-- **What's new** — the `## <versionName>` section of [`CHANGELOG.md`](CHANGELOG.md),
-  spliced in verbatim by `bin/mobile-release.sh`. Nobody generates this. Write it
-  for someone about to sideload the APK.
+- **What's new** — yours. The release ships with an empty `## What's new` section
+  holding an HTML-comment prompt; edit the release on GitHub and write it for
+  someone about to sideload the APK. Nothing generates this, and nothing blocks
+  the release on it.
 - **Build info / Install / Signing certificate** — generated: version, commit,
   build timestamp, and the certificate fingerprint read off the APK that was just
   signed.
 
-`bin/mobile-release.sh` **fails before it builds** if `CHANGELOG.md` has no
-section for the version being released, or the section is empty. If a release run
-dies with `no '## x.y.z' section`, that's this check: write the notes, merge, and
-re-run the workflow.
+Editing a release's body on GitHub doesn't retag or rebuild anything, so there's
+no rush and no risk — but note that a **re-run of `mobile-release` on the same tag
+replaces the release**, so anything you wrote by hand is lost. Write the notes
+once the version is final.
 
-The preview channel gets the same treatment — `bin/mobile-preview-release.sh`
-splices the `## Unreleased` section into the preview notes when it's non-empty, so
-add your line to the changelog in the same PR as the change and testers see it on
-the next `master` push. An empty `## Unreleased` just omits the section.
+Until it's filled in, `## What's new` renders as a bare heading (HTML comments
+don't display), so an unwritten section looks pending rather than broken.
+
+The preview channel has no such section — it's replaced on every `master` push,
+so hand-written notes there would be overwritten within the hour.
 
 ## CI gate
 
