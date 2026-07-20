@@ -51,6 +51,8 @@ OpenPTV exists for only that reason. It's not aiming to be a competitor to the o
 
 ## Data / API / Privacy
 
+OpenPTV has no tracking, ads, or analytics. We do not sell your information to anybody. I have no way of knowing how many people use this app.
+
 OpenPTV's information is sourced from [PTV's Timetable API](https://www.vic.gov.au/public-transport-timetable-api). The information is licensed from Public Transport Victoria under a Creative Commons Attribution 4.0 International Licence.
 
 On first launch, OpenPTV will ask how you'd like to connect to the PTV API. You can change your choice in the future in the settings page.
@@ -63,9 +65,7 @@ You can pick one of the following ways:
 
 Sadly, requesting an API key from PTV can take varying amounts of time (days or weeks) - so the public OpenPTV proxy lets you use the app straight away.
 
-We respect your privacy and do not sell any data or track you. We collect HTTP access logs for 24 hours for abuse tracking purposes only.
-
-Feel free to rely on the proxy and raise a GitHub issue for support.
+We respect your privacy - HTTP access logs are collected for 24 hours for abuse tracking purposes only. Feel free to raise a GitHub issue for support if you notice issues with the proxy.
 
 ## I don't like OpenPTV, what can I use instead?
 
