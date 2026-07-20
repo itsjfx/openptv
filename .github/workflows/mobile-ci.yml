@@ -10,6 +10,17 @@ on:
     paths:
       - 'mobile/**'
       - '.github/workflows/mobile-ci.yml'
+  # Called by mobile-prerelease.yml and mobile-release.yml as a gate: nothing is
+  # published off a commit that hasn't passed this suite. `paths` filters don't
+  # apply to workflow_call, so the callers always get the full run on the commit
+  # they're about to release.
+  workflow_call:
+    inputs:
+      run_connected_tests:
+        description: 'Also run :feature:search:connectedDebugAndroidTest on an emulator'
+        required: false
+        type: boolean
+        default: false
   # Manual trigger so the connected (instrumented) test job can be invoked
   # on-demand from the Actions tab without needing to land a commit. PRs and
   # `master` pushes will skip `connected-test` (`if:` guard below) — that
@@ -137,7 +148,10 @@ jobs:
   # a hardware-accelerated AOSP emulator via `reactivecircus/android-emulator-runner`.
   # Gated to `workflow_dispatch` so PR / push runs aren't slowed down by the
   # ~10 min emulator boot; trigger this from the Actions tab when validating
-  # a Compose UI change end-to-end. The matrix is intentionally a single
+  # a Compose UI change end-to-end. A release workflow calling us via
+  # workflow_call gets `run_connected_tests: false` (the input default) even
+  # when it was itself dispatched, so a release never waits on the emulator.
+  # The matrix is intentionally a single
   # API level today (the AOSP target = no GMS, mirroring GrapheneOS); add
   # API 30 / 34 entries here when there's a real coverage reason to.
   connected-test:

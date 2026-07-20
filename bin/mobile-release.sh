@@ -11,6 +11,9 @@
 # KEY_ALIAS / KEY_PASSWORD); the build leaves the APK unsigned if they're
 # absent, so we check first and fail loudly rather than shipping an unsigned
 # APK to the Releases page.
+#
+# The notes carry an empty "What's new" section for a human to fill in by
+# editing the release on GitHub afterwards — nothing generates that part.
 
 set -eu -o pipefail
 
@@ -89,6 +92,15 @@ notes="$(mktemp)"
 trap 'code="$?"; rm -f -- "$notes"; exit "$code"' EXIT
 cat >"$notes" <<EOF
 # OpenPTV ${name}
+
+## What's new
+
+<!-- Fill this in: click "Edit release" above and replace this comment with the
+     highlights of ${name}, written for someone about to sideload the APK.
+     Nothing generates this section. Until it's written it renders as an empty
+     heading — an HTML comment doesn't show on the release page. -->
+
+## Build info
 
 Signed release build — versionCode \`${code}\`, versionName \`${name}\`.
 

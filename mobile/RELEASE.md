@@ -18,10 +18,47 @@ touches the signing keystore.
 3. Alternatively, run **Actions → mobile-release → Run workflow** to build a release
    from the current `master` without a version bump (the `force` input defaults to
    on). Re-running an existing tag replaces that release in place.
+4. **Write the "What's new" notes**: open the published release, click **Edit
+   release**, and replace the placeholder comment under `## What's new`. See
+   [Release notes](#release-notes) below.
 
 The build leaves the APK **unsigned** when signing credentials are absent, so a
 plain `assembleRelease` on a fresh checkout still succeeds; the release script
 refuses to publish an unsigned APK.
+
+## Release notes
+
+The notes on a GitHub Release are part hand-written, part generated:
+
+- **What's new** — yours. The release ships with an empty `## What's new` section
+  holding an HTML-comment prompt; edit the release on GitHub and write it for
+  someone about to sideload the APK. Nothing generates this, and nothing blocks
+  the release on it.
+- **Build info / Install / Signing certificate** — generated: version, commit,
+  build timestamp, and the certificate fingerprint read off the APK that was just
+  signed.
+
+Editing a release's body on GitHub doesn't retag or rebuild anything, so there's
+no rush and no risk — but note that a **re-run of `mobile-release` on the same tag
+replaces the release**, so anything you wrote by hand is lost. Write the notes
+once the version is final.
+
+Until it's filled in, `## What's new` renders as a bare heading (HTML comments
+don't display), so an unwritten section looks pending rather than broken.
+
+The preview channel has no such section — it's replaced on every `master` push,
+so hand-written notes there would be overwritten within the hour.
+
+## CI gate
+
+Both publish workflows run the full `mobile-ci` suite (lint, spotless, detekt,
+unit tests, dependency guard, `assembleDebug`) against the commit being released
+and only publish if it's green — `mobile-ci.yml` is called as a reusable workflow
+via `workflow_call` and both `prerelease` and `release` jobs `needs: ci`. A red
+`master` therefore can't ship a preview APK, and it certainly can't ship a signed,
+tagged release that users install over the top of their existing one. The
+emulator-backed `connected-test` job stays opt-in and is **not** part of the gate;
+it would add ~10 min to every release.
 
 ## Signing config
 
